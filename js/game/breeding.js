@@ -163,9 +163,9 @@ export function executeBreeding(gameState, parentAId, parentBId, catalystId = "N
   if (!gameState.stats) gameState.stats = { battlesWon: 0, superweaponsFired: 0, reconOps: 0, hybridsCreated: 0, gauntletMax: 0, cutscenesWatched: 0 };
   gameState.stats.hybridsCreated = (gameState.stats.hybridsCreated || 0) + 1;
 
-  // Auto-add new hybrid into player's active 12-card Faction Deck (swapping out weakest slot if full)
+  // Auto-add new hybrid into player's active 16-card Faction Deck (swapping out weakest slot if full)
   if (Array.isArray(gameState.customDeck) && hybrid.fac === gameState.playerFaction && !gameState.customDeck.includes(hybrid.id)) {
-    if (gameState.customDeck.length < 12) {
+    if (gameState.customDeck.length < 16) {
       gameState.customDeck.push(hybrid.id);
     } else {
       const troopIdx = gameState.customDeck.findIndex((cid) => cid.startsWith("tr_"));

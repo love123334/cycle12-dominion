@@ -1,12 +1,17 @@
 // ============================================================================
-// CYCLE 12: AGE OF DOMINION — FACTION & CR CARD DATABASE (v6)
-// Core Rule: Each card carries Art, Name, CR, Species, Faction,
-// Row 1 Effect (Combat), and Row 2 Effect (Support / Breeding).
-// Strictly enforces Faction Leader ownership: a Leader only commands cards of their Faction.
+// CYCLE 12: AGE OF DOMINION — FACTION, GENDER, CR & 2-ROW CARD DATABASE (v7)
+// Core Rules:
+// - Each card carries: Art, Name, Gender (Male/Female), CR, Species, Faction,
+//   Row 1 Effect (Combat), Row 2 Effect (Breeding / Support / Debuff).
+// - Strict Faction Leader Lock: A Leader commands ONLY cards of their Faction.
+// - Row 2 Breeding Rates:
+//   * Tamarite: Guaranteed 100% strong hybrid token spawn every turn.
+//   * Omni-Womb / Brood: Varied multi-archetype tokens (0-99% or 100% if Tamarite).
+//   * Alien / Mutant / Wombiote: Variable 40%-96% random chance with species passives.
+//   * Pure Human (no breeding buff): Low ~32% random chance & -28% CR Debuff on Token!
 // ============================================================================
 
 import { CHARACTERS, CHAR_BY_ID } from "./characters.js";
-import { FACTIONS } from "./lore.js";
 import { getPortraitUrl, getHybridPortraitUrl } from "../render/portraits.js";
 
 function inferRow1Effect(c) {
@@ -20,7 +25,7 @@ function inferRow1Effect(c) {
   if (c.id === "ojamon") return { id: "gotterfall_tactic", tag: "Chiến Lược Cursew", bonusFlat: 90, desc: "Hàng 1/3: +90 CR; rút ngay 1 thẻ phe bạn khi được đặt ra Hàng 1." };
   if (c.id === "felicia" || c.id === "sarah") return { id: "supers_strike", tag: "Đội Đặc Nhiệm Evernight", bonusFlat: 110, desc: "Hàng 1/3: +110 CR; +140 CR thêm khi đối đầu The Collectors hoặc Wombiote." };
   if (c.id === "mrmind" || c.id === "parasoid") return { id: "collector_harvest", tag: "Thu Thập Gen", bonusFlat: 100, desc: "Hàng 1/3: +100 CR cho mỗi thẻ địch đang bị bắt trong Hàng 2 của bạn." };
-  if (c.id === "dick") return { id: "immortal_bypass", tag: "Bất Tử Áp Chế", bonusFlat: 40, desc: "Hàng 1/3: +40 CR; nếu thua ở Hàng 1 sẽ tăng mạnh hiệu ứng sinh sản khi vào Hàng 2." };
+  if (c.id === "dick") return { id: "immortal_bypass", tag: "Bất Tử Áp Chế", bonusFlat: 40, desc: "Hàng 1/3: +40 CR; khi chiến đấu giúp phá giải miễn nhiễm sinh sản." };
   if ((c.h || 1.75) >= 3.2) return { id: "titan_frame", tag: "Thể Khổng Lồ", bonusFlat: 115, desc: `Hàng 1/3: Thể hình ${c.h}m áp đảo, cộng +115 CR khi giao chiến trực diện.` };
   if (sp.includes("tamarite")) return { id: "hyper_photon", tag: "Tamarite Quang Năng", bonusFlat: 130, desc: "Hàng 1/3: +130 CR; +90 CR thêm nếu cùng phe Tamarite/Sylvarian." };
   if (sp.includes("prozon")) return { id: "knight_bastion", tag: "Hiệp Sĩ Prozonian", bonusFlat: 105, desc: "Hàng 1/3: +105 CR; +100 CR khi đấu với Nadir hoặc Mutant." };
@@ -32,16 +37,166 @@ function inferRow1Effect(c) {
 
 function inferRow2Effect(c) {
   const sp = (c.species || "").toLowerCase();
-  if (c.id === "meralina") return { id: "r2_mutator", crAura: 110, mutBonus: 40, canBreedToken: true, tag: "Đột Biến Cực Đại", desc: "Hàng 2: +110 CR cho Hàng 1 chủ nhân & tăng +40% tỷ lệ Đột Biến khi Lai Tạo tại trận!" };
-  if (c.id === "tsunadia" || c.id === "ovalina") return { id: "r2_brood_mother", crAura: 130, mutBonus: 25, canBreedToken: true, tag: "Huyết Thống Đa Sinh", desc: "Hàng 2: +130 CR cho toàn Hàng 1; khi Lai Tạo tại trận tạo Hậu Duệ +150 CR cộng thêm!" };
-  if (c.id === "pussiri") return { id: "r2_synth_tamarite", crAura: 105, mutBonus: 20, canBreedToken: true, tag: "Tổng Hợp 65/30/5", desc: "Hàng 2: Gen Tamarite-Sylvarian giúp +105 CR cho Hàng 1 & đẻ thẻ Lai chất lượng cao." };
-  if (c.id === "exorotic") return { id: "r2_nano_egg", crAura: 85, mutBonus: 55, canBreedToken: true, tag: "Tái Cấu Trúc Nano", desc: "Hàng 2: +85 CR Hàng 1; Lai Tạo tại trận luôn đạt 90%+ đột biến kế thừa CR cao." };
-  if (c.id === "dick") return { id: "r2_override", crAura: 90, mutBonus: 50, canBreedToken: true, bypassImmunity: true, tag: "Xuyên Phá Huyết Thống", desc: "Hàng 2: Bỏ qua miễn nhiễm CR>=800 khi Lai Tạo tại trận & +90 CR cho Hàng 1." };
-  if (c.id === "july" || c.id === "jorduyn" || sp.includes("hinatian")) return { id: "r2_blue_resonance", crAura: 115, mutBonus: 20, canBreedToken: true, tag: "Chuyển Hóa Máu Xanh", desc: "Hàng 2: Máu xanh Hinatian cộng +115 CR Hàng 1 & tự hóa giải bất lợi sinh học." };
-  if (sp.includes("wombiote")) return { id: "r2_wombiote_split", crAura: 95, mutBonus: 30, canBreedToken: true, tag: "Phân Nhánh Wombiote", desc: "Hàng 2: +95 CR cho Hàng 1; cho phép nhân bản tế bào Wombiote vào tay bài." };
-  if (c.cr >= 800) return { id: "r2_sovereign_gene", crAura: 145, mutBonus: 30, canBreedToken: true, immunity800: true, tag: "Gen Thượng Đẳng CR800+", desc: "Hàng 2: Miễn nhiễm ký sinh cấp thấp; cộng +145 CR uy áp cho Hàng 1 của người bắt giữ!" };
-  if (sp.includes("prozon")) return { id: "r2_prozon_lineage", crAura: 90, mutBonus: 15, canBreedToken: true, tag: "Dòng Máu Hiệp Sĩ", desc: "Hàng 2: +90 CR bền bỉ cho Hàng 1 & hậu duệ kế thừa chỉ số gốc ổn định." };
-  return { id: "r2_gene_support", crAura: Math.max(55, Math.round(c.cr * 0.14)), mutBonus: 15, canBreedToken: true, tag: "Phụ Trợ & Lai Gen", desc: `Hàng 2: Cộng +${Math.max(55, Math.round(c.cr * 0.14))} CR hỗ trợ Hàng 1 và làm nguyên liệu Lai Tạo Hậu Duệ.` };
+  const auraBase = Math.max(40, Math.round((c.cr || 100) * 0.12));
+
+  // 1. TAMARITE — Always 100% spawn, ultra-strong Token!
+  if (c.id === "ovalina" || c.id === "uterussa") {
+    const isOmni = c.id === "uterussa";
+    return {
+      id: isOmni ? "r2_tamarite_omniwomb" : "r2_tamarite_queen",
+      tier: "tamarite",
+      breedChance: 100,
+      omniWomb: true,
+      crAura: 135,
+      crMult: 1.25,
+      crPenaltyPct: 0,
+      tag: isOmni ? "Omni-Womb Tamarite (100%)" : "Nữ Hoàng Tamarite (100%)",
+      desc: isOmni
+        ? "Hàng 2: Mặc định 100% sinh ra nhiều dạng Token Đột Biến đa hệ mỗi lượt (+135 CR Hàng 1)."
+        : "Hàng 2: Mặc định 100% sinh Token Tamarite siêu mạnh cuối mỗi lượt (+135 CR Hàng 1)."
+    };
+  }
+  if (sp.includes("tamarite")) {
+    return {
+      id: "r2_tamarite",
+      tier: "tamarite",
+      breedChance: 100,
+      omniWomb: c.id === "pussiri",
+      crAura: 115,
+      crMult: 1.12,
+      crPenaltyPct: 0,
+      tag: c.id === "pussiri" ? "Tamarite Synthesis 65/30/5 (100%)" : "Huyết Thống Tamarite (100%)",
+      desc: "Hàng 2: Tamarite mặc định 100% sinh ra thẻ Token chiến lực cao cuối mỗi lượt (+115 CR Hàng 1)."
+    };
+  }
+
+  // 2. OMNI-WOMB / BROOD / WOMBIOTE / NANO (0-99% chance, varied tokens!)
+  if (c.id === "tsunadia") {
+    return {
+      id: "r2_nadir_brood",
+      tier: "omniwomb",
+      breedChance: 96,
+      omniWomb: true,
+      crAura: 130,
+      crMult: 1.12,
+      crPenaltyPct: 0,
+      tag: "Omni-Brood Nadir (96%)",
+      desc: "Hàng 2: 96% mỗi lượt sinh Token Quân Đoàn Nadir đa biến thể (+130 CR Hàng 1)."
+    };
+  }
+  if (c.id === "exorotic") {
+    return {
+      id: "r2_nano_omni",
+      tier: "omniwomb",
+      breedChance: 90,
+      omniWomb: true,
+      crAura: 85,
+      crMult: 1.05,
+      crPenaltyPct: 0,
+      tag: "Cấy Ghép Omni-Gen (90%)",
+      desc: "Hàng 2: 90% tạo Token Mô-đun đa kỹ năng kế thừa chỉ số cao mỗi lượt."
+    };
+  }
+  if (sp.includes("wombiote") || c.id === "sentrion" || c.id === "parasoid") {
+    const ch = c.id === "sentrion" ? 92 : 82;
+    return {
+      id: "r2_wombiote",
+      tier: "wombiote",
+      breedChance: ch,
+      omniWomb: c.id === "sentrion",
+      crAura: 95,
+      crMult: 0.92,
+      crPenaltyPct: 0,
+      tag: `Phân Nhánh Wombiote (${ch}%)`,
+      desc: `Hàng 2: ${ch}% mỗi lượt tách bào sinh Token Wombiote (+95 CR Hàng 1).`
+    };
+  }
+
+  // 3. SPECIAL LORE GENETICS
+  if (c.id === "dick") {
+    return {
+      id: "r2_override",
+      tier: "sovereign",
+      breedChance: 88,
+      bypassImmunity: true,
+      crAura: 90,
+      crMult: 0.95,
+      crPenaltyPct: 0,
+      tag: "Xuyên Phá Huyết Thống (88%)",
+      desc: "Hàng 2: Bỏ qua kháng cự CR>=800 khi lai & +90 CR cho Hàng 1."
+    };
+  }
+  if (c.id === "meralina") {
+    return {
+      id: "r2_meralina",
+      tier: "mutant",
+      breedChance: 76,
+      gapMutation: true,
+      crAura: 110,
+      crMult: 1.0,
+      crPenaltyPct: 0,
+      tag: "Euphoria Đột Biến (76%)",
+      desc: "Hàng 2: 76% sinh Token Nghịch Lý mỗi lượt (+110 CR Hàng 1; bùng nổ nếu chênh CR >= 200)."
+    };
+  }
+  if (sp.includes("hinatian")) {
+    const ch = c.id === "july" ? 86 : 75; // July has 10% Tamarite genes!
+    return {
+      id: "r2_hinatian",
+      tier: "alien_buff",
+      breedChance: ch,
+      blueBlood: true,
+      crAura: 105,
+      crMult: 0.95,
+      crPenaltyPct: 0,
+      tag: `Máu Xanh Hinatian (${ch}%)`,
+      desc: `Hàng 2: ${ch}% sinh Token Máu Xanh miễn nhiễm Virus (+105 CR Hàng 1).`
+    };
+  }
+
+  // 4. PURE HUMAN / SERUM / CYBORG — LOW RATE + CR DEBUFF!
+  const isPureHuman = c.race === "human" && !sp.includes("serum") && !sp.includes("wombiote") && !sp.includes("biến đổi");
+  if (isPureHuman) {
+    return {
+      id: "r2_human_weak",
+      tier: "human_debuff",
+      breedChance: 32,
+      crAura: 35,
+      crMult: 0.72,
+      crPenaltyPct: 28,
+      tag: "Người Thuần (32% • -28% CR Token)",
+      desc: "Hàng 2 (Bất lợi): Không có buff sinh sản — chỉ 32% ra Token và Token con bị GIẢM -28% CR!"
+    };
+  }
+  if (sp.includes("serum") || sp.includes("biến đổi") || sp.includes("tăng cường")) {
+    return {
+      id: "r2_serum_human",
+      tier: "human_serum",
+      breedChance: 52,
+      crAura: 55,
+      crMult: 0.88,
+      crPenaltyPct: 12,
+      tag: "Serum Pregnomorph (52% • -12% CR)",
+      desc: "Hàng 2: Serum nâng tỷ lệ sinh Token lên 52% nhưng gen chưa ổn định (-12% CR Token)."
+    };
+  }
+
+  // 5. STANDARD ALIEN / SOVEREIGN RESISTANCE (0-99%)
+  const highRes = (c.cr || 0) >= 800;
+  const chance = highRes ? 44 : 68;
+  return {
+    id: highRes ? "r2_sovereign_res" : "r2_alien_std",
+    tier: highRes ? "sovereign" : "alien",
+    breedChance: chance,
+    immunity800: highRes,
+    crAura: Math.min(140, auraBase + 30),
+    crMult: highRes ? 0.95 : 0.85,
+    crPenaltyPct: highRes ? 0 : 8,
+    tag: `${c.species.split(" ")[0]} (${chance}%)`,
+    desc: highRes
+      ? `Hàng 2: Kháng thể CR>=800 giữ tỷ lệ sinh ở mức ${chance}% (tăng lên 82% nếu Cha >=800 CR) & +${Math.min(140, auraBase + 30)} CR Hàng 1.`
+      : `Hàng 2: Tỷ lệ sinh Token ngẫu nhiên ${chance}% cuối mỗi lượt (-8% CR nếu Cha yếu) & +${Math.min(140, auraBase + 30)} CR Hàng 1.`
+  };
 }
 
 function charToCard(c) {
@@ -55,83 +210,82 @@ function charToCard(c) {
     race: c.race,
     cr: c.cr,
     h: c.h || 1.75,
-    gender: c.gender,
+    gender: c.g === "M" ? "Male" : "Female",
     unique: true,
     row1Effect: inferRow1Effect(c),
     row2Effect: inferRow2Effect(c)
   };
 }
 
-// Lore-grounded Faction Reserve Units so EVERY one of the 8 Factions (even Eris/Nadirius/Western Nadir)
-// has a rich, strict faction-pure card pool for Deck Building!
+// 18 Faction Reserve Units across ALL 8 factions with balanced Male/Female genders
 const TROOP_SPECS = [
-  // ERIS UNION (needed alongside Emma)
-  { id: "tr_eris_sentinel", name: "Eris Outer Sentinel", fac: "eris", species: "Cấu Thể Eris", race: "erisian", cr: 420,
-    r1: { id: "tr1", tag: "Giáp Khối Đa Diện", bonusFlat: 80, desc: "Hàng 1: +80 CR tại Outer Layer hoặc khi bạn dẫn đầu CR." },
-    r2: { id: "tr2", crAura: 85, mutBonus: 15, canBreedToken: true, tag: "Tinh Thể Eris", desc: "Hàng 2: +85 CR phụ trợ cho Hàng 1 & hỗ trợ tạo Hậu Duệ ánh sáng." } },
-  { id: "tr_eris_arbiter", name: "Eris Reset Arbiter", fac: "eris", species: "Thiên Sứ Eris", race: "erisian", cr: 620,
-    r1: { id: "tr1", tag: "Khóa Chân Không", bonusFlat: 110, desc: "Hàng 1: +110 CR & hủy bỏ 50% buff phe địch đối diện." },
-    r2: { id: "tr2", crAura: 110, mutBonus: 25, canBreedToken: true, tag: "Ma Trận Phôi Eris", desc: "Hàng 2: +110 CR Hàng 1 & tăng 25% đột biến lai tạo." } },
-  { id: "tr_eris_keeper", name: "Eris Chronos Keeper", fac: "eris", species: "Erisian", race: "erisian", cr: 340,
+  // ERIS UNION
+  { id: "tr_eris_sentinel", name: "Eris Outer Sentinel", fac: "eris", gender: "Male", species: "Cấu Thể Eris", race: "erisian", cr: 420,
+    r1: { id: "tr1", tag: "Giáp Khối Đa Diện", bonusFlat: 80, desc: "Hàng 1: +80 CR tại Outer Layer hoặc khi dẫn đầu CR." },
+    r2: { id: "tr2", tier: "alien", breedChance: 64, crAura: 85, crMult: 0.85, crPenaltyPct: 0, tag: "Tinh Thể Eris (64%)", desc: "Hàng 2: 64% sinh Token ánh sáng & +85 CR Hàng 1." } },
+  { id: "tr_eris_arbiter", name: "Eris Reset Arbiter", fac: "eris", gender: "Female", species: "Thiên Sứ Eris", race: "erisian", cr: 620,
+    r1: { id: "tr1", tag: "Khóa Chân Không", bonusFlat: 110, desc: "Hàng 1: +110 CR & hủy bỏ buff chủng tộc đối diện." },
+    r2: { id: "tr2", tier: "omniwomb", breedChance: 80, omniWomb: true, crAura: 110, crMult: 0.95, crPenaltyPct: 0, tag: "Ma Trận Eris (80%)", desc: "Hàng 2: 80% sinh Token Erisian đa biến & +110 CR Hàng 1." } },
+  { id: "tr_eris_keeper", name: "Eris Chronos Keeper", fac: "eris", gender: "Female", species: "Erisian", race: "erisian", cr: 340,
     r1: { id: "tr1", tag: "Ngưng Đọng Chu Kỳ", bonusFlat: 75, desc: "Hàng 1: +75 CR; rút +1 thẻ phe Eris khi ra sân." },
-    r2: { id: "tr2", crAura: 70, mutBonus: 20, canBreedToken: true, tag: "Chuỗi Thời Gian", desc: "Hàng 2: +70 CR cho Hàng 1 và ổn định quá trình ấp gen." } },
-  { id: "tr_eris_prism", name: "Outer Layer Prism", fac: "eris", species: "Sinh Thể Ánh Sáng", race: "erisian", cr: 510,
-    r1: { id: "tr1", tag: "Khúc Xạ Vũ Trụ", bonusFlat: 95, desc: "Hàng 1: +95 CR cho bản thân và +50 CR cho Thủ lĩnh Hàng 3." },
-    r2: { id: "tr2", crAura: 95, mutBonus: 20, canBreedToken: true, tag: "Phản Chiếu Gen", desc: "Hàng 2: +95 CR cho Hàng 1 của người bắt giữ." } },
+    r2: { id: "tr2", tier: "alien", breedChance: 62, crAura: 70, crMult: 0.85, crPenaltyPct: 5, tag: "Chuỗi Thời Gian (62%)", desc: "Hàng 2: 62% sinh Token & +70 CR Hàng 1." } },
+  { id: "tr_eris_prism", name: "Outer Layer Prism", fac: "eris", gender: "Male", species: "Sinh Thể Ánh Sáng", race: "erisian", cr: 510,
+    r1: { id: "tr1", tag: "Khúc Xạ Vũ Trụ", bonusFlat: 95, desc: "Hàng 1: +95 CR và +50 CR cho Thủ lĩnh Hàng 3." },
+    r2: { id: "tr2", tier: "alien", breedChance: 66, crAura: 95, crMult: 0.88, crPenaltyPct: 0, tag: "Phản Chiếu Gen (66%)", desc: "Hàng 2: +95 CR cho Hàng 1." } },
 
-  // NADIRIUS EMPIRE (alongside Magnatere & Hyouya)
-  { id: "tr_nad_knight", name: "Nadirius Astral Knight", fac: "nadirius", species: "Hiệp Sĩ Nadir", race: "nadir", cr: 460,
-    r1: { id: "tr1", tag: "Trật Tự Thép", bonusFlat: 90, desc: "Hàng 1: +90 CR; +100 CR thêm khi đấu với Western Nadir." },
-    r2: { id: "tr2", crAura: 85, mutBonus: 15, canBreedToken: true, tag: "Huyết Thống Đế Quốc", desc: "Hàng 2: +85 CR cho Hàng 1 chủ nhân." } },
-  { id: "tr_nad_warden", name: "Citadel Obsidian Warden", fac: "nadirius", species: "Thần Vệ Nadir", race: "nadir", cr: 580,
+  // NADIRIUS EMPIRE
+  { id: "tr_nad_knight", name: "Nadirius Astral Knight", fac: "nadirius", gender: "Male", species: "Hiệp Sĩ Nadir", race: "nadir", cr: 460,
+    r1: { id: "tr1", tag: "Trật Tự Thép", bonusFlat: 90, desc: "Hàng 1: +90 CR; +100 CR thêm khi đấu Western Nadir." },
+    r2: { id: "tr2", tier: "alien", breedChance: 65, crAura: 85, crMult: 0.85, crPenaltyPct: 0, tag: "Huyết Thống Đế Quốc (65%)", desc: "Hàng 2: +85 CR cho Hàng 1." } },
+  { id: "tr_nad_warden", name: "Citadel Obsidian Warden", fac: "nadirius", gender: "Female", species: "Thần Vệ Nadir", race: "nadir", cr: 580,
     r1: { id: "tr1", tag: "Thành Lũy Citadel", bonusFlat: 115, desc: "Hàng 1: +115 CR bảo vệ tối đa tuyến đầu." },
-    r2: { id: "tr2", crAura: 105, mutBonus: 20, canBreedToken: true, tag: "Kỷ Luật Huyết Mạch", desc: "Hàng 2: +105 CR cho toàn bộ Hàng 1." } },
-  { id: "tr_nad_lancer", name: "Nadirius Shadow Lancer", fac: "nadirius", species: "Tiên Phong Nadir", race: "nadir", cr: 390,
-    r1: { id: "tr1", tag: "Mũi Thương Phản Kích", bonusFlat: 85, desc: "Hàng 1: +85 CR; cộng thêm 80 CR khi đánh lá Hàng 3." },
-    r2: { id: "tr2", crAura: 75, mutBonus: 20, canBreedToken: true, tag: "Xung Huyết Nadir", desc: "Hàng 2: +75 CR cho Hàng 1 & đẩy nhanh tốc độ Lai Tạo." } },
-  { id: "tr_nad_envoy", name: "Nadirius Royal Praetor", fac: "nadirius", species: "Thần Nadir", race: "nadir", cr: 670,
-    r1: { id: "tr1", tag: "Uy Nghiêm Hoàng Tộc", bonusFlat: 120, desc: "Hàng 1: +120 CR và +60 CR cho Magnatere / Hyouya." },
-    r2: { id: "tr2", crAura: 120, mutBonus: 25, canBreedToken: true, tag: "Gen Vệ Thần", desc: "Hàng 2: +120 CR Hàng 1 & nâng CR cơ sở của con lai." } },
+    r2: { id: "tr2", tier: "alien_buff", breedChance: 72, crAura: 105, crMult: 0.9, crPenaltyPct: 0, tag: "Huyết Mạch Citadel (72%)", desc: "Hàng 2: 72% sinh Token Nadirius & +105 CR Hàng 1." } },
+  { id: "tr_nad_lancer", name: "Nadirius Shadow Lancer", fac: "nadirius", gender: "Male", species: "Tiên Phong Nadir", race: "nadir", cr: 390,
+    r1: { id: "tr1", tag: "Mũi Thương Phản Kích", bonusFlat: 85, desc: "Hàng 1: +85 CR; +80 CR khi đánh lá Hàng 3." },
+    r2: { id: "tr2", tier: "alien", breedChance: 60, crAura: 75, crMult: 0.82, crPenaltyPct: 5, tag: "Xung Huyết Nadir (60%)", desc: "Hàng 2: +75 CR cho Hàng 1." } },
+  { id: "tr_nad_envoy", name: "Nadirius Royal Praetor", fac: "nadirius", gender: "Female", species: "Thần Nadir", race: "nadir", cr: 670,
+    r1: { id: "tr1", tag: "Uy Nghiêm Hoàng Tộc", bonusFlat: 120, desc: "Hàng 1: +120 CR." },
+    r2: { id: "tr2", tier: "alien_buff", breedChance: 78, crAura: 120, crMult: 0.95, crPenaltyPct: 0, tag: "Gen Vệ Thần (78%)", desc: "Hàng 2: 78% sinh Token Hoàng Tộc & +120 CR Hàng 1." } },
 
-  // WESTERN NADIR (alongside Overlord, Kyaria, Cipheron, Dick)
-  { id: "tr_wn_raider", name: "Abyssal Border Raider", fac: "western_nadir", species: "Chiến Binh Vực Thẳm", race: "nadir", cr: 410,
+  // WESTERN NADIR
+  { id: "tr_wn_raider", name: "Abyssal Border Raider", fac: "western_nadir", gender: "Male", species: "Chiến Binh Vực Thẳm", race: "nadir", cr: 410,
     r1: { id: "tr1", tag: "Tập Kích Vực Thẳm", bonusFlat: 95, desc: "Hàng 1: +95 CR; giảm 50 CR lá Sylvarian đối diện." },
-    r2: { id: "tr2", crAura: 80, mutBonus: 25, canBreedToken: true, tag: "Dịch Thể Nadir", desc: "Hàng 2: +80 CR Hàng 1 & +25% đột biến lai tạo." } },
-  { id: "tr_wn_natheron", name: "Natheron Virus Host", fac: "western_nadir", species: "Natheron Ký Sinh", race: "nadir", cr: 320,
+    r2: { id: "tr2", tier: "alien", breedChance: 68, crAura: 80, crMult: 0.88, crPenaltyPct: 0, tag: "Dịch Thể Nadir (68%)", desc: "Hàng 2: 68% sinh Token & +80 CR Hàng 1." } },
+  { id: "tr_wn_natheron", name: "Natheron Virus Host", fac: "western_nadir", gender: "Female", species: "Natheron Ký Sinh", race: "nadir", cr: 320,
     r1: { id: "tr1", tag: "Lây Lan Natheron", bonusFlat: 80, desc: "Hàng 1: +80 CR; giảm 100 CR đối thủ có CR < 800." },
-    r2: { id: "tr2", crAura: 95, mutBonus: 35, canBreedToken: true, tag: "Lò Ấp Natheron", desc: "Hàng 2: +95 CR Hàng 1; cộng 35% đột biến (vô hiệu lên thẻ CR>=800)." } },
-  { id: "tr_wn_starro", name: "Western Starro Brood", fac: "western_nadir", species: "Starro Ký Sinh", race: "mutant", cr: 540,
-    r1: { id: "tr1", tag: "Kiểm Soát Tâm Trí", bonusFlat: 105, desc: "Hàng 1: +105 CR; khóa 50% hiệu ứng của kẻ yếu hơn." },
-    r2: { id: "tr2", crAura: 110, mutBonus: 30, canBreedToken: true, tag: "Phân Bào Starro", desc: "Hàng 2: +110 CR cho Hàng 1 và hỗ trợ lai ký sinh." } },
+    r2: { id: "tr2", tier: "omniwomb", breedChance: 84, omniWomb: true, virusTrait: true, crAura: 95, crMult: 0.9, crPenaltyPct: 0, tag: "Lò Ấp Natheron (84%)", desc: "Hàng 2: 84% sinh nhiều dạng Token Ký Sinh cuối mỗi lượt!" } },
+  { id: "tr_wn_starro", name: "Western Starro Matriarch", fac: "western_nadir", gender: "Female", species: "Starro Ký Sinh", race: "mutant", cr: 540,
+    r1: { id: "tr1", tag: "Kiểm Soát Tâm Trí", bonusFlat: 105, desc: "Hàng 1: +105 CR." },
+    r2: { id: "tr2", tier: "wombiote", breedChance: 86, omniWomb: true, crAura: 110, crMult: 0.92, crPenaltyPct: 0, tag: "Phân Bào Starro (86%)", desc: "Hàng 2: 86% phân bào tạo Token đa dạng & +110 CR Hàng 1." } },
 
-  // THE COLLECTORS (alongside Mr.Mind, Parasoid, Kale, Exorotic, Eremite)
-  { id: "tr_col_ultrabot", name: "Tokyzhou Ultra-Bot Mk.II", fac: "collectors", species: "Ultra Bot Cyborg", race: "cyborg", cr: 430,
+  // THE COLLECTORS
+  { id: "tr_col_ultrabot", name: "Tokyzhou Ultra-Bot Mk.II", fac: "collectors", gender: "Male", species: "Ultra Bot Cyborg", race: "cyborg", cr: 430,
     r1: { id: "tr1", tag: "Lưới Bắt Sinh Học", bonusFlat: 95, desc: "Hàng 1: +95 CR; +75 CR nếu trong Hàng 2 bạn có >= 1 tù binh." },
-    r2: { id: "tr2", crAura: 85, mutBonus: 20, canBreedToken: true, tag: "Kho Lưu Trữ DNA", desc: "Hàng 2: +85 CR cho Hàng 1 & hỗ trợ nhân bản gen." } },
-  { id: "tr_col_stalker", name: "Vander Bio-Harvester", fac: "collectors", species: "Dị Nhân Thí Nghiệm", race: "mutant", cr: 510,
-    r1: { id: "tr1", tag: "Săn Mẫu Vật", bonusFlat: 105, desc: "Hàng 1: +105 CR khi săn các thẻ Independent / Human." },
-    r2: { id: "tr2", crAura: 100, mutBonus: 30, canBreedToken: true, tag: "Ống Nghiệm Vander", desc: "Hàng 2: +100 CR Hàng 1 & +30% đột biến gen." } },
+    r2: { id: "tr2", tier: "human_serum", breedChance: 40, crAura: 85, crMult: 0.78, crPenaltyPct: 20, tag: "Thân Máy Cyborg (40% • -20% CR)", desc: "Hàng 2: Cơ thể máy hạn chế sinh sản (40% & -20% CR Token)." } },
+  { id: "tr_col_stalker", name: "Vander Bio-Harvester", fac: "collectors", gender: "Female", species: "Omni-Womb Thí Nghiệm", race: "mutant", cr: 510,
+    r1: { id: "tr1", tag: "Săn Mẫu Vật", bonusFlat: 105, desc: "Hàng 1: +105 CR khi săn thẻ Tự Do / Người." },
+    r2: { id: "tr2", tier: "omniwomb", breedChance: 90, omniWomb: true, crAura: 100, crMult: 0.96, crPenaltyPct: 0, tag: "Buồng Omni-Womb (90%)", desc: "Hàng 2: 90% tạo nhiều dạng Token thử nghiệm cuối mỗi lượt." } },
 
-  // SALVIC UNION (alongside Zarcseid, Elita, etc.)
-  { id: "tr_sal_veteran", name: "Predita 10-Year Veteran", fac: "salvic", species: "Prozonian", race: "prozonian", cr: 480,
-    r1: { id: "tr1", tag: "Tàn Quân Bất Tử", bonusFlat: 120, desc: "Hàng 1: +120 CR; tăng lên +200 CR khi đấu với Western Nadir." },
-    r2: { id: "tr2", crAura: 95, mutBonus: 15, canBreedToken: true, tag: "Chiến Hữu Predita", desc: "Hàng 2: +95 CR Hàng 1 & hậu duệ mang 100% ý chí Prozonian." } },
-  { id: "tr_sal_paladin", name: "Salvic Shield Paladin", fac: "salvic", species: "Prozonian", race: "prozonian", cr: 390,
-    r1: { id: "tr1", tag: "Khiên Thép Salvic", bonusFlat: 90, desc: "Hàng 1: +90 CR & +60 CR bảo hộ cho Thủ lĩnh Hàng 3." },
-    r2: { id: "tr2", crAura: 80, mutBonus: 15, canBreedToken: true, tag: "Huyết Mạch Kiên Cố", desc: "Hàng 2: +80 CR Hàng 1." } },
+  // SALVIC UNION
+  { id: "tr_sal_veteran", name: "Predita 10-Year Veteran", fac: "salvic", gender: "Male", species: "Prozonian", race: "prozonian", cr: 480,
+    r1: { id: "tr1", tag: "Tàn Quân Bất Tử", bonusFlat: 120, desc: "Hàng 1: +120 CR; tăng lên +200 CR khi đấu Western Nadir." },
+    r2: { id: "tr2", tier: "alien", breedChance: 64, crAura: 95, crMult: 0.88, crPenaltyPct: 0, tag: "Chiến Hữu Predita (64%)", desc: "Hàng 2: +95 CR Hàng 1." } },
+  { id: "tr_sal_paladin", name: "Salvic Shield Maiden", fac: "salvic", gender: "Female", species: "Prozonian", race: "prozonian", cr: 390,
+    r1: { id: "tr1", tag: "Khiên Thép Salvic", bonusFlat: 90, desc: "Hàng 1: +90 CR bảo hộ." },
+    r2: { id: "tr2", tier: "alien", breedChance: 66, crAura: 80, crMult: 0.86, crPenaltyPct: 5, tag: "Huyết Mạch Kiên Cố (66%)", desc: "Hàng 2: 66% sinh Token Prozonian & +80 CR Hàng 1." } },
 
-  // TAMARITE (alongside Ovalina, Uterussa, Tsunadia, etc.)
-  { id: "tr_tam_paragon", name: "Pherone Photon Maiden", fac: "tamarite", species: "Tamarite", race: "tamarite", cr: 610,
-    r1: { id: "tr1", tag: "Bão Quang Phổ", bonusFlat: 120, desc: "Hàng 1: +120 CR; cộng thêm +90 CR mỗi thẻ Tamarite khác trên sân." },
-    r2: { id: "tr2", crAura: 125, mutBonus: 35, canBreedToken: true, tag: "Phôi Tế Bào SSS+", desc: "Hàng 2: +125 CR Hàng 1 & tạo ra dòng lai CR vượt trội!" } },
+  // TAMARITE
+  { id: "tr_tam_paragon", name: "Pherone Photon Maiden", fac: "tamarite", gender: "Female", species: "Tamarite", race: "tamarite", cr: 610,
+    r1: { id: "tr1", tag: "Bão Quang Phổ", bonusFlat: 120, desc: "Hàng 1: +120 CR; +90 CR mỗi thẻ Tamarite khác trên sân." },
+    r2: { id: "tr2", tier: "tamarite", breedChance: 100, omniWomb: false, crAura: 125, crMult: 1.15, crPenaltyPct: 0, tag: "Tamarite Thuần (100%)", desc: "Hàng 2: Mặc định 100% sinh Token Tamarite cực mạnh cuối mỗi lượt!" } },
 
   // SYLVARIAN & INDEPENDENT reserves
-  { id: "tr_syl_guard", name: "Kronea Royal Guard", fac: "sylvarian", species: "Sylvarian", race: "sylvarian", cr: 410,
-    r1: { id: "tr1", tag: "Vệ Binh Hoàng Cung", bonusFlat: 85, desc: "Hàng 1: +85 CR; +60 CR cho Arisia / Meralina." },
-    r2: { id: "tr2", crAura: 80, mutBonus: 15, canBreedToken: true, tag: "Astraum Căn Bản", desc: "Hàng 2: +80 CR Hàng 1." } },
-  { id: "tr_ind_merc", name: "Gaiastra Horizon Merc", fac: "independent", species: "Người / Đa Tộc", race: "human", cr: 350,
+  { id: "tr_syl_guard", name: "Kronea Royal Guard", fac: "sylvarian", gender: "Male", species: "Sylvarian", race: "sylvarian", cr: 410,
+    r1: { id: "tr1", tag: "Vệ Binh Hoàng Cung", bonusFlat: 85, desc: "Hàng 1: +85 CR." },
+    r2: { id: "tr2", tier: "alien", breedChance: 60, crAura: 80, crMult: 0.85, crPenaltyPct: 5, tag: "Astraum Căn Bản (60%)", desc: "Hàng 2: +80 CR Hàng 1." } },
+  { id: "tr_ind_merc", name: "Gaiastra Horizon Merc", fac: "independent", gender: "Female", species: "Người", race: "human", cr: 350,
     r1: { id: "tr1", tag: "Lính Đánh Thuê Tự Do", bonusFlat: 90, desc: "Hàng 1: +90 CR linh hoạt trên mọi làn." },
-    r2: { id: "tr2", crAura: 75, mutBonus: 20, canBreedToken: true, tag: "Gen Đa Dạng Tự Do", desc: "Hàng 2: +75 CR cho Hàng 1 và dễ tương thích Lai Tạo." } }
+    r2: { id: "tr2", tier: "human_debuff", breedChance: 32, crAura: 35, crMult: 0.72, crPenaltyPct: 28, tag: "Người Thuần (32% • -28% CR Token)", desc: "Hàng 2 (Bất lợi): Gen người thuần không có buff (32% sinh Token & bị giảm -28% CR!)." } }
 ];
 
 export const FACTION_TROOP_CARDS = TROOP_SPECS.map((t) => ({
@@ -144,7 +298,7 @@ export const FACTION_TROOP_CARDS = TROOP_SPECS.map((t) => ({
   race: t.race,
   cr: t.cr,
   h: 1.85,
-  gender: "Unit",
+  gender: t.gender || "Male",
   unique: false,
   row1Effect: t.r1,
   row2Effect: t.r2
@@ -159,6 +313,7 @@ export function hybridToCard(h) {
   return {
     id: h.id,
     isHybrid: true,
+    isToken: Boolean(h.isToken),
     hybridData: h,
     name: h.name,
     kind: "hybrid",
@@ -167,21 +322,23 @@ export function hybridToCard(h) {
     race: h.race || "tamarite",
     cr,
     h: h.h || 1.9,
-    gender: "Hybrid",
-    unique: true,
-    row1Effect: {
+    gender: h.gender || (Math.random() < 0.5 ? "Male" : "Female"),
+    unique: !h.isToken,
+    row1Effect: h.row1Effect || {
       id: "hyb_resonance",
       tag: h.mutated ? "Đột Biến Thống Lĩnh" : "Cộng Hưởng Huyết Thống",
-      bonusFlat: h.mutated ? 165 : 115,
-      desc: `Hàng 1/3: ${h.signatureSkill || "Huyết Thống Hợp Nhất"} — +${h.mutated ? 165 : 115} CR giao chiến trực diện!`
+      bonusFlat: h.mutated ? 150 : 105,
+      desc: `Hàng 1/3: ${h.signatureSkill || "Huyết Thống Hợp Nhất"} — +${h.mutated ? 150 : 105} CR giao chiến!`
     },
-    row2Effect: {
+    row2Effect: h.row2Effect || {
       id: "hyb_lineage",
-      crAura: Math.max(95, Math.round(cr * 0.16)),
-      mutBonus: 30,
-      canBreedToken: true,
-      tag: "Gen Thế Hệ F1/F2",
-      desc: `Hàng 2: +${Math.max(95, Math.round(cr * 0.16))} CR phụ trợ cho Hàng 1 và làm nền Lai Tạo F2 cực mạnh!`
+      tier: "alien_buff",
+      breedChance: 78,
+      crAura: Math.max(85, Math.round(cr * 0.14)),
+      crMult: 0.95,
+      crPenaltyPct: 0,
+      tag: "Gen Thế Hệ Lai (78%)",
+      desc: `Hàng 2: 78% sinh Token F2 & +${Math.max(85, Math.round(cr * 0.14))} CR Hàng 1.`
     }
   };
 }
@@ -196,42 +353,38 @@ export function getCardPortrait(card) {
   if (!card) return "";
   if (card.isHybrid && card.hybridData) return getHybridPortraitUrl(card.hybridData);
   if (card.charId && CHAR_BY_ID[card.charId]) return getPortraitUrl(CHAR_BY_ID[card.charId]);
-  // Troop cards inherit visual aesthetic of an iconic character from the same faction
   const rep = CHARACTERS.find((c) => c.fac === card.fac) || CHARACTERS[0];
   return getPortraitUrl(rep);
 }
 
-// Strict Faction Pool: ONLY cards belonging to `factionId`!
 export function getFactionCardPool(factionId, hybrids = []) {
   const hybCards = (hybrids || []).filter((h) => h.fac === factionId).map(hybridToCard);
   const facCards = CARDS.filter((c) => c.fac === factionId);
   return [...hybCards, ...facCards].sort((a, b) => b.cr - a.cr);
 }
 
-// Builds a legal 12-card Faction Deck for the given Leader (`leaderId`).
-// Every card in the returned deck is GUARANTEED to share `leader.fac`!
+// Builds a strict 16-card Faction Deck for the chosen Leader (excludes Leader on Row 3)
+// Sized at 16 cards to sustain Draw-2-Per-Turn cadence cleanly!
 export function buildFactionDeck(leaderId = "arisia", hybrids = []) {
   const leader = resolveCard(leaderId, hybrids) || CARD_BY_ID.arisia;
   const fac = leader.fac || "sylvarian";
   const pool = getFactionCardPool(fac, hybrids).filter((c) => c.id !== leader.id);
 
   const deck = [];
-  // Add unique faction characters & hybrids first (except Leader who sits permanently on Row 3!)
   for (const c of pool) {
-    if (deck.length >= 12) break;
+    if (deck.length >= 16) break;
     deck.push(c.id);
   }
 
-  // If a small faction has < 12 unique cards, fill remaining slots with non-unique Faction Troop Reserves (up to 3x)
   const troops = pool.filter((c) => !c.unique);
   let idx = 0;
-  while (deck.length < 12 && pool.length > 0) {
+  while (deck.length < 16 && pool.length > 0) {
     const src = troops.length > 0 ? troops[idx % troops.length] : pool[idx % pool.length];
     deck.push(src.id);
     idx++;
   }
 
-  return deck.slice(0, 12);
+  return deck.slice(0, 16);
 }
 
 export function validateDeckForLeader(deckIds = [], leaderId = "arisia", hybrids = []) {
@@ -242,5 +395,5 @@ export function validateDeckForLeader(deckIds = [], leaderId = "arisia", hybrids
     .map((id) => resolveCard(id, hybrids))
     .filter((c) => c && c.fac === fac)
     .map((c) => c.id)
-    .slice(0, 12);
+    .slice(0, 16);
 }

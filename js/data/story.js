@@ -1,10 +1,10 @@
 // ============================================================================
 // CYCLE 12: INTERACTIVE VISUAL NOVEL ENGINE DATA (js/data/story.js)
-// 6 Chương Cốt Truyện Tương Tác Chính Thức + Đối Thoại Động cho 72 Nhân Vật
-// Bám sát 100% lore hậu Reset & thời kỳ Hiệp ước Cursew Pact.
+// 13 Chương Sử Thi Tương Tác + Đối Thoại Chuyên Sâu cho 72 Nhân Vật & Hybrid
+// Bám sát 100% lore hậu Reset, Cursew Pact, Tamarite & AI Story Director.
 // ============================================================================
 
-import { CHAR_BY_ID } from "./characters.js";
+import { CHAR_BY_ID, RELATIONS } from "./characters.js";
 import { FACTIONS } from "./lore.js";
 import { findLocation } from "./galaxy.js";
 
@@ -1313,7 +1313,8 @@ export const CHAPTERS = [
         text: (g) => `"Chu kỳ 13 mở màn dưới ngọn cờ của ${g.getProtagonist().name} và ${g.facName(g.playerFaction)}. Không còn thế lực nào dám thách thức bản đồ vì sao của chúng ta nữa!"`,
         end: {
           title: "ĐẠI KẾT CỤC A: HOÀNG ĐẾ CHU KỲ 13",
-          summary: "+5,000 Credits • +300 Ảnh hưởng • Hoàn thành toàn bộ 11 Chương Cốt Truyện!"
+          summary: "+5,000 Credits • +300 Ảnh hưởng • Mở khóa Chương Ngoại Truyện XI: Huyết Thống Pherone Nexus!",
+          nextChapter: "ch11_pherone_genes"
         }
       },
       ch10_horizon: {
@@ -1323,7 +1324,8 @@ export const CHAPTERS = [
         text: (g) => `Với tài trí của ${g.getProtagonist().name}, mọi phe phái từ Sylvarian, Nadirius đến Salvic Union đều hạ vũ khí đặt nền móng cho Liên Minh Bình Minh Chu Kỳ 13. Căng thẳng ngân hà giảm -40%!`,
         end: {
           title: "ĐẠI KẾT CỤC B: CHÂN TRỜI HÒA BÌNH GAIASTRA",
-          summary: "-40% Căng thẳng • +400 Ảnh hưởng • Hoàn thành trọn vẹn Age of Dominion!"
+          summary: "-40% Căng thẳng • +400 Ảnh hưởng • Tiếp tục Chương XI: Bí Mật Omni-Womb!",
+          nextChapter: "ch11_pherone_genes"
         }
       },
       ch10_ascension: {
@@ -1333,7 +1335,166 @@ export const CHAPTERS = [
         text: (g) => `"Không thể tin được... ${g.getProtagonist().name} đã đánh bại cả Hội Đồng Outer Layer trong trận quyết đấu! Giao thức Reset vĩnh viễn được chuyển giao cho ngươi!"`,
         end: {
           title: "ĐẠI KẾT CỤC S+: CHỦ NHÂN VĨNH HẰNG CỦA ĐA VŨ TRỤ",
-          summary: "Bạn đã chinh phục đỉnh cao nhất của Cycle 12: Age of Dominion!"
+          summary: "Tiếp nối sử thi với Chương XI: Mật Mã Tamarite & Omni-Womb!",
+          nextChapter: "ch11_pherone_genes"
+        }
+      }
+    }
+  },
+  {
+    id: "ch11_pherone_genes",
+    num: "CHƯƠNG XI",
+    title: "Bí Mật Pherone Nexus & Huyết Thống Tamarite",
+    subtitle: "Pherone Nexus (Trái Đất) → Kho Lưu Trữ Gen Vagina Clitoris",
+    sector: "earth_sol",
+    leadChar: "ovalina",
+    summary: "Khi bình minh Chu Kỳ 13 ló rạng, cánh cổng bí mật dưới lòng Pherone Nexus mở ra: kho dữ liệu gốc về khả năng sinh sản 100% của Tamarite và đột biến Omni-Womb bắt đầu thức tỉnh, thu hút ánh nhìn của cả Tyranian lẫn Meralina.",
+    nodes: {
+      start: {
+        sector: "earth_sol",
+        leftChar: "__PROTAGONIST__", rightChar: "ovalina", leftMood: "tense", rightMood: "smug",
+        speaker: "narrator",
+        text: (g) => `Dưới tầng sâu nhất của Pherone Nexus, các ống ánh sáng Hyper-Photon đồng loạt bừng sáng. ${g.getProtagonist().name} đối diện Nữ hoàng Tamarite Ovalina Perfectbrood bên cạnh lõi gen nguyên thủy của Vagina Clitoris.`,
+        next: "ch11_reveal"
+      },
+      ch11_reveal: {
+        sector: "earth_sol",
+        leftChar: "__PROTAGONIST__", rightChar: "meralina", leftMood: "secret", rightMood: "combat",
+        speaker: "meralina",
+        text: `"Chính tại đây Ta đã giấu bộ mã Euphoria và khế ước với Ragnaroir. Nếu để Sylvarian hay Collectors chiếm được lõi Omni-Womb, toàn bộ cân bằng CR của 15 chủng tộc sẽ sụp đổ!"`,
+        choices: [
+          {
+            label: "🧬 Giải mã Lõi Hyper-Photon Tamarite (+350 Nghiên cứu & +15 Độ tin cậy Ovalina)",
+            hint: "Khám phá bí mật tỷ lệ lai 100% và đột biến Omni-Token đa hình thái",
+            effects: (g) => {
+              g.addRes(g.playerFaction, "research", 350);
+              g.addAffinity("ovalina", 15);
+              g.addAffinity("uterussa", 12);
+            },
+            next: "ch11_decode"
+          },
+          {
+            label: "⚔️ Kiểm Chứng Sức Mạnh Với Nữ Vương Ovalina (CR 2000) Trên Sân Đấu 3 Làn",
+            hint: "Đấu Thẻ Bài Đỉnh Cao • Thắng để khắc dấu chủ quyền huyết thống tại Pherone Nexus",
+            battle: {
+              playerId: "__PROTAGONIST__",
+              enemyId: "ovalina",
+              stageId: "earth_sol",
+              winNext: "ch11_duel_win",
+              loseNext: "ch11_decode"
+            }
+          },
+          {
+            label: "🛡️ Bảo Vệ Meralina & Triệu Tập Bóng Ragnaroir Thoát Khỏi Truy Sát",
+            hint: "+1,200 Credits • +20 Độ tin cậy Meralina & +25 Ảnh hưởng",
+            effects: (g) => {
+              g.addAffinity("meralina", 20);
+              g.addRes(g.playerFaction, "credits", 1200);
+              g.addRes(g.playerFaction, "influence", 25);
+            },
+            next: "ch11_ally_meralina"
+          }
+        ]
+      },
+      ch11_decode: {
+        sector: "earth_sol",
+        leftChar: "__PROTAGONIST__", rightChar: "uterussa", leftMood: "happy", rightMood: "happy",
+        speaker: "uterussa",
+        text: "Dữ liệu cho thấy chỉ duy nhất huyết mạch Tamarite đạt tỷ lệ cộng hưởng gen 100%, trong khi Omni-Womb tạo ra biến thể Song Sinh hoặc Khổng Lồ — trái ngược hoàn toàn với giới hạn mong manh của con người thuần chưa qua Serum!",
+        end: {
+          title: "CHƯƠNG XI HOÀN TẤT: BÍ MẬT TAMARITE",
+          summary: "Đã mở khóa toàn bộ hiểu biết di truyền Pherone Nexus! Tiến vào Chương XII: Vương Miện Hư Không.",
+          nextChapter: "ch12_abyssal_crown"
+        }
+      },
+      ch11_duel_win: {
+        sector: "earth_sol",
+        leftChar: "__PROTAGONIST__", rightChar: "ovalina", leftMood: "smug", rightMood: "happy",
+        speaker: "ovalina",
+        text: (g) => `"Haha! Đánh bại cả ta trên sân bài 3 làn của chính Pherone Nexus sao? ${g.getProtagonist().name}, từ nay toàn bộ kho gen Tamarite mở rộng cửa đón ngươi!"`,
+        effects: (g) => g.addRes(g.playerFaction, "influence", 180),
+        end: {
+          title: "CHƯƠNG XI HOÀN TẤT: CHỦ NHÂN HYPER-PHOTON",
+          summary: "+180 Ảnh hưởng & chiến thắng Ovalina! Tiến tới Chương Kết: Vương Miện Vực Thẳm.",
+          nextChapter: "ch12_abyssal_crown"
+        }
+      },
+      ch11_ally_meralina: {
+        sector: "earth_sol",
+        leftChar: "__PROTAGONIST__", rightChar: "meralina", leftMood: "happy", rightMood: "secret",
+        speaker: "meralina",
+        text: "Ân tình tại Pherone Nexus hôm nay Ta khắc cốt ghi tâm. Khi trận chiến cuối với các thần Nadir bùng nổ, thanh kiếm của Công chúa lưu vong và Ragnaroir sẽ đứng cạnh ngươi.",
+        end: {
+          title: "CHƯƠNG XI HOÀN TẤT: LỜI THỀ CÔNG CHÚA LƯU VONG",
+          summary: "Đã kết minh với Meralina Caranter! Tiến tới Chương XII.",
+          nextChapter: "ch12_abyssal_crown"
+        }
+      }
+    }
+  },
+  {
+    id: "ch12_abyssal_crown",
+    num: "CHƯƠNG XII",
+    title: "Vương Miện Vực Thẳm & Khải Hoàn Chu Kỳ Mới",
+    subtitle: "Vùng Biên Nadir ↔ Thủ Đô Kronea ↔ Đỉnh Trời Eris",
+    sector: "western_abyss",
+    leadChar: "overlord",
+    summary: "Bóng tối nguyên thủy từ Impregnita và lời tiên tri về những đứa con Nadir tái sinh trỗi dậy lần cuối. Dù ngươi là kẻ chinh phục, nhà di truyền hay người bảo hộ hòa bình, chương cuối cùng sẽ định đoạt vận mệnh mọi vương quốc.",
+    nodes: {
+      start: {
+        sector: "western_abyss",
+        leftChar: "__PROTAGONIST__", rightChar: "overlord", leftMood: "combat", rightMood: "angry",
+        speaker: "overlord",
+        text: (g) => `"Cười lên đi, ${g.getProtagonist().name}! Khi mặt trăng máu soi rọi cả Western Abyss và Nadirius Citadel, Magnatere, Arisia và chính ta sẽ chỉ tôn vinh kẻ đứng vững sau cùng trên ngai vàng!"`,
+        next: "ch12_summit"
+      },
+      ch12_summit: {
+        sector: "western_abyss",
+        leftChar: "__PROTAGONIST__", rightChar: "tsunadia", leftMood: "tense", rightMood: "smug",
+        speaker: "tsunadia",
+        text: "Các huynh đệ Nadir cùng hội đồng Sylvarian đã tập hợp hạm đội. Hãy chọn nước đi cuối cùng của bạn trong bản giao hưởng Chu Kỳ 12!",
+        choices: [
+          {
+            label: "🔥 Tổng Tiến Công Quyết Tử: Thách Đấu Overlord (CR 1200) Trận Sinh Tử",
+            hint: "Trận Đấu Thẻ Bài Hoàng Kim • Giành chiến thắng tuyệt đối trước Chúa Tể Vực Thẳm",
+            battle: {
+              playerId: "__PROTAGONIST__",
+              enemyId: "overlord",
+              stageId: "western_abyss",
+              winNext: "ch12_crown_win",
+              loseNext: "ch12_crown_pact"
+            }
+          },
+          {
+            label: "📜 Ký Tân Hiến Chương Đa Chủng Tộc: Cân Bằng 8 Phe & Mở Rộng Giao Thương",
+            hint: "+3,000 Credits • +250 Ảnh hưởng • -25% Căng thẳng Toàn Ngân Hà",
+            effects: (g) => {
+              g.addRes(g.playerFaction, "credits", 3000);
+              g.addRes(g.playerFaction, "influence", 250);
+              g.addTension(-25);
+            },
+            next: "ch12_crown_pact"
+          }
+        ]
+      },
+      ch12_crown_win: {
+        sector: "outer_layer",
+        leftChar: "__PROTAGONIST__", rightChar: "overlord", leftMood: "smug", rightMood: "tense",
+        speaker: "__PROTAGONIST__",
+        text: (g) => `"Overlord cũng đã quỳ gối trước chiến thuật Hàng 1 — Hàng 2 — Hàng 3 của ${g.getProtagonist().name}! Từ Sylvalon tới tận cùng Hư Không, kỷ nguyên mới mang tên ngươi chính thức bất tử!"`,
+        end: {
+          title: "HUYỀN THOẠI ĐỘC TÔN: BÁ CHỦ CHU KỲ 12–13",
+          summary: "Đã hoàn thành 13/13 Chương Sử Thi! Hãy thử '✨ Mở Rộng AI' hoặc chọn Nhân Vật Chính mới để viết tiếp lịch sử riêng!"
+        }
+      },
+      ch12_crown_pact: {
+        sector: "sylvalon",
+        leftChar: "__PROTAGONIST__", rightChar: "emma", leftMood: "happy", rightMood: "happy",
+        speaker: "emma",
+        text: (g) => `"Hội đồng Eris Union xác nhận bình minh hòa bình dưới sự bảo chứng của ${g.getProtagonist().name}. Hãy tiếp tục khám phá 72 nhân vật hoặc dùng Trí Tuệ Nhân Tạo để viết tiếp vô số ngoại truyện mới!"`,
+        end: {
+          title: "HOÀN TẤT SỬ THI: BÌNH MINH VĨNH CỬU GAIASTRA",
+          summary: "Bạn đã hoàn thành trọn vẹn 13 Chương Cốt Truyện Cycle 12: Age of Dominion!"
         }
       }
     }
@@ -1347,10 +1508,10 @@ export const CHAPTER_BY_ID = Object.fromEntries(CHAPTERS.map(c => [c.id, c]));
 // Gọi khi người chơi nhấn "💬 Đối thoại" từ Bảng Nhân Vật hoặc Đồn Trú
 // ============================================================================
 export function buildEncounterScene(charId, gameState) {
-  const c = CHAR_BY_ID[charId];
+  const c = CHAR_BY_ID[charId] || gameState?.hybrids?.find((h) => h.id === charId);
   if (!c) return null;
 
-  const loc = findLocation(c.loc);
+  const loc = c.loc ? findLocation(c.loc) : null;
   const sectorId = loc?.sector?.id || "sylvalon";
   const fac = FACTIONS[c.fac] || FACTIONS.independent;
   const affinity = gameState.getAffinity(charId);
@@ -1358,49 +1519,59 @@ export function buildEncounterScene(charId, gameState) {
     ? "Hiệp ước Cursew giữa Sylvarian và Western Nadir vẫn đang kìm hãm bề nổi."
     : "Hiệp ước Cursew đã đổ vỡ — mọi chiến tuyến đều đang rực lửa.";
 
-  // Câu thoại đặc trưng theo nhân vật / phe phái
-  let greeting = "";
-  if (c.id === "arisia") {
-    greeting = `Ta không có thời gian cho lời sáo rỗng. ${pactLine} Ngươi mang tới tin tình báo gì cho Đế chế?`;
-  } else if (c.id === "overlord") {
-    greeting = `Hahaha! Nhìn mặt ngươi kìa. ${gameState.pact.active ? "Arisia quả thật rất thú vị sau màn Gotterfall đó." : "Không còn hiệp ước nào trói được Western Nadir nữa đâu!"}`;
-  } else if (c.id === "yulia") {
-    greeting = `Ta vừa ghi chép xong hồ sơ lịch sử chu kỳ ${gameState.cycleMajor}.${gameState.cycleMinor}. Thật kỳ lạ khi chẳng ai ở Berlidona hiểu câu ví von về Molotov–Ribbentrop của ta.`;
-  } else if (c.id === "meralina") {
-    greeting = `Xuỵt... nói khẽ thôi. Mái tóc đen này chỉ là lớp ngụy trang tạm ở Pherone Nexus. Đừng để tai mắt của Arisia hay April đánh hơi thấy.`;
-  } else if (c.id === "ovalina") {
-    greeting = `Chào mừng tới Pherone Nexus! Ở đây chẳng có luật nào của Sylvarian có hiệu lực cả — chỉ có niềm vui và những thí nghiệm tiến hóa thôi!`;
-  } else if (c.id === "magnatere") {
-    greeting = `Đế chế Nadirius coi trọng kỷ luật và danh dự chiến binh. ${gameState.pact.active ? "Chừng nào Arisia còn bắt tay với Overlord, ta chưa thể tin Kronea." : "Cuối cùng thì trật tự cũng sẵn sàng quét sạch hỗn loạn."}`;
-  } else if (c.id === "zarcseid") {
-    greeting = `Ở Predita ta đã giữ được 10 năm với 500 triệu tàn quân. Dù Salvic Union vừa thoát khỏi Reichkomos còn nhiều giới hạn, ý chí Prozonian không bao giờ gãy.`;
-  } else if (c.id === "emma") {
-    greeting = `Đứng từ trung tâm vũ trụ nhìn xuống, mọi cuộc tranh giành 5% hay 70% lãnh thổ đều nhỏ bé lạ thường... miễn là các vị đừng đẩy vũ trụ tới mức cần thêm một lần Reset.`;
-  } else if (c.id === "mina") {
-    greeting = `Ồ, khách quý của Global Icon sao? Đừng nói với bên Sylvarian nhé, nhưng tôi thực sự rất ngưỡng mộ tinh thần hiệp sĩ của người Prozonian đấy.`;
-  } else if (c.id === "ojamon") {
-    greeting = `Đừng nhìn ta với ánh mắt nghi ngờ đó. Pháo Gotterfall lẫn Hiệp ước Cursew đều do một tay ta thiết kế — và kẻ nắm thông tin luôn có đường lui.`;
-  } else if (c.id === "veidos") {
-    greeting = `Kẻ ta trung thành là chiến tuyến Border Division và Ixalcienkorps ở Gandora, không phải những kẻ chỉ biết ngồi trên ngai vàng Kronea phán xét ngoại hình ta.`;
-  } else if (c.id === "hyouya") {
-    greeting = `Ở Nadirius ai cũng nghiêm nghị cả, may mà bệ hạ Magnatere luôn tin tưởng ta. Không biết chị Elita bên Salvic dạo này thế nào rồi...`;
-  } else if (c.id === "felicia") {
-    greeting = `AI Bernice vừa quét xong mật độ năng lượng khu vực. Với tư cách nhà sáng lập The Supers, ta sẽ không để Collectors chạm vào thường dân Evernight!`;
-  } else if (c.id === "pussiri") {
-    greeting = `Nghe kỹ này... đừng nói với ai là tôi kể nhé, nhưng Arisia lúc nào cũng tính chuyện rất xa sau lưng phe Reformists đấy.`;
-  } else if (c.fac === "collectors") {
-    greeting = `Khu vực Vander và Tokyzhou có quy tắc riêng. Nếu mang đủ lợi ích cho The Collectors, có lẽ Mr. Mind sẽ để ngươi yên.`;
-  } else {
-    greeting = `Ta là ${c.name} (${c.title}), hiện đang đóng tại ${loc ? loc.label : c.loc}. ${pactLine}`;
+  const playerCharId = gameState?.protagonistId || gameState.getChampionForFaction(gameState.playerFaction);
+  const hero = CHAR_BY_ID[playerCharId] || gameState?.hybrids?.find((h) => h.id === playerCharId) || CHAR_BY_ID.arisia;
+  const sharedRel = [];
+  const npcShort = c.name.split(" ")[0];
+  const heroShort = hero?.name?.split(" ")[0] || "";
+  for (const rel of RELATIONS) {
+    for (const item of rel.items || []) {
+      if (item.includes(npcShort)) sharedRel.push(`${rel.type}: ${item}`);
+    }
   }
+  const mutualRel = sharedRel.find((s) => heroShort && s.includes(heroShort));
 
-  const playerCharId = gameState.getChampionForFaction(gameState.playerFaction);
+  // Câu thoại đặc trưng theo nhân vật / phe phái / quan hệ
+  const GREETINGS = {
+    arisia: `Ta không có thời gian cho lời sáo rỗng. ${pactLine} Ngươi mang tới tin tình báo gì cho Đế chế?`,
+    overlord: `Hahaha! Nhìn mặt ngươi kìa. ${gameState.pact.active ? "Arisia quả thật rất thú vị sau màn Gotterfall đó." : "Không còn hiệp ước nào trói được Western Nadir nữa đâu!"}`,
+    yulia: `Ta vừa ghi chép xong hồ sơ lịch sử chu kỳ ${gameState.cycleMajor}.${gameState.cycleMinor}. Thật kỳ lạ khi chẳng ai ở Berlidona hiểu câu ví von về Molotov–Ribbentrop của ta.`,
+    meralina: `Xuỵt... nói khẽ thôi. Mái tóc đen này chỉ là lớp ngụy trang tạm ở Pherone Nexus. Đừng để tai mắt của Arisia hay April đánh hơi thấy.`,
+    ovalina: `Chào mừng tới Pherone Nexus! Ở đây chẳng có luật nào của Sylvarian có hiệu lực cả — chỉ có niềm vui và những thí nghiệm tiến hóa thôi!`,
+    uterussa: `Chị Ovalina đang hào hứng với buồng Omni-Womb mới lắm đó! Ngươi muốn xem kích thước thật của Tamarite hay dáng người 1m67?`,
+    magnatere: `Đế chế Nadirius coi trọng kỷ luật và danh dự chiến binh. ${gameState.pact.active ? "Chừng nào Arisia còn bắt tay với Overlord, ta chưa thể tin Kronea." : "Cuối cùng thì trật tự cũng sẵn sàng quét sạch hỗn loạn."}`,
+    zarcseid: `Ở Predita ta đã giữ được 10 năm với 500 triệu tàn quân. Dù Salvic Union vừa thoát khỏi Reichkomos còn nhiều giới hạn, ý chí Prozonian không bao giờ gãy.`,
+    emma: `Đứng từ trung tâm vũ trụ nhìn xuống, mọi cuộc tranh giành 5% hay 70% lãnh thổ đều nhỏ bé lạ thường... miễn là các vị đừng đẩy vũ trụ tới mức cần thêm một lần Reset.`,
+    mina: `Ồ, khách quý của Global Icon sao? Đừng nói với bên Sylvarian nhé, nhưng tôi thực sự rất ngưỡng mộ tinh thần hiệp sĩ của người Prozonian đấy.`,
+    ojamon: `Đừng nhìn ta với ánh mắt nghi ngờ đó. Pháo Gotterfall lẫn Hiệp ước Cursew đều do một tay ta thiết kế — và kẻ nắm thông tin luôn có đường lui.`,
+    veidos: `Kẻ ta trung thành là chiến tuyến Border Division và Ixalcienkorps ở Gandora, không phải những kẻ chỉ biết ngồi trên ngai vàng Kronea phán xét ngoại hình ta.`,
+    hyouya: `Ở Nadirius ai cũng nghiêm nghị cả, may mà bệ hạ Magnatere luôn tin tưởng ta. Không biết chị Elita bên Salvic dạo này thế nào rồi...`,
+    felicia: `AI Bernice vừa quét xong mật độ năng lượng khu vực. Với tư cách nhà sáng lập The Supers, ta sẽ không để Collectors chạm vào thường dân Evernight!`,
+    pussiri: `Nghe kỹ này... đừng nói với ai là tôi kể nhé, nhưng Arisia lúc nào cũng tính chuyện rất xa sau lưng phe Reformists đấy.`,
+    tsunadia: `Quân đoàn phân thân của Nadir luôn sẵn sàng tiếp ứng. Đừng xem thường năng lực tái sinh và sinh sản quân lực của hàng ngũ Vực Thẳm.`,
+    brigitte: `Đừng nhắc chuyện tướng Zarcseid trước mặt Hội đồng Kronea nhé... nhưng công nhận ông chú Prozonian đó chiến đấu rất có khí chất.`,
+    elita: `Chức trách của ta là bảo toàn dòng gen và danh dự Prozonian tại Salvic Union. Hyouya tuy đứng bên kia chiến tuyến Nadirius nhưng mãi là em gái ta.`,
+    ragnaroir: `Grrr... Mẹ Meralina ra lệnh bảo vệ nơi này. Nếu ngươi là kẻ thù của Sylvarian hay Nadir, móng vuốt hỗn mang sẽ xé nát bộ bài của ngươi.`,
+    carnavex: `Mọi đế chế đều có thời điểm giao chuyển quyền lực. Arisia thông minh, nhưng Tham vọng Kronea đâu chỉ dành cho mỗi nhà Grok.`,
+    cipheron: `Thần trí Nadir nhìn thấy mọi mắt xích yếu trên bàn cờ. Sớm thôi, ngay cả Prozonian kiên cường nhất cũng sẽ phải cân nhắc lại liên minh.`,
+    bill: `Trong kỷ nguyên thần linh chiến tranh, đồng Credits và lọ Serum Pregnomorph đôi khi xoay chuyển ván cờ còn nhanh hơn cả tàu chiến!`
+  };
+
+  let greeting = mutualRel
+    ? `${hero.name} đấy à? (${mutualRel}). Ta là ${c.name} — không ngờ chúng ta lại hội ngộ giữa sóng gió ${pactLine.toLowerCase()}`
+    : (GREETINGS[c.id] || (c.fac === "collectors"
+      ? `Khu vực Vander và Tokyzhou có quy tắc riêng. Nếu mang đủ lợi ích cho The Collectors, có lẽ Mr. Mind sẽ để ngươi yên.`
+      : `Ta là ${c.name} (${c.title || "Hậu duệ thế hệ mới"}), hiện đang đóng tại ${loc ? loc.label : "Gaiastra"}. ${pactLine}`));
+
+  const secretText = sharedRel.length > 0
+    ? `Hồ sơ mật của ${c.name} ghi nhận các mối dây liên hệ đáng chú ý: ${sharedRel.join(" • ")}. Những mắt xích này ảnh hưởng trực tiếp tới cục diện ${fac.name}.`
+    : `${c.name} giữ kín hầu hết mạng lưới cá nhân tại ${loc ? loc.label : fac.name}, chỉ hé lộ rằng nội bộ các siêu cường đang âm thầm tích lũy lực lượng trước kỳ biến động tiếp theo.`;
 
   return {
     id: `enc_${c.id}`,
     num: "ĐỐI THOẠI TƯƠNG TÁC",
     title: `Gặp gỡ ${c.name}`,
-    subtitle: `${c.title} • Độ tin cậy hiện tại: ${affinity}/100`,
+    subtitle: `${c.title || "Chiến Binh Gaiastra"} • Độ tin cậy hiện tại: ${affinity}/100`,
     sector: sectorId,
     isEncounter: true,
     nodes: {
@@ -1418,6 +1589,15 @@ export function buildEncounterScene(charId, gameState) {
             hint: "+12 Độ tin cậy • Mở khóa chia sẻ cá nhân",
             effects: (g) => g.addAffinity(c.id, 12),
             next: "enc_lore"
+          },
+          {
+            label: `🕵️ Hỏi sâu về bí mật phe ${fac.name} & quan hệ ngầm`,
+            hint: "+150 Nghiên cứu • Hé lộ mạng lưới chính trị trong lore",
+            effects: (g) => {
+              g.addAffinity(c.id, 8);
+              g.addRes(g.playerFaction, "research", 150);
+            },
+            next: "enc_secrets"
           },
           {
             label: `🎁 Viện trợ trang bị / Quà chiến thuật cho ${c.name}`,
@@ -1473,10 +1653,23 @@ export function buildEncounterScene(charId, gameState) {
         leftMood: "happy",
         rightMood: "happy",
         speaker: c.id,
-        text: `${c.bio} Kỹ năng sở trường của ta là ${(c.skills || []).join(", ")}. (Độ tin cậy hiện tại: ${Math.min(100, affinity + 12)}/100)`,
+        text: `${c.bio || "Hậu duệ đột biến dòng gen mới."} Kỹ năng sở trường của ta là ${(c.skills || []).join(", ")}. (Độ tin cậy hiện tại: ${Math.min(100, affinity + 12)}/100)`,
         end: {
           title: `Đã gắn kết với ${c.name}`,
           summary: `Độ tin cậy với ${c.name} đã tăng lên. Mối liên hệ tại ${fac.name} được củng cố.`
+        }
+      },
+      enc_secrets: {
+        sector: sectorId,
+        leftChar: playerCharId,
+        rightChar: c.id,
+        leftMood: "tense",
+        rightMood: "secret",
+        speaker: c.id,
+        text: secretText,
+        end: {
+          title: `Giải Mã Tình Báo: ${c.name}`,
+          summary: "+150 Nghiên cứu & +8 Độ tin cậy • Đọc thêm hồ sơ quan hệ tại Mục Lục."
         }
       },
       enc_gift: {

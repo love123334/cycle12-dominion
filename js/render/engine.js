@@ -30,6 +30,7 @@ export class UniverseEngine3D {
     this.vnSectorId = "sylvalon";
 
     this.systemBodies = [];
+    this.nebulaSprites = [];
     this.vfxList = [];
     this.keysDown = new Set();
     this.joystickVec = { x: 0, z: 0 };
@@ -37,6 +38,7 @@ export class UniverseEngine3D {
     this.clock = 0;
 
     this.initThree();
+    this.initProceduralTextures();
     this.createStarfieldAndNebula();
     this.buildGalaxySectors();
     this.buildBreedingHelix();
@@ -45,6 +47,146 @@ export class UniverseEngine3D {
     this.switchMode("vn");
     this.animate = this.animate.bind(this);
     requestAnimationFrame(this.animate);
+  }
+
+  initProceduralTextures() {
+    this.planetTexCache = new Map();
+
+    // Soft glowing circular star sprite (eliminates boxy WebGL square points!)
+    const starCan = document.createElement("canvas");
+    starCan.width = 64;
+    starCan.height = 64;
+    const sctx = starCan.getContext("2d");
+    const sGrad = sctx.createRadialGradient(32, 32, 1, 32, 32, 30);
+    sGrad.addColorStop(0, "rgba(255,255,255,1)");
+    sGrad.addColorStop(0.22, "rgba(255,255,255,0.88)");
+    sGrad.addColorStop(0.55, "rgba(180,225,255,0.28)");
+    sGrad.addColorStop(1, "rgba(0,0,0,0)");
+    sctx.fillStyle = sGrad;
+    sctx.fillRect(0, 0, 64, 64);
+    this.starSpriteTex = new THREE.CanvasTexture(starCan);
+
+    // Volumetric layered nebula puff sprite
+    const nebCan = document.createElement("canvas");
+    nebCan.width = 128;
+    nebCan.height = 128;
+    const nctx = nebCan.getContext("2d");
+    const nGrad = nctx.createRadialGradient(64, 64, 4, 64, 64, 62);
+    nGrad.addColorStop(0, "rgba(255,255,255,0.75)");
+    nGrad.addColorStop(0.35, "rgba(210,235,255,0.34)");
+    nGrad.addColorStop(0.7, "rgba(150,180,255,0.08)");
+    nGrad.addColorStop(1, "rgba(0,0,0,0)");
+    nctx.fillStyle = nGrad;
+    nctx.fillRect(0, 0, 128, 128);
+    this.nebulaTex = new THREE.CanvasTexture(nebCan);
+  }
+
+  createPlanetTexture(kind = "planet", hexColor = "#38bdf8") {
+    const key = `${kind}_${hexColor}`;
+    if (this.planetTexCache.has(key)) return this.planetTexCache.get(key);
+
+    const w = 256;
+    const h = 128;
+    const can = document.createElement("canvas");
+    can.width = w;
+    can.height = h;
+    const ctx = can.getContext("2d");
+    const base = new THREE.Color(hexColor || "#38bdf8");
+    const dark = base.clone().multiplyScalar(0.35).getStyle();
+    const mid = base.getStyle();
+    const bright = base.clone().lerp(new THREE.Color("#ffffff"), 0.45).getStyle();
+
+    ctx.fillStyle = dark;
+    ctx.fillRect(0, 0, w, h);
+
+    if (kind === "megastructure" || kind === "station") {
+      ctx.strokeStyle = bright;
+      ctx.lineWidth = 1.2;
+      for (let x = 0; x < w; x += 16) {
+        ctx.globalAlpha = 0.28;
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+      }
+      for (let y = 0; y < h; y += 16) {
+        ctx.globalAlpha = 0.32;
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+      }
+      ctx.globalAlpha = 0.85;
+      ctx.fillStyle = "#fde047";
+      for (let i = 0; i < 42; i++) {
+        ctx.fillRect((i * 43) % w, (i * 29) % h, 3, 2);
+      }
+    } else if (kind === "gas" || kind === "ringed") {
+      for (let y = 0; y < h; y += 5) {
+        const band = ctx.createLinearGradient(0, y, w, y + 6);
+        band.addColorStop(0, y % 10 === 0 ? mid : dark);
+        band.addColorStop(0.5, bright);
+        band.addColorStop(1, mid);
+        ctx.globalAlpha = 0.45 + (Math.sin(y * 0.14) + 1) * 0.16;
+        ctx.fillStyle = band;
+        ctx.fillRect(0, y, w, 6);
+      }
+      ctx.globalAlpha = 0.42;
+      ctx.fillStyle = bright;
+      ctx.beginPath();
+      ctx.ellipse(w * 0.62, h * 0.56, 22, 10, 0, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      // Terrestrial continents, atmosphere swirl & night city lights
+      for (let i = 0; i < 28; i++) {
+        const px = ((i * 73) % w);
+        const py = ((i * 41) % h);
+        const rad = 10 + (i % 5) * 8;
+        const g = ctx.createRadialGradient(px, py, 2, px, py, rad);
+        g.addColorStop(0, i % 3 === 0 ? bright : mid);
+        g.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.globalAlpha = 0.52;
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.arc(px, py, rad, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.globalAlpha = 0.25;
+      ctx.fillStyle = "#ffffff";
+      for (let i = 0; i < 16; i++) {
+        ctx.fillRect((i * 59) % w, (i * 19 + 8) % h, 38, 3);
+      }
+      ctx.globalAlpha = 0.8;
+      ctx.fillStyle = "#fef08a";
+      for (let i = 0; i < 36; i++) {
+        ctx.fillRect((i * 67) % w, (i * 31) % h, 1.5, 1.5);
+      }
+    }
+    ctx.globalAlpha = 1;
+    const tex = new THREE.CanvasTexture(can);
+    tex.wrapS = THREE.RepeatWrapping;
+    this.planetTexCache.set(key, tex);
+    return tex;
+  }
+
+  createAtmosphereShell(radius, hexColor) {
+    return new THREE.Mesh(
+      new THREE.SphereGeometry(radius * 1.18, 24, 24),
+      new THREE.ShaderMaterial({
+        uniforms: { glowColor: { value: new THREE.Color(hexColor || "#38bdf8") } },
+        vertexShader: `
+          varying vec3 vNormal;
+          void main() {
+            vNormal = normalize(normalMatrix * normal);
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }
+        `,
+        fragmentShader: `
+          uniform vec3 glowColor;
+          varying vec3 vNormal;
+          void main() {
+            float intensity = pow(0.68 - dot(vNormal, vec3(0.0, 0.0, 1.0)), 2.6);
+            gl_FragColor = vec4(glowColor, clamp(intensity * 0.9, 0.0, 0.72));
+          }
+        `,
+        side: THREE.BackSide,
+        blending: THREE.AdditiveBlending,
+        transparent: true,
+        depthWrite: false
+      })
+    );
   }
 
   initThree() {
@@ -58,7 +200,7 @@ export class UniverseEngine3D {
     this.camera.position.set(0, 220, 350);
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
-    this.renderer.setSize(this.width, this.height);
+    this.renderer.setSize(this.width, this.height, false);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.25;
@@ -158,20 +300,48 @@ export class UniverseEngine3D {
     starGeo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
 
     const starMat = new THREE.PointsMaterial({
-      size: 2.0,
+      size: 4.8,
+      map: this.starSpriteTex,
       vertexColors: true,
       transparent: true,
-      opacity: 0.88,
+      opacity: 0.95,
       blending: THREE.AdditiveBlending,
       depthWrite: false
     });
     this.galaxyStars = new THREE.Points(starGeo, starMat);
     this.scene.add(this.galaxyStars);
 
+    // Floating foreground cosmic dust layer for crisp 3D depth parallax
+    const dustCount = 900;
+    const dustGeo = new THREE.BufferGeometry();
+    const dustPos = new Float32Array(dustCount * 3);
+    const dustCol = new Float32Array(dustCount * 3);
+    for (let i = 0; i < dustCount; i++) {
+      dustPos[i * 3] = (Math.random() - 0.5) * 620;
+      dustPos[i * 3 + 1] = (Math.random() - 0.5) * 260;
+      dustPos[i * 3 + 2] = (Math.random() - 0.5) * 620;
+      const c = palette[i % palette.length];
+      dustCol[i * 3] = c.r;
+      dustCol[i * 3 + 1] = c.g;
+      dustCol[i * 3 + 2] = c.b;
+    }
+    dustGeo.setAttribute("position", new THREE.BufferAttribute(dustPos, 3));
+    dustGeo.setAttribute("color", new THREE.BufferAttribute(dustCol, 3));
+    this.cosmicDust = new THREE.Points(dustGeo, new THREE.PointsMaterial({
+      size: 6.5,
+      map: this.starSpriteTex,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.55,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    }));
+    this.scene.add(this.cosmicDust);
+
     // Vòng lưới tọa độ Gaiastra
-    const gridRing1 = new THREE.RingGeometry(120, 121.2, 72);
-    const gridRing2 = new THREE.RingGeometry(240, 241.5, 96);
-    const gridMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8, side: THREE.DoubleSide, transparent: true, opacity: 0.12 });
+    const gridRing1 = new THREE.RingGeometry(120, 121.2, 96);
+    const gridRing2 = new THREE.RingGeometry(240, 241.5, 128);
+    const gridMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8, side: THREE.DoubleSide, transparent: true, opacity: 0.14 });
     [gridRing1, gridRing2].forEach(g => {
       const m = new THREE.Mesh(g, gridMat);
       m.rotation.x = Math.PI / 2;
@@ -180,30 +350,32 @@ export class UniverseEngine3D {
 
     // Vòng xoáy chiều không gian Nadir (phía dưới y = -120)
     const nadirRing = new THREE.Mesh(
-      new THREE.RingGeometry(95, 175, 48),
-      new THREE.MeshBasicMaterial({ color: 0x991b1b, side: THREE.DoubleSide, transparent: true, opacity: 0.14 })
+      new THREE.RingGeometry(95, 185, 64),
+      new THREE.MeshBasicMaterial({ color: 0xdc2626, side: THREE.DoubleSide, transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending })
     );
     nadirRing.rotation.x = Math.PI / 2;
     nadirRing.position.y = -120;
     this.galaxyGroup.add(nadirRing);
 
-    // Đám mây tinh vân phát sáng tạo chiều sâu không gian
-    const nebulaColors = [0x0284c7, 0x7e22ce, 0xf43f5e, 0xfacc15];
-    for (let i = 0; i < 16; i++) {
-      const ang = (i / 16) * Math.PI * 2;
-      const rad = 85 + (i % 4) * 72;
-      const cloud = new THREE.Mesh(
-        new THREE.SphereGeometry(24 + (i % 3) * 14, 14, 14),
-        new THREE.MeshBasicMaterial({
-          color: nebulaColors[i % nebulaColors.length],
-          transparent: true,
-          opacity: 0.045,
-          blending: THREE.AdditiveBlending,
-          depthWrite: false
-        })
-      );
-      cloud.position.set(Math.cos(ang) * rad, (i % 2 === 0 ? 12 : -14), Math.sin(ang) * rad);
-      this.galaxyGroup.add(cloud);
+    // Đám mây tinh vân billboard volumetric tạo chiều sâu không gian thực
+    const nebulaColors = [0x0ea5e9, 0x9333ea, 0xf43f5e, 0xfacc15, 0x2dd4bf];
+    for (let i = 0; i < 36; i++) {
+      const ang = (i / 36) * Math.PI * 2 + (i % 3) * 0.4;
+      const rad = 55 + (i % 6) * 62;
+      const spMat = new THREE.SpriteMaterial({
+        map: this.nebulaTex,
+        color: nebulaColors[i % nebulaColors.length],
+        transparent: true,
+        opacity: 0.16 + (i % 3) * 0.05,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      });
+      const sprite = new THREE.Sprite(spMat);
+      sprite.position.set(Math.cos(ang) * rad, (i % 2 === 0 ? 18 : -24) + ((i * 7) % 24 - 12), Math.sin(ang) * rad);
+      const sz = 95 + (i % 4) * 38;
+      sprite.scale.set(sz, sz, 1);
+      this.galaxyGroup.add(sprite);
+      this.nebulaSprites.push(sprite);
     }
   }
 
@@ -242,17 +414,21 @@ export class UniverseEngine3D {
       this.galaxyGroup.add(mesh);
       this.sectorMeshes.push(mesh);
 
-      // Aura wireframe nhẹ
-      const glowMesh = new THREE.Mesh(
-        new THREE.SphereGeometry(radius * 1.38, 14, 14),
-        new THREE.MeshBasicMaterial({
+      // Luminous sector core beacon & Fresnel atmospheric shell
+      const haloSprite = new THREE.Sprite(
+        new THREE.SpriteMaterial({
+          map: this.starSpriteTex,
           color: new THREE.Color(colHex),
           transparent: true,
-          opacity: sec.capital ? 0.22 : 0.11,
-          wireframe: true,
-          blending: THREE.AdditiveBlending
+          opacity: sec.capital ? 0.85 : 0.58,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false
         })
       );
+      haloSprite.scale.setScalar(radius * (sec.capital ? 4.8 : 3.4));
+      mesh.add(haloSprite);
+
+      const glowMesh = this.createAtmosphereShell(radius * 1.18, colHex);
       mesh.add(glowMesh);
 
       if (sec.kind === "system" || sec.capital) {
@@ -332,20 +508,34 @@ export class UniverseEngine3D {
         starMesh.position.copy(targetPos);
         this.systemGroup.add(starMesh);
 
-        // Corona 2 lớp
-        const corona1 = new THREE.Mesh(
-          new THREE.SphereGeometry(starSize * 1.45, 20, 20),
-          new THREE.MeshBasicMaterial({
-            color: new THREE.Color(sec.star.color || "#ffffff"),
+        // Corona 2 lớp + Flare hào quang rực rỡ
+        const starHex = sec.star.color || "#ffffff";
+        const starFlare = new THREE.Sprite(
+          new THREE.SpriteMaterial({
+            map: this.starSpriteTex,
+            color: new THREE.Color(starHex),
             transparent: true,
-            opacity: 0.28,
+            opacity: 0.92,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false
+          })
+        );
+        starFlare.scale.setScalar(starSize * 5.6);
+        starMesh.add(starFlare);
+
+        const corona1 = new THREE.Mesh(
+          new THREE.SphereGeometry(starSize * 1.38, 24, 24),
+          new THREE.MeshBasicMaterial({
+            color: new THREE.Color(starHex),
+            transparent: true,
+            opacity: 0.26,
             blending: THREE.AdditiveBlending
           })
         );
         const corona2 = new THREE.Mesh(
-          new THREE.SphereGeometry(starSize * 2.1, 16, 16),
+          new THREE.SphereGeometry(starSize * 2.05, 20, 20),
           new THREE.MeshBasicMaterial({
-            color: new THREE.Color(sec.star.color || "#ffffff"),
+            color: new THREE.Color(starHex),
             transparent: true,
             opacity: 0.1,
             blending: THREE.AdditiveBlending
@@ -368,18 +558,24 @@ export class UniverseEngine3D {
         const bSize = Math.max(0.8, (b.size || 1.5) * 1.05);
         const bGeo = b.kind === "asteroid"
           ? new THREE.DodecahedronGeometry(bSize, 0)
-          : (b.kind === "megastructure" ? new THREE.OctahedronGeometry(bSize * 0.95, 0) : new THREE.SphereGeometry(bSize, 24, 24));
+          : (b.kind === "megastructure" ? new THREE.OctahedronGeometry(bSize * 0.95, 0) : new THREE.SphereGeometry(bSize, 32, 32));
 
+        const bColor = b.color || "#38bdf8";
+        const tex = this.createPlanetTexture(b.ring ? "ringed" : b.kind, bColor);
         const bMesh = new THREE.Mesh(
           bGeo,
           new THREE.MeshStandardMaterial({
-            color: new THREE.Color(b.color || "#38bdf8"),
-            emissive: new THREE.Color(b.color || "#38bdf8"),
-            emissiveIntensity: b.kind === "megastructure" ? 0.55 : 0.16,
-            roughness: 0.5,
-            metalness: 0.25
+            map: tex,
+            color: new THREE.Color("#ffffff"),
+            emissive: new THREE.Color(bColor),
+            emissiveIntensity: b.kind === "megastructure" ? 0.45 : 0.14,
+            roughness: b.kind === "megastructure" ? 0.28 : 0.52,
+            metalness: b.kind === "megastructure" ? 0.68 : 0.18
           })
         );
+        if (b.kind !== "asteroid") {
+          bMesh.add(this.createAtmosphereShell(bSize, bColor));
+        }
 
         const initAngle = idx * 1.35 + 0.5;
         bMesh.position.set(
@@ -1154,7 +1350,7 @@ export class UniverseEngine3D {
     this.height = this.container.clientHeight || window.innerHeight;
     this.camera.aspect = this.width / this.height;
     this.camera.updateProjectionMatrix();
-    this.renderer.setSize(this.width, this.height);
+    this.renderer.setSize(this.width, this.height, false);
   }
 
   clearGroup(group) {
@@ -1169,8 +1365,14 @@ export class UniverseEngine3D {
     const dt = 0.016;
     this.clock += dt;
 
-    // 1. Xoay thiên hà & quỹ đạo hành tinh
+    // 1. Xoay thiên hà, bụi sao & quỹ đạo hành tinh
     if (this.galaxyStars) this.galaxyStars.rotation.y += 0.00025;
+    if (this.cosmicDust) this.cosmicDust.rotation.y -= 0.00038;
+    if (this.nebulaSprites && this.nebulaSprites.length) {
+      this.nebulaSprites.forEach((sp, i) => {
+        sp.material.opacity = 0.14 + Math.sin(this.clock * 0.55 + i) * 0.045;
+      });
+    }
 
     if ((this.currentMode === "galaxy" || this.currentMode === "vn" || this.currentMode === "duel" || this.currentMode === "cutscene") && !this.isDragging) {
       if (this.currentMode === "vn" || this.currentMode === "cutscene") {
@@ -1320,13 +1522,29 @@ export class UniverseEngine3D {
     }
 
     const halo = new THREE.Mesh(
-      new THREE.TorusGeometry(8.8, 0.18, 12, 64),
-      new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.45 })
+      new THREE.TorusGeometry(8.8, 0.2, 16, 72),
+      new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.65, blending: THREE.AdditiveBlending })
     );
     halo.rotation.x = Math.PI / 2.2;
+    const haloInner = new THREE.Mesh(
+      new THREE.TorusGeometry(6.6, 0.12, 12, 64),
+      new THREE.MeshBasicMaterial({ color: 0xf472b6, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending })
+    );
+    haloInner.rotation.x = -Math.PI / 2.5;
+    const coreGlow = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: this.starSpriteTex,
+        color: 0xc084fc,
+        transparent: true,
+        opacity: 0.42,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      })
+    );
+    coreGlow.scale.set(22, 26, 1);
     this.dnaHalo = halo;
     this.dnaHelix = helix;
-    this.breedingGroup.add(helix, halo);
+    this.breedingGroup.add(helix, halo, haloInner, coreGlow);
   }
 
   pulseBreedingHelix() {

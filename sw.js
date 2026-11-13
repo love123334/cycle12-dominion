@@ -1,4 +1,4 @@
-const CACHE_NAME = "cycle12-dominion-v6.0";
+const CACHE_NAME = "cycle12-dominion-v8.0";
 
 const PRECACHE_ASSETS = [
   "./",
@@ -16,6 +16,7 @@ const PRECACHE_ASSETS = [
   "./js/game/state.js",
   "./js/game/card_engine.js",
   "./js/game/breeding.js",
+  "./js/game/ai_director.js",
   "./js/render/engine.js",
   "./js/render/portraits.js",
   "./js/render/sfx.js",
@@ -94,6 +95,28 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
+  const reqUrl = new URL(event.request.url);
+  if (reqUrl.pathname.startsWith("/api/")) return;
+
+  const isCodeOrDoc =
+    event.request.mode === "navigate" ||
+    /\.(html|css|js|webmanifest)(\?.*)?$/i.test(reqUrl.pathname);
+
+  if (isCodeOrDoc) {
+    event.respondWith(
+      fetch(event.request)
+        .then((networkRes) => {
+          if (networkRes && networkRes.status === 200 && networkRes.type === "basic") {
+            const copy = networkRes.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+          }
+          return networkRes;
+        })
+        .catch(() => caches.match(event.request))
+    );
+    return;
+  }
+
   event.respondWith(
     caches.match(event.request).then((cached) => {
       const fetchPromise = fetch(event.request)

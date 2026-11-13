@@ -65,6 +65,7 @@
         <select id="vn-chapter-select" aria-label="Chọn chương cốt truyện"></select>
       </div>
       <div class="vn-controls">
+        <button class="btn-accent btn-compact" id="btn-vn-ai-expand" title="Dùng AI viết tiếp nhánh truyện / đối thoại sâu theo góc nhìn của bạn">✨ Mở Rộng AI</button>
         <button class="btn-gold btn-compact" id="btn-play-cutscene" title="Xem phim hoạt cảnh lịch sử vũ trụ">🎬 Sử Thi</button>
         <button class="btn-glass btn-compact" id="btn-open-protagonist" title="Chọn nhân vật bất kỳ làm Nhân vật chính">🎭 Đổi Tướng</button>
         <button class="btn-ghost" id="btn-vn-auto" title="Tự động chuyển thoại">▶ Tự đọc</button>
@@ -98,9 +99,14 @@
         <div class="vn-speaker-row">
           <div class="vn-speaker-badge" id="vn-speaker-badge">NGƯỜI DẪN CHUYỆN</div>
           <div class="vn-speaker-title" id="vn-speaker-title"></div>
+          <span class="badge vn-ai-status" id="vn-ai-status-badge" title="Trạng thái AI Story Director">🤖 AI Sẵn Sàng</span>
         </div>
         <div class="vn-text" id="vn-text">Đang tải cốt truyện...</div>
         <div class="vn-choices" id="vn-choices"></div>
+        <div class="vn-ai-dock hidden" id="vn-ai-dock">
+          <input type="text" id="vn-ai-input" placeholder="Nhập lời thoại hoặc mệnh lệnh tự do (AI nhập vai trả lời theo Lore)..." />
+          <button class="btn-accent btn-compact" id="btn-vn-ai-send">💬 Gửi AI</button>
+        </div>
         <div class="vn-tap-hint" id="vn-tap-hint">Chạm / Click để tiếp tục ▸</div>
       </div>
     </div>
@@ -114,9 +120,9 @@
       <!-- Top Sub-Mode Bar -->
       <div class="duel-subnav">
         <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
-          <button class="btn-glass active" data-dtab="skirmish">⚔️ Đấu Thẻ Bài 3 Hàng</button>
+          <button class="btn-glass active" data-dtab="skirmish">⚔️ Đấu Trường Snap × Yu-Gi-Oh</button>
           <button class="btn-glass" data-dtab="gauntlet">🗼 Tháp Hư Không</button>
-          <button class="btn-glass" data-dtab="deck">🗂️ Bộ Bài Phe (<span id="deck-count-badge">12</span>/12)</button>
+          <button class="btn-glass" data-dtab="deck">🗂️ Bộ Bài Phe (<span id="deck-count-badge">16</span>/16)</button>
         </div>
 
         <div id="duel-skirmish-controls" style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
@@ -130,80 +136,87 @@
         </div>
       </div>
 
-      <!-- 3-ROW VERTICAL CLASH TABLE VIEW -->
-      <div id="duel-battle-view" class="duel-table">
-        <!-- ENEMY ROW 3 (OUTER LEADER SLOT) + CAPTURE TRACKER -->
-        <div class="commander-bar enemy row3-slot">
-          <div style="display:flex; align-items:center; gap:10px; min-width:0;">
-            <img id="duel-e-img" class="vs-avatar" alt="" />
-            <div style="min-width:0;">
-              <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
-                <span class="row-tag row3">HÀNG 3 • THỦ LĨNH</span>
-                <strong id="duel-e-name" style="color:#fb7185; font-size:13.5px;">Overlord</strong>
+      <!-- MARVEL SNAP × YU-GI-OH 3-LANE VERTICAL CLASH ARENA -->
+      <div id="duel-battle-view" class="duel-table snap-ygo-arena">
+        <!-- ENEMY COMMAND WING: ROW 3 LEADER + ROW 2 BREEDING/CAPTIVES -->
+        <div class="arena-wing enemy">
+          <div class="commander-bar enemy row3-slot">
+            <div style="display:flex; align-items:center; gap:9px; min-width:0;">
+              <img id="duel-e-img" class="vs-avatar" alt="" />
+              <div style="min-width:0;">
+                <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                  <span class="row-tag row3">HÀNG 3 • THỦ LĨNH</span>
+                  <strong id="duel-e-name" style="color:#fb7185; font-size:13.5px;">Overlord</strong>
+                </div>
+                <div id="duel-e-meta" class="muted">Western Nadir • Thủ lĩnh phe</div>
               </div>
-              <div id="duel-e-meta" class="muted">Western Nadir • Thủ lĩnh phe</div>
+            </div>
+            <div class="commander-stats">
+              <span class="badge" id="duel-e-row3-cr" style="color:#fda4af;">⚔️ CR: —</span>
+              <span class="badge" id="duel-e-row3-state">🛡️ Hàng 1 Bảo Hộ</span>
+              <span class="badge" id="duel-e-captives" style="color:#f472b6;">🔒 Bắt: 0/3</span>
             </div>
           </div>
-          <div class="commander-stats">
-            <span class="badge" id="duel-e-row3-cr" style="color:#fda4af;">⚔️ CR: —</span>
-            <span class="badge" id="duel-e-row3-state">🛡️ Hàng 1 Bảo Hộ</span>
-            <span class="badge" id="duel-e-captives" style="color:#f472b6;">🔒 Bắt: 0/3</span>
+
+          <div class="duel-row2-bar enemy">
+            <div class="row2-label">
+              <span class="row-tag row2">HÀNG 2 ĐỊCH • BUỒNG LAI &amp; TÙ BINH</span>
+              <span id="duel-e-row2-aura" class="muted">Hỗ trợ: +0 CR</span>
+            </div>
+            <div id="duel-e-row2" class="row2-slots"></div>
           </div>
         </div>
 
-        <!-- ENEMY ROW 2 (CAPTIVES & SUPPORT/BREEDING) -->
-        <div class="duel-row2-bar enemy">
-          <div class="row2-label">
-            <span class="row-tag row2">HÀNG 2 • TÙ BINH / HỖ TRỢ</span>
-            <span id="duel-e-row2-aura" class="muted">Aura: +0 CR</span>
-          </div>
-          <div id="duel-e-row2" class="row2-slots"></div>
+        <!-- 3-COLUMN MARVEL SNAP LOCATIONS × YU-GI-OH MONSTER ZONES -->
+        <div class="snap-lane-arena">
+          <div class="board-row enemy-r1" id="duel-e-row1"></div>
+          <div class="lane-location-row" id="duel-lanes-bar"></div>
+          <div class="board-row player-r1" id="duel-p-row1"></div>
         </div>
 
-        <!-- ENEMY ROW 1 (3 VERTICAL LANES) -->
-        <div class="board-row enemy-r1" id="duel-e-row1"></div>
-
-        <!-- CENTER VERTICAL CLASH STRIP -->
+        <!-- CENTER RESOLVE & LOG BAR -->
         <div class="duel-mid-strip">
-          <span class="badge" id="duel-turn-badge" style="color:var(--gold);">Lượt 1</span>
-          <div id="duel-log-latest" class="duel-log-ticker">Chọn thẻ phe bạn để đặt tối đa 3 lá ra Hàng 1 rồi Đấu Theo Chiều Dọc!</div>
-          <button class="btn-gold btn-compact" id="btn-resolve-clash">⚔️ Đấu Theo Chiều Dọc</button>
+          <span class="badge" id="duel-turn-badge" style="color:var(--gold);">Lượt 1 • Rút +2/lượt</span>
+          <div id="duel-log-latest" class="duel-log-ticker">Chọn thẻ bài ở tay rồi đặt vào 1–3 làn (Nam thắng Nữ → đưa sang Hàng 2 &amp; tự lai cuối lượt + rút 2 lá)!</div>
+          <button class="btn-gold btn-compact" id="btn-resolve-clash">⚔️ Giao Chiến Chiều Dọc</button>
         </div>
 
-        <!-- PLAYER ROW 1 (3 VERTICAL LANES) -->
-        <div class="board-row player-r1" id="duel-p-row1"></div>
-
-        <!-- PLAYER ROW 2 (CAPTIVES & FIELD BREEDING) -->
+        <!-- PLAYER ROW 2: AUTO-BREEDING CHAMBERS & CAPTIVES -->
         <div class="duel-row2-bar player">
           <div class="row2-label">
-            <span class="row-tag row2">HÀNG 2 • BẮT GIỮ &amp; LAI TẠO</span>
+            <span class="row-tag row2">HÀNG 2 • PHÒNG LAI TỰ ĐỘNG &amp; TÙ BINH</span>
             <span id="duel-p-row2-aura" class="muted">Hỗ trợ Hàng 1: +0 CR</span>
           </div>
           <div id="duel-p-row2" class="row2-slots"></div>
         </div>
 
-        <!-- PLAYER ROW 3 (OUTER REPRESENTATIVE SLOT) -->
-        <div class="commander-bar player row3-slot">
-          <div style="display:flex; align-items:center; gap:10px; min-width:0;">
-            <img id="duel-p-img" class="vs-avatar" alt="" />
-            <div style="min-width:0;">
-              <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
-                <span class="row-tag row3">HÀNG 3 • ĐẠI DIỆN</span>
-                <strong id="duel-p-name" style="color:#38bdf8; font-size:13.5px;">Arisia Grok</strong>
+        <!-- PLAYER BOTTOM DOCK: ROW 3 LEADER + INSPECTOR + HAND -->
+        <div class="arena-wing player">
+          <div class="commander-bar player row3-slot">
+            <div style="display:flex; align-items:center; gap:9px; min-width:0;">
+              <img id="duel-p-img" class="vs-avatar" alt="" />
+              <div style="min-width:0;">
+                <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                  <span class="row-tag row3">HÀNG 3 • ĐẠI DIỆN</span>
+                  <strong id="duel-p-name" style="color:#38bdf8; font-size:13.5px;">Arisia Grok</strong>
+                </div>
+                <div id="duel-p-meta" class="muted">Sylvarian • Độc quyền phe</div>
               </div>
-              <div id="duel-p-meta" class="muted">Sylvarian • Độc quyền phe</div>
+            </div>
+            <div class="commander-stats">
+              <span class="badge" id="duel-p-row3-cr" style="color:#7dd3fc;">⚔️ CR: —</span>
+              <span class="badge" id="duel-p-row3-state">🛡️ Hàng 1 Bảo Hộ</span>
+              <span class="badge" id="duel-p-captives" style="color:#4ade80;">🔒 Bắt: 0/3</span>
+              <span class="badge" id="duel-p-deck-count" style="color:#fde68a;">📚 Bộ bài: 12 (+2/lượt)</span>
             </div>
           </div>
-          <div class="commander-stats">
-            <span class="badge" id="duel-p-row3-cr" style="color:#7dd3fc;">⚔️ CR: —</span>
-            <span class="badge" id="duel-p-row3-state">🛡️ Hàng 1 Bảo Hộ</span>
-            <span class="badge" id="duel-p-captives" style="color:#4ade80;">🔒 Bắt: 0/3</span>
-            <span class="badge" id="duel-p-deck-count">📚 Bộ bài: 7</span>
-          </div>
-        </div>
 
-        <!-- PLAYER HAND -->
-        <div class="duel-hand-row" id="duel-p-hand"></div>
+          <div id="duel-card-inspector" class="card-inspector-bar">
+            <span class="muted">🔍 Bấm hoặc chạm vào bất kỳ thẻ bài nào để xem rõ CR, Loài, Phe, ♂/♀, Nội tại Hàng 1 (Chiến đấu) &amp; Hàng 2 (Sinh sản).</span>
+          </div>
+
+          <div class="duel-hand-row" id="duel-p-hand"></div>
+        </div>
       </div>
 
       <!-- FACTION-LOCKED DECK BUILDER VIEW -->
@@ -212,13 +225,13 @@
           📜 Luật Phe Phái: Chỉ sử dụng thẻ cùng phe với Thủ lĩnh đại diện.
         </div>
         <div class="deck-toolbar">
-          <strong style="color:var(--gold);">🗂️ Bộ Bài Phe Đang Dùng (12 lá — Bấm thẻ để gỡ)</strong>
+          <strong style="color:var(--gold);">🗂️ Bộ Bài Phe Đang Dùng (16 lá — Bấm thẻ để gỡ)</strong>
           <button class="btn-accent btn-compact" id="btn-auto-deck">✨ Tự Xếp Đội Hình Phe</button>
         </div>
         <div id="deck-active-list" class="deck-active-strip"></div>
 
         <div class="deck-toolbar" style="margin-top:8px;">
-          <strong style="color:var(--primary);">📚 Kho Thẻ Thuộc Phe (Nhân Vật + Quân Dự Bị + Hậu Duệ Lai Tạo)</strong>
+          <strong style="color:var(--primary);">📚 Kho Thẻ Thuộc Phe (Nhân Vật + Quân Dự Bị + Hậu Duệ Token Lai Tạo)</strong>
           <input type="text" id="deck-search-input" placeholder="Tìm tên thẻ, loài, hiệu ứng Hàng 1/2..." style="max-width:250px;" />
         </div>
         <div id="deck-pool-grid" class="deck-pool-grid"></div>

@@ -20,8 +20,15 @@ import { buildHistoryCutscenes } from "./data/cutscenes.js";
 import { GameState, ACHIEVEMENTS } from "./game/state.js";
 import { CardBattleEngine } from "./game/card_engine.js";
 import { CATALYSTS, previewBreeding, executeBreeding, resolveGeneticSubject } from "./game/breeding.js";
+import {
+  detectAIStatus,
+  getStoredAIKeys,
+  setStoredAIKeys,
+  askAICharacterReply,
+  askAIStoryExpand
+} from "./game/ai_director.js";
 import { UniverseEngine3D } from "./render/engine.js";
-import { getPortraitUrl, getHybridPortraitUrl, moodLabel } from "./render/portraits.js";
+import { getPortraitUrl, getHybridPortraitUrl, getCustomPortrait, setCustomPortrait, clearPortraitCache, moodLabel } from "./render/portraits.js";
 import { SFX } from "./render/sfx.js";
 
 const ESC = (s) => String(s ?? "")
@@ -56,7 +63,11 @@ class Cycle12App {
 
     // Card Game runtime
     this.duelEngine = null;
+    this.inspectedDuelCard = null;
     this.duelContext = { kind: "skirmish", enemyId: "overlord", floor: 0, carryHp: null };
+    this.aiChatHistory = [];
+    this.aiBusy = false;
+    detectAIStatus().then((st) => this.refreshAIStatusBadge(st));
 
     // Cutscene runtime
     this.cutsceneSlides = [];
@@ -508,9 +519,41 @@ class Cycle12App {
     });
 
     document.getElementById("vn-dialogue-box").addEventListener("click", (e) => {
-      if (e.target.closest("button")) return;
+      if (e.target.closest("button, input, select, #vn-ai-dock")) return;
       this.advanceVN();
     });
+
+    document.getElementById("btn-vn-ai-expand")?.addEventListener("click", () => {
+      SFX.choice();
+      this.triggerAIStoryExpand();
+    });
+
+    const aiInput = document.getElementById("vn-ai-input");
+    document.getElementById("btn-vn-ai-send")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.sendAIDialogueMessage();
+    });
+    aiInput?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        this.sendAIDialogueMessage();
+      }
+    });
+  }
+
+  refreshAIStatusBadge(st = null) {
+    const el = document.getElementById("vn-ai-status-badge");
+    if (!el) return;
+    if (!st) {
+      el.textContent = "🤖 AI Story";
+      return;
+    }
+    const provs = [];
+    if (st.proxyAvailable?.groq || st.byokAvailable?.groq) provs.push("Groq");
+    if (st.proxyAvailable?.deepseek || st.byokAvailable?.deepseek) provs.push("DeepSeek");
+    if (st.proxyAvailable?.openrouter || st.byokAvailable?.openrouter) provs.push("OpenRouter");
+    el.textContent = provs.length ? `🤖 AI Ready (${provs[0]})` : "🤖 AI (BYOK)";
+    el.style.color = provs.length ? "#4ade80" : "#94a3b8";
   }
 
   populateChapterSelect() {
@@ -553,6 +596,8 @@ class Cycle12App {
     const script = buildEncounterScene(charId, this.game);
     if (!script) return;
     this.activeEncounterScript = script;
+    this.aiChatHistory = [];
+    this.aiReturnNodeId = "start";
     this.game.vn.currentNodeId = "start";
     this.lastAppliedNodeKey = null;
     this.populateChapterSelect();
@@ -565,6 +610,12 @@ class Cycle12App {
 
     const { script, isEncounter, nodeId, node } = this.getActiveVNContext();
     if (!node) return;
+
+    const aiDock = document.getElementById("vn-ai-dock");
+    if (aiDock) {
+      const showDock = Boolean(isEncounter || node.allowAIInput || nodeId.startsWith("ai_"));
+      aiDock.classList.toggle("hidden", !showDock);
+    }
 
     this.populateChapterSelect();
 
@@ -780,6 +831,226 @@ class Cycle12App {
     if (this.vnAutoPlay) this.scheduleVNAutoAdvance();
   }
 
+  async triggerAIStoryExpand() {
+    if (this.aiBusy) return;
+    const { script, isEncounter, nodeId, node } = this.getActiveVNContext();
+    if (!script || !node) return;
+
+    const btn = document.getElementById("btn-vn-ai-expand");
+    const badge = document.getElementById("vn-ai-status-badge");
+    const prevBtnText = btn ? btn.textContent : "✨ Mở Rộng AI";
+    this.aiBusy = true;
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "⏳ AI Đang Viết...";
+    }
+    if (badge) {
+      badge.textContent = "⏳ AI Đang Sáng Tác...";
+      badge.style.color = "#facc15";
+    }
+
+    try {
+      const baseReturnId = nodeId.startsWith("ai_") ? (this.aiReturnNodeId || "start") : nodeId;
+      this.aiReturnNodeId = baseReturnId;
+
+      if (isEncounter && script.id.startsWith("enc_")) {
+        const npcId = script.id.slice(4);
+        const res = await askAICharacterReply({
+          gameState: this.game,
+          npcId,
+          userMessage: "",
+          history: this.aiChatHistory || []
+        });
+        this.presentAICharacterNode(script, npcId, node, baseReturnId, res);
+      } else {
+        const res = await askAIStoryExpand({
+          gameState: this.game,
+          chapter: script,
+          currentNodeText: this.fullVnText || (typeof node.text === "function" ? node.text(this.game) : String(node.text || ""))
+        });
+
+        const resumeNodeId = node.next && script.nodes[node.next] ? node.next : baseReturnId;
+        const playerId = resolveStoryChar("PLAYER", this.game);
+        const resolvedSpeaker = res.speakerId === "narrator"
+          ? "narrator"
+          : (CHAR_BY_ID[res.speakerId] || (this.game.hybrids || []).find((h) => h.id === res.speakerId)
+            ? res.speakerId
+            : (node.speaker || "narrator"));
+        const leftChar = node.leftChar || "PLAYER";
+        const rightChar = resolvedSpeaker !== "narrator" && resolvedSpeaker !== playerId
+          ? resolvedSpeaker
+          : node.rightChar;
+
+        const aiExpId = `ai_exp_${Date.now().toString(36)}`;
+        const expChoices = (res.choices || []).map((ch, idx) => {
+          const outId = `${aiExpId}_out_${idx}`;
+          script.nodes[outId] = {
+            sector: node.sector || script.sector || "sylvalon",
+            leftChar,
+            rightChar,
+            leftMood: "happy",
+            rightMood: res.speakerMood || "tense",
+            speaker: resolvedSpeaker,
+            allowAIInput: true,
+            text: `${ch.outcome || "Cục diện ngân hà xoay chuyển theo quyết định chiến lược của bạn."}`,
+            effects: (g) => {
+              if (ch.creditsDelta) g.addRes(g.playerFaction, "credits", Number(ch.creditsDelta));
+              if (ch.tensionDelta) g.tension = Math.max(5, Math.min(100, (g.tension || 45) + Number(ch.tensionDelta)));
+              if (ch.affinityDelta && rightChar) g.addAffinity(resolveStoryChar(rightChar, g), Number(ch.affinityDelta));
+            },
+            next: resumeNodeId
+          };
+          const bonusBits = [];
+          if (ch.creditsDelta) bonusBits.push(`+${ch.creditsDelta} CR$`);
+          if (ch.affinityDelta) bonusBits.push(`+${ch.affinityDelta} Tin cậy`);
+          return {
+            label: `✨ ${ch.label || `Phương án ${idx + 1}`}`,
+            hint: bonusBits.length ? `${bonusBits.join(" • ")} • Nhánh AI Mở Rộng` : "Nhánh cốt truyện AI Mở Rộng",
+            next: outId
+          };
+        });
+
+        expChoices.push({
+          label: "↩️ Quay lại mạch truyện chính",
+          hint: "Tiếp tục diễn biến gốc của chương",
+          next: resumeNodeId
+        });
+
+        script.nodes[aiExpId] = {
+          sector: node.sector || script.sector || "sylvalon",
+          leftChar,
+          rightChar,
+          leftMood: "tense",
+          rightMood: res.speakerMood || "tense",
+          speaker: resolvedSpeaker,
+          allowAIInput: true,
+          text: `${res.sceneText}\n\n[✨ AI Story Director • ${res.provider?.toUpperCase() || "AI"}${res.model ? ` / ${res.model}` : ""}]`,
+          choices: expChoices
+        };
+
+        this.game.vn.currentNodeId = aiExpId;
+        this.renderVNNode();
+        this.finishTypingAndShowControls(script.nodes[aiExpId], isEncounter, script);
+      }
+
+      detectAIStatus().then((st) => this.refreshAIStatusBadge(st));
+    } catch (err) {
+      SFX.alert();
+      this.showToast("⚠️ AI Story Tạm Gián Đoạn", err.message || "Không thể kết nối AI. Hãy kiểm tra API Key trong Mục Lục → Hệ Thống.");
+      detectAIStatus(true).then((st) => this.refreshAIStatusBadge(st));
+    } finally {
+      this.aiBusy = false;
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = prevBtnText;
+      }
+    }
+  }
+
+  presentAICharacterNode(script, npcId, sourceNode, returnNodeId, res) {
+    if (res.creditsDelta) this.game.addRes(this.game.playerFaction, "credits", res.creditsDelta);
+    if (res.tensionDelta) this.game.tension = Math.max(5, Math.min(100, (this.game.tension || 45) + res.tensionDelta));
+    if (res.affinityDelta) this.game.addAffinity(npcId, res.affinityDelta);
+    this.refreshTopResources();
+
+    const playerId = resolveStoryChar("PLAYER", this.game);
+    const rightChar = npcId !== playerId ? npcId : sourceNode?.rightChar;
+    const replyId = `ai_chat_${Date.now().toString(36)}`;
+
+    const choices = (res.followUpPrompts || []).slice(0, 2).map((promptText) => ({
+      label: `💬 "${promptText}"`,
+      hint: "Gửi câu hỏi/phản hồi này tới AI nhập vai",
+      onSelect: () => this.sendAIDialogueMessage(promptText)
+    }));
+    choices.push({
+      label: "↩️ Quay lại các lựa chọn gặp gỡ",
+      hint: "Đổi sang hành động chuẩn / Tặng quà / Thách đấu / Kết thúc",
+      next: returnNodeId
+    });
+
+    const statNotes = [];
+    if (res.affinityDelta) statNotes.push(`${res.affinityDelta > 0 ? "+" : ""}${res.affinityDelta} Độ tin cậy`);
+    if (res.creditsDelta) statNotes.push(`+${res.creditsDelta} CR$`);
+
+    script.nodes[replyId] = {
+      sector: sourceNode?.sector || script.sector || "sylvalon",
+      leftChar: sourceNode?.leftChar || "PLAYER",
+      rightChar,
+      leftMood: "neutral",
+      rightMood: res.mood || "tense",
+      speaker: npcId,
+      allowAIInput: true,
+      text: `${res.narration ? `[${res.narration}]\n\n` : ""}${res.reply}\n\n[🤖 ${res.provider?.toUpperCase() || "AI"}${statNotes.length ? ` • ${statNotes.join(" • ")}` : ""}]`,
+      choices
+    };
+
+    this.game.vn.currentNodeId = replyId;
+    this.renderVNNode();
+    this.finishTypingAndShowControls(script.nodes[replyId], Boolean(this.activeEncounterScript), script);
+  }
+
+  async sendAIDialogueMessage(presetMsg = null) {
+    if (this.aiBusy) return;
+    const input = document.getElementById("vn-ai-input");
+    const sendBtn = document.getElementById("btn-vn-ai-send");
+    const msg = typeof presetMsg === "string" ? presetMsg.trim() : (input ? input.value.trim() : "");
+    if (!msg) return;
+
+    const { script, isEncounter, nodeId, node } = this.getActiveVNContext();
+    if (!script || !node) return;
+
+    const playerId = resolveStoryChar("PLAYER", this.game);
+    let npcId = isEncounter && script.id.startsWith("enc_") ? script.id.slice(4) : null;
+    if (!npcId) {
+      const rightResolved = node.rightChar ? resolveStoryChar(node.rightChar, this.game) : null;
+      const leftResolved = node.leftChar ? resolveStoryChar(node.leftChar, this.game) : null;
+      const spResolved = node.speaker && node.speaker !== "narrator" ? resolveStoryChar(node.speaker, this.game) : null;
+      npcId = [rightResolved, spResolved, leftResolved].find((id) => id && id !== playerId) || playerId;
+    }
+
+    const badge = document.getElementById("vn-ai-status-badge");
+    const prevSend = sendBtn ? sendBtn.textContent : "💬 Gửi AI";
+    this.aiBusy = true;
+    if (sendBtn) {
+      sendBtn.disabled = true;
+      sendBtn.textContent = "⏳...";
+    }
+    if (badge) {
+      badge.textContent = "⏳ AI đang nhập vai...";
+      badge.style.color = "#facc15";
+    }
+
+    try {
+      this.aiChatHistory = this.aiChatHistory || [];
+      const res = await askAICharacterReply({
+        gameState: this.game,
+        npcId,
+        userMessage: msg,
+        history: this.aiChatHistory
+      });
+      this.aiChatHistory.push({ role: "user", content: msg });
+      this.aiChatHistory.push({ role: "assistant", content: res.reply });
+      if (this.aiChatHistory.length > 12) this.aiChatHistory = this.aiChatHistory.slice(-12);
+
+      if (input && typeof presetMsg !== "string") input.value = "";
+      const baseReturnId = nodeId.startsWith("ai_") ? (this.aiReturnNodeId || "start") : nodeId;
+      this.aiReturnNodeId = baseReturnId;
+
+      this.presentAICharacterNode(script, npcId, node, baseReturnId, res);
+      detectAIStatus().then((st) => this.refreshAIStatusBadge(st));
+    } catch (err) {
+      SFX.alert();
+      this.showToast("⚠️ Lỗi AI Đối Thoại", err.message || "Kiểm tra API Key trong Mục Lục → Hệ Thống.");
+      detectAIStatus(true).then((st) => this.refreshAIStatusBadge(st));
+    } finally {
+      this.aiBusy = false;
+      if (sendBtn) {
+        sendBtn.disabled = false;
+        sendBtn.textContent = prevSend;
+      }
+    }
+  }
+
   scheduleVNAutoAdvance() {
     clearTimeout(this.vnAutoTimer);
     this.vnAutoTimer = setTimeout(() => {
@@ -806,6 +1077,10 @@ class Cycle12App {
   }
 
   selectVNChoice(choice, script, isEncounter) {
+    if (typeof choice.onSelect === "function") {
+      choice.onSelect();
+      return;
+    }
     if (typeof choice.effects === "function") {
       choice.effects(this.game);
       this.refreshTopResources();
@@ -892,7 +1167,15 @@ class Cycle12App {
         this.showToast("Chưa thể giao chiến", res.reason || "Đặt thẻ ra Hàng 1 trước khi đấu!");
         return;
       }
-      SFX.cardHit();
+      if (res.newTokens && res.newTokens.length) {
+        SFX.breed();
+        this.showToast(
+          "🧬 Lai Tạo Cuối Lượt!",
+          `${res.newTokens.map((t) => `${t.name} (CR ${t.cr})`).join(", ")} vừa xuất hiện ngay sau lượt!`
+        );
+      } else {
+        SFX.cardHit();
+      }
       this.renderDuelUI();
       if (this.duelEngine.over) this.showDuelOutcome();
     });
@@ -903,7 +1186,7 @@ class Cycle12App {
       this.game.saveToSlot("auto");
       this.renderDeckBuilder();
       const protag = this.game.getProtagonist();
-      this.showToast("✨ Đã xếp Bộ Bài Phe", `12 lá thuộc phe ${this.game.facName(protag.fac)} theo Thủ lĩnh ${protag.name}.`);
+      this.showToast("✨ Đã xếp Bộ Bài Phe", `16 lá thuộc phe ${this.game.facName(protag.fac)} theo Thủ lĩnh ${protag.name}.`);
     });
 
     document.getElementById("deck-search-input").addEventListener("input", () => this.renderDeckBuilder());
@@ -1009,6 +1292,38 @@ class Cycle12App {
     });
   }
 
+  inspectDuelCard(card, evalCR = null) {
+    const bar = document.getElementById("duel-card-inspector");
+    if (!bar) return;
+    if (!card) {
+      bar.innerHTML = `<span class="muted">🔍 Chạm hoặc di chuột vào bất kỳ thẻ bài nào để xem rõ CR, Loài, Phe, ♂/♀, Nội tại Hàng 1 (Chiến đấu) &amp; Hàng 2 (Sinh sản).</span>`;
+      return;
+    }
+    this.inspectedDuelCard = card;
+    const isM = card.gender === "Male";
+    const facLabel = FACTIONS[card.fac]?.name || card.fac;
+    const crStr = evalCR ? `Tổng CR ${evalCR.total} (Gốc ${card.cr})` : `CR ${card.cr}`;
+    const r2 = card.row2Effect || {};
+    const penWarn = r2.crPenaltyPct ? ` • <span style="color:#fda4af;">Debuff -${r2.crPenaltyPct}% CR Token</span>` : "";
+    const sireLine = card.breedingActive && card.sireCard
+      ? ` • <span style="color:#f472b6;">Đang lai cùng ♂ ${ESC(card.sireCard.name)} (${this.duelEngine?.getEffectiveBreedChance(card) || r2.breedChance || 50}%/lượt, đã sinh ${card.spawnCount || 0})</span>`
+      : "";
+    bar.innerHTML = `
+      <img src="${getCardPortrait(card)}" style="width:36px;height:40px;border-radius:7px;object-fit:cover;object-position:top center;flex-shrink:0;" alt="" />
+      <div style="flex:1;min-width:0;line-height:1.35;">
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          <strong style="color:#fff;">${ESC(card.name)}</strong>
+          <span class="gender-pill ${isM ? "male" : "female"}">${isM ? "♂ Nam" : "♀ Nữ"}</span>
+          <span style="color:#fbbf24;font-weight:800;">⚔️ ${crStr}</span>
+          <span class="muted">${ESC(card.species)} • ${ESC(facLabel)}</span>
+          ${card.isToken ? `<span class="badge" style="color:#f472b6;border-color:rgba(244,114,182,0.5);">🪙 TOKEN LAI</span>` : ""}
+        </div>
+        <div style="font-size:10.5px;color:#7dd3fc;">⚔️ Hàng 1: ${ESC(card.row1Effect?.desc || "Đánh trực tiếp theo tổng CR")}</div>
+        <div style="font-size:10.5px;color:#fbcfe8;">🧬 Hàng 2: ${ESC(r2.desc || "Hỗ trợ +60 CR")}${penWarn}${sireLine}</div>
+      </div>
+    `;
+  }
+
   renderDuelUI() {
     const eng = this.duelEngine;
     if (!eng) return;
@@ -1021,93 +1336,118 @@ class Cycle12App {
     document.getElementById("deck-count-badge").textContent = validateDeckForLeader(this.game.customDeck || [], this.game.protagonistId, this.game.hybrids).length;
 
     // Row 3 Outer Leader Slots
-    const eRow3Eval = eng.evalCardCombatCR(eLeader, eng.getRow1Cards("player")[0] || null, "enemy");
-    const pRow3Eval = eng.evalCardCombatCR(pLeader, eng.getRow1Cards("enemy")[0] || null, "player");
+    const eRow3Eval = eng.evalCardCombatCR(eLeader, eng.getRow1Cards("player")[0] || null, "enemy", { attackingRow3: true });
+    const pRow3Eval = eng.evalCardCombatCR(pLeader, eng.getRow1Cards("enemy")[0] || null, "player", { attackingRow3: true });
     const eFrontCount = eng.getRow1Cards("enemy").length;
     const pFrontCount = eng.getRow1Cards("player").length;
 
+    const eWingBar = document.querySelector(".commander-bar.enemy.row3-slot");
+    const pWingBar = document.querySelector(".commander-bar.player.row3-slot");
+    eWingBar?.classList.toggle("exposed", eFrontCount === 0);
+    pWingBar?.classList.toggle("exposed", pFrontCount === 0);
+
     document.getElementById("duel-e-img").src = getCardPortrait(eLeader);
-    document.getElementById("duel-e-name").textContent = eLeader.name;
-    document.getElementById("duel-e-meta").textContent = `${eLeader.species} • Phe ${eFacName} • ${eLeader.row1Effect?.tag || ""}`;
+    document.getElementById("duel-e-name").innerHTML = `${ESC(eLeader.name)} <span class="gender-pill ${eLeader.gender === "Male" ? "male" : "female"}">${eLeader.gender === "Male" ? "♂" : "♀"}</span>`;
+    document.getElementById("duel-e-meta").textContent = `${eLeader.species} • Phe ${eFacName} • H1: ${eLeader.row1Effect?.tag || ""}`;
     document.getElementById("duel-e-row3-cr").textContent = `⚔️ CR Hàng 3: ${eRow3Eval.total} (Gốc ${eLeader.cr})`;
-    document.getElementById("duel-e-row3-state").textContent = eFrontCount > 0 ? `🛡️ Bảo Hộ (${eFrontCount} lá H1)` : "⚡ LỘ DIỆN — Có thể đánh Hàng 3!";
+    document.getElementById("duel-e-row3-state").textContent = eFrontCount > 0 ? `🛡️ Hàng 1 Bảo Hộ (${eFrontCount} lá)` : "⚡ LỘ DIỆN — Tổng CR H1 đánh thẳng Hàng 3!";
     document.getElementById("duel-e-captives").textContent = `🔒 Bắt: ${eng.enemy.row2.length}/3`;
 
     document.getElementById("duel-p-img").src = getCardPortrait(pLeader);
-    document.getElementById("duel-p-name").textContent = pLeader.name;
-    document.getElementById("duel-p-meta").textContent = `${pLeader.species} • Phe ${pFacName} • ${pLeader.row1Effect?.desc || ""}`;
+    document.getElementById("duel-p-name").innerHTML = `${ESC(pLeader.name)} <span class="gender-pill ${pLeader.gender === "Male" ? "male" : "female"}">${pLeader.gender === "Male" ? "♂" : "♀"}</span>`;
+    document.getElementById("duel-p-meta").textContent = `${pLeader.species} • Phe ${pFacName} • H1: ${pLeader.row1Effect?.tag || ""}`;
     document.getElementById("duel-p-row3-cr").textContent = `⚔️ CR Hàng 3: ${pRow3Eval.total} (Gốc ${pLeader.cr})`;
     document.getElementById("duel-p-row3-state").textContent = pFrontCount > 0 ? `🛡️ Hàng 1 Bảo Hộ (${pFrontCount} lá)` : "⚠️ HÀNG 1 TRỐNG — Hàng 3 bị uy hiếp!";
     document.getElementById("duel-p-captives").textContent = `🔒 Bắt: ${eng.player.row2.length}/3`;
-    document.getElementById("duel-p-deck-count").textContent = `📚 Bộ bài: ${eng.player.deck.length}`;
+    document.getElementById("duel-p-deck-count").textContent = `📚 Bộ bài: ${eng.player.deck.length} (+2/lượt)`;
 
-    document.getElementById("duel-turn-badge").textContent = `${eng.modeLabel || "Đấu Thẻ 3 Hàng"} • Lượt ${eng.turn}`;
+    document.getElementById("duel-turn-badge").textContent = `${eng.modeLabel || "Snap × YGO"} • Lượt ${eng.turn}`;
     const lastLog = eng.log[eng.log.length - 1];
     document.getElementById("duel-log-latest").textContent = lastLog || "";
 
-    // Row 2 Captives & Support/Breeding Zones
-    document.getElementById("duel-e-row2-aura").textContent = `Aura Hàng 1 Địch: +${eng.getRow2SupportAura("enemy")} CR`;
-    const eRow2El = document.getElementById("duel-e-row2");
-    eRow2El.innerHTML = eng.enemy.row2.length
-      ? eng.enemy.row2.map((c) => `
-          <div class="row2-captive-chip" title="${ESC(c.row2Effect?.desc || "")}">
+    // Row 2 Captives & Automatic Male×Female Breeding Zones
+    const renderRow2Chips = (sideKey, list, emptyMsg, isEnemy) => {
+      if (!list.length) return `<span class="muted" style="font-size:11px;">${emptyMsg}</span>`;
+      return list.map((c, idx) => {
+        const isBreeding = Boolean(c.breedingActive);
+        const effPct = isBreeding ? eng.getEffectiveBreedChance(c) : 0;
+        const r2 = c.row2Effect || {};
+        const penBadge = r2.crPenaltyPct ? ` • <span style="color:#fda4af;">-${r2.crPenaltyPct}% CR</span>` : "";
+        const subText = isBreeding
+          ? `🔥 Lai ${effPct}%/lượt (♂ ${ESC(c.sireCard?.name || "Nam")}) • 🪙x${c.spawnCount || 0}${penBadge}`
+          : `🔒 Tù binh • H2: +${r2.crAura || 60} CR (${ESC(r2.tag || "")})`;
+        return `
+          <div class="row2-captive-chip ${isBreeding ? "breeding-chamber" : ""}"
+               data-inspect-side="${sideKey}" data-inspect-zone="row2" data-inspect-idx="${idx}"
+               title="${ESC(r2.desc || "")}">
             <img src="${getCardPortrait(c)}" alt="${ESC(c.name)}" />
             <div>
-              <strong>${ESC(c.name)}</strong> <span class="muted">(${ESC(c.species)})</span>
-              <div style="font-size:10px;color:#fda4af;">H2: +${c.row2Effect?.crAura || 60} CR • Khóa Hàng 1</div>
+              <strong>${ESC(c.name)}</strong>
+              <span class="gender-pill ${c.gender === "Male" ? "male" : "female"}">${c.gender === "Male" ? "♂" : "♀"}</span>
+              <span class="muted">(${ESC(c.species)})</span>
+              <div style="font-size:10px;color:${isBreeding ? "#f9a8d4" : (isEnemy ? "#fda4af" : "#bae6fd")};">${subText}</div>
             </div>
           </div>
-        `).join("")
-      : `<span class="muted" style="font-size:11.5px;">Chưa có tù binh nào bị bắt (Mất 3 lá = Thua!)</span>`;
+        `;
+      }).join("");
+    };
+
+    document.getElementById("duel-e-row2-aura").textContent = `Hỗ trợ Địch: +${eng.getRow2SupportAura("enemy")} CR`;
+    const eRow2El = document.getElementById("duel-e-row2");
+    eRow2El.innerHTML = renderRow2Chips("enemy", eng.enemy.row2, "Chưa bắt được thẻ nào (Địch bắt 3 lá = Bạn thua!)", true);
 
     document.getElementById("duel-p-row2-aura").textContent = `Hỗ trợ Hàng 1: +${eng.getRow2SupportAura("player")} CR`;
     const pRow2El = document.getElementById("duel-p-row2");
-    pRow2El.innerHTML = eng.player.row2.length
-      ? eng.player.row2.map((c, idx) => {
-          const canBreed = !c.bredUsed && !eng.player.fieldBreedUsedThisTurn && !eng.over;
-          return `
-            <div class="row2-captive-chip" title="${ESC(c.row2Effect?.desc || "")}">
-              <img src="${getCardPortrait(c)}" alt="${ESC(c.name)}" />
-              <div>
-                <strong>${ESC(c.name)}</strong> <span class="muted">(${ESC(c.species)})</span>
-                <div style="font-size:10px;color:#fbcfe8;">H2: +${c.row2Effect?.crAura || 60} CR • ${ESC(c.row2Effect?.tag || "Lai Gen")}</div>
-              </div>
-              ${canBreed
-                ? `<button class="btn-accent btn-compact" data-breed-row2="${idx}" style="font-size:10.5px;padding:4px 8px;">🧬 Lai Tại Trận</button>`
-                : `<span class="badge" style="font-size:9.5px;">${c.bredUsed ? "✓ Đã Lai" : "⏳ Chờ lượt"}</span>`}
-            </div>
-          `;
-        }).join("")
-      : `<span class="muted" style="font-size:11.5px;">Hàng 2 trống — Thắng giao chiến chiều dọc để bắt thẻ địch vào đây (3 lá = Thắng!)</span>`;
+    pRow2El.innerHTML = renderRow2Chips("player", eng.player.row2, "Trống — Thẻ Nam thắng thẻ Nữ sẽ đưa vào đây lai tự động mỗi cuối lượt!", false);
 
-    pRow2El.querySelectorAll("[data-breed-row2]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const res = eng.breedFromRow2(Number(btn.dataset.breedRow2));
-        if (res.ok) {
-          SFX.breed();
-          this.renderDuelUI();
-          this.showToast("🧬 Lai Tạo Tại Trận!", `Sinh ra thẻ ${res.hybridCard.name} (CR ${res.hybridCard.cr}, phe ${pFacName}) lên tay bài!`);
-        } else {
-          SFX.alert();
-          this.showToast("Không thể Lai Tại Trận", res.reason);
-        }
-      });
-    });
+    // Marvel Snap 3 Cosmic Lane Locations + Live Power Comparison
+    const lanesEl = document.getElementById("duel-lanes-bar");
+    if (lanesEl) {
+      lanesEl.innerHTML = (eng.lanes || []).map((loc, i) => {
+        const pUnit = eng.player.row1[i];
+        const eUnit = eng.enemy.row1[i];
+        const pCR = pUnit ? eng.evalCardCombatCR(pUnit, eUnit, "player", { laneIdx: i }).total : 0;
+        const eCR = eUnit ? eng.evalCardCombatCR(eUnit, pUnit, "enemy", { laneIdx: i }).total : 0;
+        const statusCls = pCR > eCR ? "win" : (eCR > pCR ? "lose" : "");
+        return `
+          <div class="lane-loc-card ${statusCls}" title="${ESC(loc.desc)}">
+            <div class="lane-loc-head">
+              <span>${ESC(loc.name)}</span>
+              <span>Làn ${i + 1}</span>
+            </div>
+            <div class="lane-loc-desc">${ESC(loc.desc)}</div>
+            <div class="lane-cr-meter">
+              <span style="color:#7dd3fc;">Ta ${pCR}</span>
+              <span style="color:#fbbf24;">VS</span>
+              <span style="color:#fda4af;">Địch ${eCR}</span>
+            </div>
+          </div>
+        `;
+      }).join("");
+    }
 
     // Enemy Row 1 (3 Vertical Lanes)
     document.getElementById("duel-e-row1").innerHTML = eng.enemy.row1.map((u, i) => {
       if (!u) return `<div class="board-slot">Địch Làn ${i + 1} (Trống)</div>`;
       const pOpp = eng.player.row1[i];
-      const evalCR = eng.evalCardCombatCR(u, pOpp, "enemy");
+      const evalCR = eng.evalCardCombatCR(u, pOpp, "enemy", { laneIdx: i });
+      const isM = u.gender === "Male";
       return `
         <div class="board-slot">
-          <div class="board-card enemy-unit" title="${ESC(u.row1Effect?.desc || "")}">
+          <div class="tcg-unit-card enemy-unit ${u.isToken ? "is-token" : ""}"
+               data-inspect-side="enemy" data-inspect-zone="row1" data-inspect-idx="${i}"
+               title="${ESC(u.row1Effect?.desc || "")}">
+            <span class="card-cr-pill">CR ${evalCR.total}</span>
+            ${u.isToken ? `<span class="token-pill">🪙 TOKEN</span>` : ""}
             <img src="${getCardPortrait(u)}" alt="${ESC(u.name)}" />
             <div style="min-width:0; flex:1;">
-              <div style="font-weight:800;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ESC(u.name)}</div>
-              <div style="font-size:10px;color:#cbd5e1;">${ESC(u.species)} • ${ESC(FACTIONS[u.fac]?.name || u.fac)}</div>
-              <div style="font-size:11px;color:#fda4af;font-weight:800;">⚔️ Tổng CR: ${evalCR.total} <span class="muted">(Gốc ${u.cr})</span></div>
-              <div class="muted" style="font-size:9.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">H1: ${ESC(u.row1Effect?.tag || "")}</div>
+              <div style="display:flex;align-items:center;gap:4px;min-width:0;">
+                <span class="gender-pill ${isM ? "male" : "female"}">${isM ? "♂" : "♀"}</span>
+                <span style="font-weight:800;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ESC(u.name)}</span>
+              </div>
+              <div style="font-size:9.5px;color:#cbd5e1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ESC(u.species)} • ${ESC(FACTIONS[u.fac]?.name || u.fac)}</div>
+              <div style="font-size:10px;color:#fda4af;font-weight:800;">Gốc ${u.cr} → ${evalCR.total}</div>
+              <div class="muted" style="font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">⚔️ ${ESC(u.row1Effect?.tag || "")}</div>
             </div>
           </div>
         </div>
@@ -1126,17 +1466,26 @@ class Cycle12App {
         `;
       }
       const eOpp = eng.enemy.row1[i];
-      const evalCR = eng.evalCardCombatCR(u, eOpp, "player");
+      const evalCR = eng.evalCardCombatCR(u, eOpp, "player", { laneIdx: i });
       const canRecall = u.deployedTurn === eng.turn && !eng.over;
+      const isM = u.gender === "Male";
       return `
         <div class="board-slot">
-          <button class="board-card ${canRecall ? "ready" : ""}" data-recall-lane="${i}" title="${canRecall ? "Bấm để thu hồi về tay trước khi Giao Chiến" : ESC(u.row1Effect?.desc || "")}">
+          <button class="tcg-unit-card ${canRecall ? "ready" : ""} ${u.isToken ? "is-token" : ""}"
+                  data-recall-lane="${i}"
+                  data-inspect-side="player" data-inspect-zone="row1" data-inspect-idx="${i}"
+                  title="${canRecall ? "Bấm để thu hồi về tay trước khi Giao Chiến" : ESC(u.row1Effect?.desc || "")}">
+            <span class="card-cr-pill">CR ${evalCR.total}</span>
+            ${u.isToken ? `<span class="token-pill">🪙 TOKEN</span>` : ""}
             <img src="${getCardPortrait(u)}" alt="${ESC(u.name)}" />
             <div style="min-width:0; flex:1;">
-              <div style="font-weight:800;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ESC(u.name)}</div>
-              <div style="font-size:10px;color:#cbd5e1;">${ESC(u.species)} • ${ESC(FACTIONS[u.fac]?.name || u.fac)}</div>
-              <div style="font-size:11px;color:#86efac;font-weight:800;">⚔️ Tổng CR: ${evalCR.total} <span class="muted">(Gốc ${u.cr})</span></div>
-              <div class="muted" style="font-size:9.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${canRecall ? "↩️ Bấm thu hồi • " : ""}H1: ${ESC(u.row1Effect?.tag || "")}</div>
+              <div style="display:flex;align-items:center;gap:4px;min-width:0;">
+                <span class="gender-pill ${isM ? "male" : "female"}">${isM ? "♂" : "♀"}</span>
+                <span style="font-weight:800;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ESC(u.name)}</span>
+              </div>
+              <div style="font-size:9.5px;color:#cbd5e1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ESC(u.species)} • ${ESC(FACTIONS[u.fac]?.name || u.fac)}</div>
+              <div style="font-size:10px;color:#86efac;font-weight:800;">Gốc ${u.cr} → ${evalCR.total}</div>
+              <div class="muted" style="font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${canRecall ? "↩️ Thu hồi • " : ""}⚔️ ${ESC(u.row1Effect?.tag || "")}</div>
             </div>
           </button>
         </div>
@@ -1173,23 +1522,31 @@ class Cycle12App {
       });
     });
 
-    // Player Hand
+    // Player Hand (TCG Upright Cards with Gender, Species, Faction, H1 & H2 Passives)
     const handEl = document.getElementById("duel-p-hand");
     const openLane = eng.player.row1.findIndex((s) => s === null);
     handEl.innerHTML = eng.player.hand.map((c, idx) => {
       const isSelected = eng.selectedHandIdx === idx;
       const canDeploy = !eng.over && openLane >= 0;
       const facLabel = FACTIONS[c.fac]?.name || c.fac;
+      const isM = c.gender === "Male";
+      const r2 = c.row2Effect || {};
+      const r2Color = r2.crPenaltyPct ? "#fda4af" : (r2.tier === "tamarite" ? "#fde68a" : "#fbcfe8");
       return `
-        <button class="hand-card ${canDeploy ? "playable" : "unaffordable"} ${isSelected ? "selected" : ""} ${c.isHybrid ? "rarity-hybrid" : ""}"
+        <button class="hand-card ${canDeploy ? "playable" : "unaffordable"} ${isSelected ? "selected" : ""} ${c.isHybrid || c.isToken ? "rarity-hybrid" : ""}"
                 data-hand-idx="${idx}"
-                title="H1: ${ESC(c.row1Effect?.desc || "")} | H2: ${ESC(c.row2Effect?.desc || "")}">
+                data-inspect-side="player" data-inspect-zone="hand" data-inspect-idx="${idx}"
+                title="H1: ${ESC(c.row1Effect?.desc || "")} | H2: ${ESC(r2.desc || "")}">
           <span class="card-cr-pill">CR ${c.cr}</span>
+          ${c.isToken ? `<span class="token-pill">🪙 TOKEN</span>` : ""}
           <img class="hand-card-thumb" src="${getCardPortrait(c)}" alt="${ESC(c.name)}" />
-          <div style="font-weight:800;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:3px;">${ESC(c.name)}</div>
+          <div style="display:flex;align-items:center;gap:4px;margin-top:3px;min-width:0;">
+            <span class="gender-pill ${isM ? "male" : "female"}">${isM ? "♂" : "♀"}</span>
+            <span style="font-weight:800;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ESC(c.name)}</span>
+          </div>
           <div style="font-size:9.5px;color:#cbd5e1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ESC(c.species)} • ${ESC(facLabel)}</div>
           <div style="font-size:9px;color:#7dd3fc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">⚔️ H1: ${ESC(c.row1Effect?.tag || "")}</div>
-          <div style="font-size:9px;color:#fbcfe8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">🧬 H2: +${c.row2Effect?.crAura || 60} CR</div>
+          <div style="font-size:9px;color:${r2Color};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">🧬 H2: ${ESC(r2.tag || `+${r2.crAura || 60} CR`)}</div>
         </button>
       `;
     }).join("");
@@ -1197,10 +1554,12 @@ class Cycle12App {
     handEl.querySelectorAll("[data-hand-idx]").forEach((btn) => {
       btn.addEventListener("click", () => {
         const idx = Number(btn.dataset.handIdx);
+        const card = eng.player.hand[idx];
+        if (card) this.inspectDuelCard(card);
         const firstEmpty = eng.player.row1.findIndex((s) => s === null);
         if (firstEmpty < 0) {
           SFX.alert();
-          this.showToast("Hàng 1 đã đủ 3 lá", "Hãy bấm Đấu Theo Chiều Dọc hoặc thu hồi 1 lá vừa đặt để đổi làn!");
+          this.showToast("Hàng 1 đã đủ 3 lá", "Hãy bấm Giao Chiến Chiều Dọc hoặc thu hồi 1 lá vừa đặt để đổi làn!");
           return;
         }
         // Second click on already-selected card auto-deploys into first open Row 1 lane;
@@ -1221,6 +1580,26 @@ class Cycle12App {
         }
       });
     });
+
+    // Attach hover/click card inspection across Board & Row 2
+    document.querySelectorAll("#duel-battle-view [data-inspect-zone]").forEach((el) => {
+      const resolveSubject = () => {
+        const side = eng[el.dataset.inspectSide];
+        const zone = el.dataset.inspectZone;
+        const idx = Number(el.dataset.inspectIdx);
+        const card = side?.[zone]?.[idx];
+        if (!card) return;
+        const evalCR = zone === "row1"
+          ? eng.evalCardCombatCR(card, eng[el.dataset.inspectSide === "player" ? "enemy" : "player"].row1[idx], el.dataset.inspectSide, { laneIdx: idx })
+          : null;
+        this.inspectDuelCard(card, evalCR);
+      };
+      el.addEventListener("pointerenter", resolveSubject);
+      if (el.dataset.inspectZone !== "hand") el.addEventListener("click", resolveSubject);
+    });
+
+    if (hasSelectedHand) this.inspectDuelCard(hasSelectedHand);
+    else if (!this.inspectedDuelCard) this.inspectDuelCard(pLeader, pRow3Eval);
   }
 
   showDuelOutcome() {
@@ -1268,7 +1647,7 @@ class Cycle12App {
         b.addEventListener("click", () => {
           const cid = b.dataset.draftCard;
           if (!this.game.customDeck.includes(cid)) {
-            if (this.game.customDeck.length < 12) this.game.customDeck.push(cid);
+            if (this.game.customDeck.length < 16) this.game.customDeck.push(cid);
             else this.game.customDeck[this.game.customDeck.length - 1] = cid;
           }
           this.game.addRes(this.game.playerFaction, "credits", 500);
@@ -1298,14 +1677,15 @@ class Cycle12App {
 
     const ruleBanner = document.getElementById("deck-faction-rule");
     if (ruleBanner) {
-      ruleBanner.innerHTML = `🔒 <strong>Luật Phe Phái & 3 Hàng:</strong> Thủ lĩnh <strong>${ESC(protag.name)}</strong> (CR ${protag.cr}) trấn thủ <strong>Hàng 3</strong>. Bộ bài 12 lá chỉ được dùng các thẻ thuộc phe <strong style="color:var(--gold);">${ESC(facName)}</strong>!`;
+      ruleBanner.innerHTML = `🔒 <strong>Luật Phe Phái &amp; 3 Hàng:</strong> Thủ lĩnh <strong>${ESC(protag.name)}</strong> (CR ${protag.cr}) trấn thủ <strong>Hàng 3</strong>. Bộ bài 16 lá (rút 2 lá/lượt) chỉ được dùng các thẻ thuộc phe <strong style="color:var(--gold);">${ESC(facName)}</strong>!`;
     }
 
     const activeEl = document.getElementById("deck-active-list");
     activeEl.innerHTML = deck.map((cid, idx) => {
       const c = resolveCard(cid, hybrids);
       if (!c) return "";
-      return `<button class="deck-chip ${c.isHybrid ? "hybrid" : ""}" data-remove-idx="${idx}">[CR ${c.cr}] ${ESC(c.name)} ✕</button>`;
+      const gMark = c.gender === "Male" ? "♂" : "♀";
+      return `<button class="deck-chip ${c.isHybrid ? "hybrid" : ""}" data-remove-idx="${idx}">${gMark} [CR ${c.cr}] ${ESC(c.name)} ✕</button>`;
     }).join("");
 
     activeEl.querySelectorAll("[data-remove-idx]").forEach((b) => {
@@ -1325,23 +1705,30 @@ class Cycle12App {
     });
 
     const poolEl = document.getElementById("deck-pool-grid");
-    poolEl.innerHTML = factionPool.map((c) => `
-      <button class="hand-card playable ${c.isHybrid ? "rarity-hybrid" : ""}" style="width:auto;min-width:0;" data-add-card="${ESC(c.id)}"
-              title="H1: ${ESC(c.row1Effect?.desc || "")} | H2: ${ESC(c.row2Effect?.desc || "")}">
-        <span class="card-cr-pill">CR ${c.cr}</span>
-        <img class="hand-card-thumb" src="${getCardPortrait(c)}" alt="${ESC(c.name)}" loading="lazy" />
-        <div style="font-weight:800;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:4px;">${ESC(c.name)}</div>
-        <div class="muted" style="font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ESC(c.species)} • ${ESC(facName)}</div>
-        <div style="font-size:9.5px;color:#7dd3fc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">⚔️ H1: ${ESC(c.row1Effect?.tag || "")}</div>
-        <div style="font-size:9.5px;color:#fbcfe8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">🧬 H2: +${c.row2Effect?.crAura || 60} CR</div>
-      </button>
-    `).join("");
+    poolEl.innerHTML = factionPool.map((c) => {
+      const isM = c.gender === "Male";
+      const r2 = c.row2Effect || {};
+      return `
+        <button class="hand-card playable ${c.isHybrid ? "rarity-hybrid" : ""}" style="width:auto;min-width:0;" data-add-card="${ESC(c.id)}"
+                title="H1: ${ESC(c.row1Effect?.desc || "")} | H2: ${ESC(r2.desc || "")}">
+          <span class="card-cr-pill">CR ${c.cr}</span>
+          <img class="hand-card-thumb" src="${getCardPortrait(c)}" alt="${ESC(c.name)}" loading="lazy" />
+          <div style="display:flex;align-items:center;gap:4px;margin-top:4px;min-width:0;">
+            <span class="gender-pill ${isM ? "male" : "female"}">${isM ? "♂" : "♀"}</span>
+            <span style="font-weight:800;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ESC(c.name)}</span>
+          </div>
+          <div class="muted" style="font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ESC(c.species)} • ${ESC(facName)}</div>
+          <div style="font-size:9.5px;color:#7dd3fc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">⚔️ H1: ${ESC(c.row1Effect?.tag || "")}</div>
+          <div style="font-size:9.5px;color:${r2.crPenaltyPct ? "#fda4af" : "#fbcfe8"};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">🧬 H2: ${ESC(r2.tag || `+${r2.crAura || 60} CR`)}</div>
+        </button>
+      `;
+    }).join("");
 
     poolEl.querySelectorAll("[data-add-card]").forEach((b) => {
       b.addEventListener("click", () => {
-        if (this.game.customDeck.length >= 12) {
+        if (this.game.customDeck.length >= 16) {
           SFX.alert();
-          this.showToast("Bộ bài đã đủ 12 lá", "Bấm vào lá phía trên để gỡ bớt trước khi thêm mới!");
+          this.showToast("Bộ bài đã đủ 16 lá", "Bấm vào lá phía trên để gỡ bớt trước khi thêm mới!");
           return;
         }
         const cid = b.dataset.addCard;
@@ -1928,8 +2315,13 @@ class Cycle12App {
                 <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">
                   <span class="badge">CR ${selected.cr}</span>
                   <span class="badge">${ESC(selected.species)}</span>
-                  <span class="badge">Thẻ: ⚡${card?.cost || 3} | ⚔️${card?.atk || 4} | ❤️${card?.hp || 5}</span>
+                  <span class="badge">${card?.gender === "Male" || selected.g === "M" ? "♂ Nam" : "♀ Nữ"}</span>
                   <span class="badge" style="color:#f472b6;">Độ tin cậy: ${aff}/100</span>
+                </div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
+                  <button class="btn-glass btn-compact" id="btn-roster-upload-portrait">🖼️ Gắn Ảnh Grok / Tự Chọn</button>
+                  ${getCustomPortrait(selected.id) ? `<button class="btn-glass btn-compact" id="btn-roster-reset-portrait">↩️ Về Ảnh Mặc Định</button>` : ""}
+                  <input type="file" id="roster-portrait-file" accept="image/*" class="hidden" />
                 </div>
               </div>
             </div>
@@ -1937,8 +2329,9 @@ class Cycle12App {
             <div class="planet-meta-grid">
               <div><strong>Căn cứ:</strong> ${ESC(loc ? loc.label : (selected.loc || "Gaiastra"))}</div>
               <div><strong>Chiều cao:</strong> ${selected.h || 1.8}m</div>
-              <div><strong>Năng lực Thẻ Bài:</strong> ${ESC(card?.desc || "")}</div>
-              <div><strong>Chiêu thức đặc trưng:</strong> ${ESC((selected.skills || []).join(", "))}</div>
+              <div><strong>Hàng 1 (Chiến Đấu):</strong> ${ESC(card?.row1Effect?.desc || "Đấu theo Tổng CR & Phe")}</div>
+              <div><strong>Hàng 2 (Sinh Sản):</strong> ${ESC(card?.row2Effect?.desc || "Hỗ trợ Hàng 1 & Lai Tạo")}</div>
+              <div style="grid-column:1 / -1;"><strong>Chiêu thức đặc trưng:</strong> ${ESC((selected.skills || []).join(", "))}</div>
             </div>
 
             <p class="muted" style="line-height:1.6;">${ESC(selected.bio || "Hậu duệ dòng gen mới kiến tạo trong Chu Kỳ 12.")}</p>
@@ -1967,6 +2360,53 @@ class Cycle12App {
         body.querySelectorAll("[data-pick-roster]").forEach(item => {
           item.style.display = item.textContent.toLowerCase().includes(needle) ? "flex" : "none";
         });
+      });
+
+      const fileInput = document.getElementById("roster-portrait-file");
+      document.getElementById("btn-roster-upload-portrait")?.addEventListener("click", () => {
+        SFX.click();
+        fileInput?.click();
+      });
+      fileInput?.addEventListener("change", () => {
+        const file = fileInput.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          const img = new Image();
+          img.onload = () => {
+            const canvas = document.createElement("canvas");
+            const maxW = 380;
+            const maxH = 440;
+            const scale = Math.min(maxW / img.width, maxH / img.height, 1);
+            canvas.width = Math.max(120, Math.round(img.width * scale));
+            canvas.height = Math.max(140, Math.round(img.height * scale));
+            canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+            const ok = setCustomPortrait(selected.id, canvas.toDataURL("image/jpeg", 0.86));
+            clearPortraitCache(selected.id);
+            if (ok) {
+              SFX.victory();
+              this.refreshTopResources();
+              if (this.duelEngine) this.renderDuelUI();
+              this.renderCodexTab();
+              this.showToast("🖼️ Đã gắn ảnh chân dung mới!", `Ảnh Grok/tự chọn cho ${selected.name} đã được lưu trên thiết bị.`);
+            } else {
+              SFX.alert();
+              this.showToast("Bộ nhớ trình duyệt đầy", "Không thể lưu thêm ảnh vào localStorage.");
+            }
+          };
+          img.src = reader.result;
+        };
+        reader.readAsDataURL(file);
+      });
+
+      document.getElementById("btn-roster-reset-portrait")?.addEventListener("click", () => {
+        SFX.click();
+        setCustomPortrait(selected.id, null);
+        clearPortraitCache(selected.id);
+        this.refreshTopResources();
+        if (this.duelEngine) this.renderDuelUI();
+        this.renderCodexTab();
+        this.showToast("↩️ Đã khôi phục ảnh", `${selected.name} dùng lại ảnh mặc định.`);
       });
 
       document.getElementById("btn-roster-make-protag")?.addEventListener("click", () => {
@@ -2129,7 +2569,7 @@ class Cycle12App {
               <span>🃏 Trận bài thắng: <strong>${stats.battlesWon || 0}</strong></span>
               <span>🗼 Tháp Hư Không cao nhất: <strong>Tầng ${stats.gauntletMax || 0}</strong></span>
               <span>🧬 Hậu duệ lai gen: <strong>${this.game.hybrids?.length || 0}</strong></span>
-              <span>📖 Chương xong: <strong>${this.game.vn.completedChapters?.length || 0}/11</strong></span>
+              <span>📖 Chương xong: <strong>${this.game.vn.completedChapters?.length || 0}/${CHAPTERS.length}</strong></span>
             </div>
           </div>
         </div>
@@ -2186,8 +2626,35 @@ class Cycle12App {
         `;
       }).join("");
 
+      const aiKeys = getStoredAIKeys();
       body.innerHTML = `
         <div class="codex-grid">
+          <div class="codex-card" style="border-color:rgba(56,189,248,0.4);">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+              <div class="panel-section-title" style="margin:0;">🤖 AI Story &amp; Đối Thoại (BYOK / Local Proxy)</div>
+              <span class="badge" id="sys-ai-proxy-badge">⏳ Đang kiểm tra...</span>
+            </div>
+            <p class="muted" style="margin:6px 0;">Khi chạy localhost (<code>server.js</code>), game tự dùng proxy bảo mật từ <code>.env.local</code>. Khi chơi web tĩnh (<code>cycle12.sedsp.lol</code>), nhập key riêng — lưu 100% cục bộ trong trình duyệt, không đẩy lên Git.</p>
+            <div style="display:flex;flex-direction:column;gap:7px;">
+              <label style="font-size:11px;color:#cbd5e1;">Ưu tiên Provider:
+                <select id="ai-pref-provider" style="margin-top:3px;width:100%;">
+                  <option value="auto" ${aiKeys.preferredProvider === "auto" ? "selected" : ""}>Tự động (Groq → DeepSeek → OpenRouter)</option>
+                  <option value="groq" ${aiKeys.preferredProvider === "groq" ? "selected" : ""}>Groq (Siêu nhanh)</option>
+                  <option value="deepseek" ${aiKeys.preferredProvider === "deepseek" ? "selected" : ""}>DeepSeek Chat</option>
+                  <option value="openrouter" ${aiKeys.preferredProvider === "openrouter" ? "selected" : ""}>OpenRouter</option>
+                </select>
+              </label>
+              <input type="password" id="inp-ai-groq" placeholder="Groq API Key (gsk_...)" value="${ESC(aiKeys.groq)}" autocomplete="off" />
+              <input type="password" id="inp-ai-deepseek" placeholder="DeepSeek API Key (sk-...)" value="${ESC(aiKeys.deepseek)}" autocomplete="off" />
+              <input type="password" id="inp-ai-openrouter" placeholder="OpenRouter API Key (sk-or-v1-...)" value="${ESC(aiKeys.openrouter)}" autocomplete="off" />
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;">
+              <button class="btn-accent btn-compact" id="btn-save-ai-keys">💾 Lưu Key AI</button>
+              <button class="btn-gold btn-compact" id="btn-test-ai">⚡ Test AI Ngay</button>
+              <button class="btn-ghost btn-compact" id="btn-clear-ai-keys">🗑️ Xóa Key Trình Duyệt</button>
+            </div>
+          </div>
+
           <div class="codex-card">
             <div class="panel-section-title">📱 Cài Thành App Trên Điện Thoại & PC</div>
             <p class="muted"><strong>Android (Chrome / Edge):</strong> Bấm nút <em>📲 Cài App</em> ở góc phải hoặc chọn Menu (⋮) → <strong>Thêm vào Màn hình chính</strong>.</p>
@@ -2207,6 +2674,85 @@ class Cycle12App {
         </div>
         <div class="codex-grid" style="margin-top:12px;">${slotsHtml}</div>
       `;
+
+      const updateSysAIBadge = (st) => {
+        this.refreshAIStatusBadge(st);
+        const badgeEl = body.querySelector("#sys-ai-proxy-badge");
+        if (!badgeEl) return;
+        const activeList = ["groq", "deepseek", "openrouter"].filter(
+          (k) => st.proxyAvailable?.[k] || st.byokAvailable?.[k]
+        );
+        if (st.localProxy) {
+          badgeEl.textContent = activeList.length
+            ? `🟢 Local Proxy + BYOK (${activeList.join(", ")})`
+            : "🟡 Local Proxy (Chưa có Key)";
+          badgeEl.style.color = activeList.length ? "#4ade80" : "#facc15";
+        } else {
+          badgeEl.textContent = activeList.length
+            ? `🟢 BYOK Sẵn Sàng (${activeList.join(", ")})`
+            : "⚪ Chưa nhập BYOK Key";
+          badgeEl.style.color = activeList.length ? "#4ade80" : "#94a3b8";
+        }
+      };
+
+      detectAIStatus(true).then(updateSysAIBadge);
+
+      body.querySelector("#btn-save-ai-keys")?.addEventListener("click", () => {
+        setStoredAIKeys({
+          preferredProvider: body.querySelector("#ai-pref-provider")?.value || "auto",
+          groq: body.querySelector("#inp-ai-groq")?.value || "",
+          deepseek: body.querySelector("#inp-ai-deepseek")?.value || "",
+          openrouter: body.querySelector("#inp-ai-openrouter")?.value || ""
+        });
+        SFX.choice();
+        detectAIStatus(true).then((st) => {
+          updateSysAIBadge(st);
+          this.showToast("💾 Đã Lưu Cấu Hình AI", "API key được lưu cục bộ trong trình duyệt.");
+        });
+      });
+
+      body.querySelector("#btn-clear-ai-keys")?.addEventListener("click", () => {
+        setStoredAIKeys({ preferredProvider: "auto", groq: "", deepseek: "", openrouter: "" });
+        body.querySelector("#inp-ai-groq").value = "";
+        body.querySelector("#inp-ai-deepseek").value = "";
+        body.querySelector("#inp-ai-openrouter").value = "";
+        SFX.click();
+        detectAIStatus(true).then(updateSysAIBadge);
+        this.showToast("🗑️ Đã Xóa Key BYOK", "Đã xóa API key khỏi localStorage trình duyệt.");
+      });
+
+      body.querySelector("#btn-test-ai")?.addEventListener("click", async () => {
+        const testBtn = body.querySelector("#btn-test-ai");
+        if (testBtn) {
+          testBtn.disabled = true;
+          testBtn.textContent = "⏳ Đang gọi AI...";
+        }
+        try {
+          setStoredAIKeys({
+            preferredProvider: body.querySelector("#ai-pref-provider")?.value || "auto",
+            groq: body.querySelector("#inp-ai-groq")?.value || "",
+            deepseek: body.querySelector("#inp-ai-deepseek")?.value || "",
+            openrouter: body.querySelector("#inp-ai-openrouter")?.value || ""
+          });
+          const res = await askAICharacterReply({
+            gameState: this.game,
+            npcId: "mina",
+            userMessage: "Chào nhanh 1 câu để kiểm tra kết nối vũ trụ Gaiastra.",
+            provider: body.querySelector("#ai-pref-provider")?.value || "auto"
+          });
+          SFX.victory();
+          this.showToast(`⚡ Kết Nối ${res.provider?.toUpperCase()} Thành Công!`, `${res.model}: ${res.reply.slice(0, 120)}`);
+          detectAIStatus(true).then(updateSysAIBadge);
+        } catch (err) {
+          SFX.alert();
+          this.showToast("⚠️ Test AI Thất Bại", err.message);
+        } finally {
+          if (testBtn) {
+            testBtn.disabled = false;
+            testBtn.textContent = "⚡ Test AI Ngay";
+          }
+        }
+      });
 
       body.querySelectorAll("[data-save-slot]").forEach((b) => {
         b.addEventListener("click", () => {

@@ -1,15 +1,18 @@
 // ============================================================================
-// CYCLE 12: AGE OF DOMINION — FACTION & 3-ROW CR CARD BATTLE ENGINE (v6)
+// CYCLE 12: AGE OF DOMINION — MARVEL SNAP × YU-GI-OH 3-ROW CARD ENGINE (v7)
 // Rules:
-// - Faction Lock: Leaders only command cards of their own Faction.
-// - Row 1 (3 Vertical Lanes): Direct combat using CR + Species/Faction Lore Effects.
-// - Row 2 (Capture & Support/Breeding Zone): Losers of vertical clashes move
-//   to the WINNER's Row 2. They CANNOT be summoned to Row 1; instead they
-//   grant Support CR Aura & enable Field Breeding into your Faction Hand.
-// - Row 3 (Outer Representative Slot): Holds each Leader. Protected while ANY
-//   card remains on Row 1. Once Row 1 is empty, Attacker's Total Row 1 CR vs
-//   Defender Leader Effective CR resolves — if Total Row 1 CR wins, Game Over!
-// - Also ends immediately when either side captures 3 enemy cards into Row 2.
+// - Faction Lock: Leaders only command cards of their Faction (16-card deck).
+// - Draw 2 Cards From Deck Every Turn End (4 opening hand).
+// - Row 1 (3 Vertical Cosmic Lanes): Direct CR + Species/Faction combat.
+// - Row 2 (Capture & Auto-Breeding Chambers):
+//   * Loser of each vertical lane moves to WINNER's Row 2 (cannot return to Row 1).
+//   * Male beats Female -> Female enters Winner's Row 2 in ACTIVE GESTATION,
+//     automatically rolling Token Hybrid synthesis at EVERY Turn End!
+//   * Tamarite = 100% strong Token; Omni-Womb = multi-variant/twin Tokens;
+//     Alien = 40%-96% random; Pure Human = low ~32% random & -28% CR Debuff!
+// - Row 3 (Outer Leader Slot): Protected while ANY card stays on Row 1.
+//   When Row 1 is empty, Total Attacker Row 1 CR vs Defender Row 3 CR resolves.
+// - Match ends on 3 Row-2 Captures OR Row 3 Leader defeat.
 // ============================================================================
 
 import {
@@ -20,7 +23,23 @@ import {
   hybridToCard
 } from "../data/cards.js";
 import { FACTIONS } from "../data/lore.js";
-import { executeBreeding } from "./breeding.js";
+import { RACE_STYLE } from "../data/characters.js";
+
+const LANE_LOCATIONS = [
+  { id: "kronea_bastion", name: "Pháo Đài Kronea", desc: "Làn Sylvarian: Thẻ phe Sylvarian +80 CR tại làn này." },
+  { id: "pherone_nexus", name: "Pherone Nexus", desc: "Làn Sinh Sản: +12% tỷ lệ tạo Token Hàng 2 nếu thắng tại làn này (Tối đa 99%, Tamarite 100%)." },
+  { id: "predita_line", name: "Chiến Tuyến Predita", desc: "Làn Tử Thủ: Thẻ có CR gốc <= 600 được cộng +90 CR." },
+  { id: "outer_layer", name: "Vùng Ngoại Eris", desc: "Làn Cân Bằng: Vô hiệu hóa buff chủng tộc ở làn này." },
+  { id: "abyss_rift", name: "Khe Nứt Vực Thẳm", desc: "Làn Hỗn Mang: Thẻ Nadir / Demon +90 CR; thẻ < 800 CR bị -40 CR." },
+  { id: "gaiastra_orbit", name: "Quỹ Đạo Gaiastra", desc: "Làn Chuẩn: Giao chiến thuần CR & nội tại Hàng 1–2–3." }
+];
+
+const OMNI_VARIANTS = [
+  { key: "titan", title: "Giáp Thú", crBonus: 95, r1Id: "omni_titan", tag: "Omni: Càn Quét (+95 CR)", desc: "Hàng 1: Token đột biến hình thái Giáp Thú (+95 CR)." },
+  { key: "siphon", title: "Ký Sinh", crBonus: 45, r1Id: "nadir_psionic", tag: "Omni: Hấp Thụ (-70 CR địch)", desc: "Hàng 1: +45 CR & giảm 70 CR đối thủ đối diện (CR < 800)." },
+  { key: "guard", title: "Máu Xanh", crBonus: 65, r1Id: "blue_blood_guard", tag: "Omni: Kháng Độc (+65 CR)", desc: "Hàng 1: +65 CR & miễn nhiễm trừ CR từ Virus/Nadir." },
+  { key: "twin", title: "Phân Bào Đôi", crBonus: 25, r1Id: "frontline_valor", tag: "Omni: Sinh Đôi (+25 CR)", desc: "Hàng 1: +25 CR — Omni-Womb tự phân đôi thành 2 Token lên tay!" }
+];
 
 function shuffle(arr) {
   const copy = [...arr];
@@ -37,7 +56,10 @@ function makeInstance(card, ownerSide, uidNum) {
     uid: `${ownerSide}_${card.id}_${uidNum}`,
     ownerSide,
     deployedTurn: 0,
-    bredUsed: false
+    breedingActive: false,
+    sireCard: null,
+    spawnCount: 0,
+    captureLane: -1
   };
 }
 
@@ -74,10 +96,16 @@ export class CardBattleEngine {
     this.turn = 1;
     this.maxTurns = 24;
     this.log = [];
+    this.lastNewTokens = [];
     this.over = false;
     this.winner = null; // "player" | "enemy"
     this.winReason = null; // "capture_3" | "leader_breach" | "tiebreak"
     this.selectedHandIdx = null;
+    this.maxHandSize = 8;
+
+    // Roll 3 Marvel-Snap-inspired Cosmic Locations for the 3 Vertical Lanes
+    const shuffledLocs = shuffle(LANE_LOCATIONS);
+    this.lanes = shuffledLocs.slice(0, 3);
 
     const pLeaderCard = resolveCard(playerLeaderId, hybrids) || CARD_BY_ID.arisia;
     const eLeaderCard = resolveCard(enemyLeaderId, []) || CARD_BY_ID.overlord;
@@ -85,48 +113,44 @@ export class CardBattleEngine {
     const legalPDeck = (playerDeckIds && playerDeckIds.length)
       ? validateDeckForLeader(playerDeckIds, pLeaderCard.id, hybrids)
       : buildFactionDeck(pLeaderCard.id, hybrids);
-    const finalPDeckIds = legalPDeck.length >= 6 ? legalPDeck : buildFactionDeck(pLeaderCard.id, hybrids);
+    const finalPDeckIds = legalPDeck.length >= 10 ? legalPDeck : buildFactionDeck(pLeaderCard.id, hybrids);
 
     const legalEDeck = (enemyDeckIds && enemyDeckIds.length)
       ? validateDeckForLeader(enemyDeckIds, eLeaderCard.id, [])
       : buildFactionDeck(eLeaderCard.id, []);
-    const finalEDeckIds = legalEDeck.length >= 6 ? legalEDeck : buildFactionDeck(eLeaderCard.id, []);
+    const finalEDeckIds = legalEDeck.length >= 10 ? legalEDeck : buildFactionDeck(eLeaderCard.id, []);
 
     this.player = {
       side: "player",
       leader: makeInstance(pLeaderCard, "player", this.uidCounter++),
       row1: [null, null, null],
-      row2: [], // Captives won from Enemy (max 3 -> Instant Victory)
+      row2: [],
       hand: [],
-      deck: shuffle(finalPDeckIds.map((id) => makeInstance(resolveCard(id, hybrids) || CARD_BY_ID.tr_syl_guard, "player", this.uidCounter++))),
-      placedThisTurn: 0,
-      fieldBreedUsedThisTurn: false
+      deck: shuffle(finalPDeckIds.map((id) => makeInstance(resolveCard(id, hybrids) || CARD_BY_ID.tr_syl_guard, "player", this.uidCounter++)))
     };
 
     this.enemy = {
       side: "enemy",
       leader: makeInstance(eLeaderCard, "enemy", this.uidCounter++),
       row1: [null, null, null],
-      row2: [], // Captives won from Player (max 3 -> Instant Defeat)
+      row2: [],
       hand: [],
-      deck: shuffle(finalEDeckIds.map((id) => makeInstance(resolveCard(id, []) || CARD_BY_ID.tr_wn_raider, "enemy", this.uidCounter++))),
-      placedThisTurn: 0,
-      fieldBreedUsedThisTurn: false
+      deck: shuffle(finalEDeckIds.map((id) => makeInstance(resolveCard(id, []) || CARD_BY_ID.tr_wn_raider, "enemy", this.uidCounter++)))
     };
 
-    // Draw initial 5 cards each
-    this.drawCards("player", 5);
-    this.drawCards("enemy", 5);
+    // Draw 4 opening cards each (+2 drawn at end of every turn!)
+    this.drawCards("player", 4);
+    this.drawCards("enemy", 4);
 
     const pFacName = (FACTIONS[pLeaderCard.fac] && FACTIONS[pLeaderCard.fac].name) || pLeaderCard.fac;
     const eFacName = (FACTIONS[eLeaderCard.fac] && FACTIONS[eLeaderCard.fac].name) || eLeaderCard.fac;
-    this.pushLog(`⚔️ Khai chiến 3 Hàng! Thủ lĩnh ${pLeaderCard.name} [${pFacName}] đối đầu ${eLeaderCard.name} [${eFacName}].`);
-    this.pushLog(`📜 Đặt tối đa 3 lá cùng phe ra Hàng 1, sau đó bấm Đấu Theo Chiều Dọc.`);
+    this.pushLog(`⚔️ Khai chiến 3 Làn! ${pLeaderCard.name} [${pFacName}] vs ${eLeaderCard.name} [${eFacName}]. Mỗi lượt rút 2 lá!`);
+    this.pushLog(`💗 Luật Hàng 2: Thẻ Nam (♂) thắng thẻ Nữ (♀) sẽ đưa vào Hàng 2 & tự lai tạo Token mỗi cuối lượt!`);
   }
 
   pushLog(msg) {
     this.log.push(msg);
-    if (this.log.length > 60) this.log.shift();
+    if (this.log.length > 70) this.log.shift();
   }
 
   getSide(sideKey) {
@@ -137,11 +161,11 @@ export class CardBattleEngine {
     return sideKey === "player" ? this.enemy : this.player;
   }
 
-  drawCards(sideKey, count = 1) {
+  drawCards(sideKey, count = 2) {
     const s = this.getSide(sideKey);
     let drawn = 0;
     for (let i = 0; i < count; i++) {
-      if (s.deck.length === 0 || s.hand.length >= 6) break;
+      if (s.deck.length === 0 || s.hand.length >= this.maxHandSize) break;
       s.hand.push(s.deck.shift());
       drawn++;
     }
@@ -150,7 +174,7 @@ export class CardBattleEngine {
 
   getRow2SupportAura(sideKey) {
     const s = this.getSide(sideKey);
-    return s.row2.reduce((sum, cap) => sum + ((cap.row2Effect && cap.row2Effect.crAura) || 60), 0);
+    return s.row2.reduce((sum, cap) => sum + ((cap.row2Effect && cap.row2Effect.crAura) || 40), 0);
   }
 
   getRow3LeaderAura(sideKey, targetCard) {
@@ -158,40 +182,32 @@ export class CardBattleEngine {
     const leader = s.leader;
     if (!leader || !targetCard || targetCard.uid === leader.uid) return 0;
     const r1 = leader.row1Effect || {};
-    let aura = 0;
-    // Row 3 leader passively projects command aura onto Row 1 frontline
-    if (r1.id === "syl_empress" && (targetCard.fac === "sylvarian" || (targetCard.race || "").includes("syl"))) {
-      aura += 80;
-    } else if (r1.id === "nadirius_decree" && targetCard.fac === "nadirius") {
-      aura += 55;
-    } else if (r1.id === "predita_will" && targetCard.fac === "salvic") {
-      aura += 60;
-    } else if (r1.id === "hyper_photon" && targetCard.fac === "tamarite") {
-      aura += 70;
-    } else if (r1.id === "collector_harvest") {
-      aura += s.row2.length * 40;
-    } else {
-      aura += Math.round((r1.bonusFlat || 60) * 0.35);
-    }
-    return aura;
+    if (r1.id === "syl_empress" && (targetCard.fac === "sylvarian" || (targetCard.race || "").includes("syl"))) return 80;
+    if (r1.id === "nadirius_decree" && targetCard.fac === "nadirius") return 55;
+    if (r1.id === "predita_will" && targetCard.fac === "salvic") return 60;
+    if (r1.id === "hyper_photon" && targetCard.fac === "tamarite") return 70;
+    if (r1.id === "collector_harvest") return s.row2.length * 40;
+    return Math.round((r1.bonusFlat || 60) * 0.35);
   }
 
-  // Computes transparent Combat CR for any card on Row 1 or Leader on Row 3
+  // Computes transparent Combat CR for any card on Row 1 (with optional laneIdx) or Leader on Row 3
   evalCardCombatCR(card, oppCard = null, sideKey = "player", opts = {}) {
-    if (!card) return { total: 0, base: 0, r1Bonus: 0, leaderAura: 0, row2Aura: 0, penalty: 0 };
+    if (!card) return { total: 0, base: 0, r1Bonus: 0, laneBonus: 0, leaderAura: 0, row2Aura: 0, penalty: 0 };
     const s = this.getSide(sideKey);
     const opp = this.getOpp(sideKey);
     const base = card.cr || 100;
     const r1 = card.row1Effect || {};
     const oppR1 = (oppCard && oppCard.row1Effect) || {};
+    const laneLoc = (typeof opts.laneIdx === "number" && this.lanes[opts.laneIdx]) ? this.lanes[opts.laneIdx] : null;
 
-    // Check if opponent nullifies racial bonuses (Emma's Outer Layer Loop or Eris Arbiter)
+    const laneCancelsRacial = laneLoc && laneLoc.id === "outer_layer";
     const oppCancelsRacial = oppR1.id === "eris_reset" || (oppCard && oppCard.id === "tr_eris_arbiter");
+    const cancelRacial = laneCancelsRacial || oppCancelsRacial;
 
     let r1Bonus = r1.bonusFlat || 0;
+    let laneBonus = 0;
 
-    // Specific Row 1 & Row 3 Lore Passives
-    if (!oppCancelsRacial) {
+    if (!cancelRacial) {
       if (r1.id === "syl_empress") {
         const sylCount = s.row1.filter((c) => c && c.uid !== card.uid && (c.fac === "sylvarian" || (c.species || "").toLowerCase().includes("syl"))).length;
         r1Bonus += sylCount * 80;
@@ -227,9 +243,19 @@ export class CardBattleEngine {
       }
     }
 
-    // Opposing Debuffs (respecting CR >= 800 Sovereign Immunity & Hinatian Blue Blood Guard)
+    // Cosmic Lane modifiers (Marvel Snap twist)
+    if (laneLoc) {
+      if (laneLoc.id === "kronea_bastion" && card.fac === "sylvarian") laneBonus += 80;
+      else if (laneLoc.id === "predita_line" && base <= 600) laneBonus += 90;
+      else if (laneLoc.id === "abyss_rift") {
+        if (isNadirCard(card) || card.race === "demon") laneBonus += 90;
+        else if (base < 800) laneBonus -= 40;
+      }
+    }
+
+    // Opposing Debuffs (respecting CR >= 800 Immunity & Hinatian Blue Blood Guard)
     let penalty = 0;
-    const isImmuneToDebuff = base >= 800 || r1.id === "blue_blood_guard";
+    const isImmuneToDebuff = base >= 800 || r1.id === "blue_blood_guard" || r1.id === "omni_titan";
     if (!isImmuneToDebuff && oppCard) {
       if (oppR1.id === "abyss_terror") penalty += 120;
       else if (oppR1.id === "nadir_psionic") penalty += 70;
@@ -241,33 +267,21 @@ export class CardBattleEngine {
     const leaderAura = card.uid === s.leader.uid ? 0 : this.getRow3LeaderAura(sideKey, card);
     const diffScale = sideKey === "enemy" ? Math.round((this.difficulty - 1) * 35) : 0;
 
-    const total = Math.max(50, base + r1Bonus + leaderAura + row2Aura + diffScale - penalty);
-    return {
-      total,
-      base,
-      r1Bonus,
-      leaderAura,
-      row2Aura,
-      penalty
-    };
-  }
-
-  isRow1Empty(sideKey) {
-    return this.getSide(sideKey).row1.every((c) => c === null);
+    const total = Math.max(40, base + r1Bonus + laneBonus + leaderAura + row2Aura + diffScale - penalty);
+    return { total, base, r1Bonus, laneBonus, leaderAura, row2Aura, penalty };
   }
 
   getRow1Cards(sideKey) {
     return this.getSide(sideKey).row1.filter(Boolean);
   }
 
-  // Player places a card from hand onto Row 1 lane (0, 1, or 2)
   deployCardToRow1(handIdx, laneIdx) {
     if (this.over) return { ok: false, reason: "Trận đấu đã kết thúc." };
     const s = this.player;
     const card = s.hand[handIdx];
     if (!card) return { ok: false, reason: "Không tìm thấy thẻ trên tay." };
     if (card.fac !== s.leader.fac) {
-      return { ok: false, reason: `Vi phạm phe phái: Thủ lĩnh ${s.leader.name} chỉ điều khiển được thẻ phe ${s.leader.fac}!` };
+      return { ok: false, reason: `Vi phạm phe phái: Thủ lĩnh ${s.leader.name} chỉ dùng thẻ phe ${s.leader.fac}!` };
     }
     if (laneIdx < 0 || laneIdx > 2) return { ok: false, reason: "Làn Hàng 1 không hợp lệ." };
     if (s.row1[laneIdx]) return { ok: false, reason: `Làn ${laneIdx + 1} đang có thẻ trấn giữ.` };
@@ -275,100 +289,132 @@ export class CardBattleEngine {
     s.hand.splice(handIdx, 1);
     card.deployedTurn = this.turn;
     s.row1[laneIdx] = card;
-    s.placedThisTurn++;
     this.selectedHandIdx = null;
 
-    // On-deploy draw hooks (Ojamon / Eris Chronos Keeper)
     let bonusMsg = "";
     if (card.id === "ojamon" || card.id === "tr_eris_keeper") {
       const drawn = this.drawCards("player", 1);
       if (drawn > 0) bonusMsg = " (+rút 1 thẻ)";
     }
 
-    this.pushLog(`🃏 Đặt ${card.name} (CR ${card.cr}) vào Hàng 1 - Làn ${laneIdx + 1}${bonusMsg}.`);
+    this.pushLog(`🃏 Đặt ${card.name} (${card.gender === "Male" ? "♂" : "♀"} • CR ${card.cr}) vào Làn ${laneIdx + 1}${bonusMsg}.`);
     return { ok: true, card, laneIdx };
   }
 
-  // Player can pull back a card placed THIS turn before clicking Clash
   recallFromRow1(laneIdx) {
     if (this.over) return { ok: false };
     const card = this.player.row1[laneIdx];
-    if (!card) return { ok: false, reason: "Ô trống." };
+    if (!card) return { ok: false, reason: "Làn trống." };
     if (card.deployedTurn !== this.turn) {
-      return { ok: false, reason: "Thẻ sống sót từ lượt trước đang khóa vị trí Hàng 1." };
+      return { ok: false, reason: "Thẻ sống sót từ lượt trước đang giữ vị trí Hàng 1." };
     }
     this.player.row1[laneIdx] = null;
     this.player.hand.push(card);
-    this.player.placedThisTurn = Math.max(0, this.player.placedThisTurn - 1);
     return { ok: true, card };
   }
 
-  // Row 2 Breeding Effect: Synthesize a playable Hybrid card from a captured card in Row 2!
-  breedFromRow2(captiveIdx) {
-    if (this.over) return { ok: false, reason: "Trận đã kết thúc." };
-    const p = this.player;
-    if (p.fieldBreedUsedThisTurn) {
-      return { ok: false, reason: "Mỗi lượt chỉ kích hoạt Lai Tạo Tại Trận Hàng 2 được 1 lần." };
-    }
-    const captive = p.row2[captiveIdx];
-    if (!captive) return { ok: false, reason: "Không tìm thấy tù binh ở Hàng 2." };
-    if (captive.bredUsed) return { ok: false, reason: `${captive.name} đã hoàn tất chu kỳ lai tạo trận này.` };
+  // Compute exact Row 2 auto-breeding chance for an active Male-captured-Female pair:
+  // Tamarite = 100%; all others strictly 0-99%!
+  getEffectiveBreedChance(captive) {
+    const r2 = captive.row2Effect || {};
+    if (r2.tier === "tamarite") return 100;
 
-    // Sovereign CR >= 800 Immunity unless Dick Pierce bypass or Cosmic Leader >= 850 CR
-    const hasBypass = captive.id === "dick" ||
-      (p.leader.id === "dick") ||
-      p.row2.some((c) => c.row2Effect && c.row2Effect.bypassImmunity) ||
-      p.leader.cr >= 850;
-    if ((captive.cr || 0) >= 800 && !hasBypass) {
-      return {
-        ok: false,
-        reason: `Gen của ${captive.name} (CR ${captive.cr} >= 800) miễn nhiễm Lai Tạo cưỡng chế! (Cần Dick Pierce hoặc Thủ Lĩnh >= 850 CR).`
-      };
+    let chance = typeof r2.breedChance === "number" ? r2.breedChance : 55;
+    const sire = captive.sireCard;
+    if ((captive.cr || 0) >= 800 && r2.tier === "sovereign" && sire && (sire.cr >= 800 || sire.id === "dick")) {
+      chance = 82;
+    } else if (sire && sire.id === "dick") {
+      chance = Math.min(95, chance + 25);
     }
 
-    // Generate Faction-pure Hybrid card directly into Hand!
-    const mutBonus = (captive.row2Effect && captive.row2Effect.mutBonus) || 20;
-    let hybridCard = null;
+    const lane = typeof captive.captureLane === "number" ? this.lanes[captive.captureLane] : null;
+    if (lane && lane.id === "pherone_nexus") {
+      chance += 12;
+    }
 
-    // If Story GameState is linked and both have genetic profiles, try persistent Breeding Lab record!
-    if (this.gameStateRef && !captive.isHybrid && !captive.troopId && !p.leader.isHybrid && !p.leader.troopId) {
-      const catId = (captive.row2Effect && captive.row2Effect.id === "r2_mutator") ? "cat_mutagen" : "cat_photon";
-      const prevLen = this.gameStateRef.hybrids.length;
-      const res = executeBreeding(this.gameStateRef, p.leader.id, captive.id, catId);
-      if (res.ok && res.hybrid) {
-        // Ensure match token belongs strictly to Player Leader's faction so they can deploy it on Row 1!
-        const tokenData = { ...res.hybrid, fac: p.leader.fac };
-        hybridCard = makeInstance(hybridToCard(tokenData), "player", this.uidCounter++);
-        if (this.gameStateRef.hybrids.length > prevLen && res.hybrid.fac !== p.leader.fac) {
-          res.hybrid.fac = p.leader.fac;
-        }
+    // Strict rule: Non-Tamarite capped strictly at 0-99%!
+    return Math.max(0, Math.min(99, chance));
+  }
+
+  // Generate 1 (or 2 if Omni-Womb Twin morph!) Token Hybrid card(s) from Row 2 active breeding pair
+  spawnTokensForCaptive(sideKey, captive, forcedRoll = null) {
+    const side = this.getSide(sideKey);
+    const r2 = captive.row2Effect || {};
+    const sire = captive.sireCard || side.leader;
+    const chance = this.getEffectiveBreedChance(captive);
+    const roll = forcedRoll !== null ? forcedRoll : Math.random() * 100;
+
+    if (roll >= chance) {
+      return { spawned: [], chance, missed: true };
+    }
+
+    const morph = r2.omniWomb
+      ? OMNI_VARIANTS[Math.floor(Math.random() * OMNI_VARIANTS.length)]
+      : null;
+
+    const countToSpawn = morph && morph.key === "twin" ? 2 : 1;
+    const created = [];
+
+    for (let k = 0; k < countToSpawn; k++) {
+      if (side.hand.length >= this.maxHandSize) break;
+      let tokenCR = (sire.cr * 0.45 + captive.cr * 0.55) * (r2.crMult || 0.9);
+      if (r2.gapMutation && Math.abs((sire.cr || 0) - (captive.cr || 0)) >= 200) {
+        tokenCR += 160;
       }
-    }
+      if (morph) tokenCR += morph.crBonus;
 
-    if (!hybridCard) {
-      const tokenCR = Math.round(p.leader.cr * 0.45 + captive.cr * 0.55 + mutBonus * 2.5);
-      const tokenH = +(((p.leader.h || 1.75) + (captive.h || 1.75)) / 2).toFixed(2);
-      const hObj = {
-        id: `field_hyb_${this.uidCounter}`,
-        name: `${p.leader.name.split(" ")[0]}-${captive.name.split(" ")[0]} F1`,
-        fac: p.leader.fac,
-        species: `${p.leader.species.split(" ")[0]}-${captive.species.split(" ")[0]}`,
-        race: p.leader.race,
-        cr: tokenCR,
-        h: tokenH,
-        mutated: mutBonus >= 30,
-        parentAId: p.leader.id,
-        parentBId: captive.id,
-        signatureSkill: `Gen ${captive.row2Effect ? captive.row2Effect.tag : "Hợp Nhất"}`
+      // Apply Human Pure / Unbuffed Negative CR% Debuff!
+      if (r2.crPenaltyPct && r2.crPenaltyPct > 0) {
+        tokenCR = tokenCR * (1 - r2.crPenaltyPct / 100);
+      }
+
+      const finalCR = Math.max(25, Math.round(tokenCR));
+      const raceKey = (captive.race || sire.race || "hybrid").toLowerCase();
+      const styleA = RACE_STYLE[sire.race] || { aura: "#38bdf8" };
+      const styleB = RACE_STYLE[captive.race] || { aura: "#f472b6" };
+
+      const suffix = morph ? morph.title : (r2.tier === "tamarite" ? "Tamarite" : (r2.crPenaltyPct >= 20 ? "Yếu Gen" : "Hậu Duệ"));
+      const gender = Math.random() < 0.5 ? "Male" : "Female";
+
+      const tokenObj = {
+        id: `tok_${this.turn}_${this.uidCounter}`,
+        isToken: true,
+        name: `${sire.name.split(" ")[0]}×${captive.name.split(" ")[0]} [${suffix}]`,
+        fac: side.leader.fac, // Follows Owner Leader Faction so it can immediately be deployed onto Row 1!
+        species: morph ? `Omni-Token (${captive.species.split(" ")[0]})` : `Token (${sire.species.split(" ")[0]} × ${captive.species.split(" ")[0]})`,
+        race: raceKey,
+        gender,
+        cr: finalCR,
+        h: Number((((sire.h || 1.8) + (captive.h || 1.75)) / 2).toFixed(2)),
+        auraA: styleA.aura,
+        auraB: styleB.aura,
+        mutated: r2.tier === "tamarite" || Boolean(r2.omniWomb),
+        row1Effect: morph
+          ? { id: morph.r1Id, tag: morph.tag, bonusFlat: morph.crBonus, desc: morph.desc }
+          : (r2.tier === "tamarite"
+            ? { id: "hyper_photon", tag: "Token Tamarite (+110 CR)", bonusFlat: 110, desc: "Hàng 1: Token huyết thống Tamarite +110 CR chiến đấu!" }
+            : (r2.blueBlood
+              ? { id: "blue_blood_guard", tag: "Máu Xanh Miễn Virus (+70 CR)", bonusFlat: 70, desc: "Hàng 1: +70 CR & kháng trừ CR." }
+              : { id: "frontline_valor", tag: r2.crPenaltyPct >= 20 ? "Token Suy Yếu (+20 CR)" : "Token Lai Chiến (+55 CR)", bonusFlat: r2.crPenaltyPct >= 20 ? 20 : 55, desc: "Hàng 1: Token hậu duệ tham chiến." })),
+        row2Effect: {
+          id: "tok_r2",
+          tier: r2.tier === "tamarite" ? "tamarite" : "alien",
+          breedChance: r2.tier === "tamarite" ? 100 : 55,
+          crAura: Math.max(30, Math.round(finalCR * 0.12)),
+          crMult: 0.85,
+          crPenaltyPct: r2.crPenaltyPct || 0,
+          tag: r2.tier === "tamarite" ? "Token Tamarite (100%)" : "Hậu Duệ Thế Hệ Sau (55%)",
+          desc: `Hàng 2: +${Math.max(30, Math.round(finalCR * 0.12))} CR hỗ trợ Hàng 1.`
+        }
       };
-      hybridCard = makeInstance(hybridToCard(hObj), "player", this.uidCounter++);
+
+      const inst = makeInstance(hybridToCard(tokenObj), sideKey, this.uidCounter++);
+      side.hand.push(inst);
+      captive.spawnCount = (captive.spawnCount || 0) + 1;
+      created.push(inst);
     }
 
-    captive.bredUsed = true;
-    p.fieldBreedUsedThisTurn = true;
-    p.hand.push(hybridCard);
-    this.pushLog(`🧬 Lai Tạo Tại Trận Hàng 2 (${p.leader.name} × ${captive.name}) -> Sinh ra thẻ ${hybridCard.name} (CR ${hybridCard.cr}, phe ${p.leader.fac}) lên tay!`);
-    return { ok: true, hybridCard };
+    return { spawned: created, chance, missed: false };
   }
 
   aiDeployRow1() {
@@ -376,35 +422,34 @@ export class CardBattleEngine {
     const emptyLanes = [0, 1, 2].filter((idx) => e.row1[idx] === null);
     if (emptyLanes.length === 0 || e.hand.length === 0) return;
 
-    // Sort AI hand by effective CR; contest player occupied lanes with best matching counter!
-    const playerOccupiedLanes = emptyLanes.filter((idx) => this.player.row1[idx] !== null);
-    const otherEmptyLanes = emptyLanes.filter((idx) => this.player.row1[idx] === null);
-    const laneOrder = [...playerOccupiedLanes, ...otherEmptyLanes];
+    const occupiedByPlayer = emptyLanes.filter((idx) => this.player.row1[idx] !== null);
+    const otherEmpty = emptyLanes.filter((idx) => this.player.row1[idx] === null);
+    const laneOrder = [...occupiedByPlayer, ...otherEmpty];
 
     for (const laneIdx of laneOrder) {
       if (e.hand.length === 0) break;
       const pCard = this.player.row1[laneIdx];
-      let bestHandIdx = 0;
+      let bestIdx = 0;
       let bestScore = -1;
 
       e.hand.forEach((c, idx) => {
-        const eVal = this.evalCardCombatCR(c, pCard, "enemy").total;
+        const eVal = this.evalCardCombatCR(c, pCard, "enemy", { laneIdx }).total;
         let score = eVal;
         if (pCard) {
-          const pVal = this.evalCardCombatCR(pCard, c, "player").total;
-          // Prefer narrow win or strong trade rather than wasting top card on weak lane
-          score = eVal > pVal ? 10000 - (eVal - pVal) : eVal;
+          const pVal = this.evalCardCombatCR(pCard, c, "player", { laneIdx }).total;
+          const bonusMaleHunt = (c.gender === "Male" && pCard.gender === "Female") ? 180 : 0;
+          score = eVal > pVal ? 10000 - (eVal - pVal) + bonusMaleHunt : eVal;
         }
         if (score > bestScore) {
           bestScore = score;
-          bestHandIdx = idx;
+          bestIdx = idx;
         }
       });
 
-      const chosen = e.hand.splice(bestHandIdx, 1)[0];
+      const chosen = e.hand.splice(bestIdx, 1)[0];
       chosen.deployedTurn = this.turn;
       e.row1[laneIdx] = chosen;
-      this.pushLog(`👁️ Đối thủ đặt ${chosen.name} (CR ${chosen.cr}) vào Hàng 1 - Làn ${laneIdx + 1}.`);
+      this.pushLog(`👁️ Đối thủ đặt ${chosen.name} (${chosen.gender === "Male" ? "♂" : "♀"} • CR ${chosen.cr}) vào Làn ${laneIdx + 1}.`);
     }
   }
 
@@ -417,7 +462,9 @@ export class CardBattleEngine {
       return { ok: false, reason: "Hãy đặt ít nhất 1 thẻ ra Hàng 1 trước khi Đấu Theo Chiều Dọc!" };
     }
 
-    // 1. AI deploys into open Enemy Row 1 lanes
+    this.lastNewTokens = [];
+
+    // 1. Enemy deploys into open Enemy Row 1 lanes
     this.aiDeployRow1();
 
     const laneResults = [];
@@ -428,35 +475,44 @@ export class CardBattleEngine {
       const eCard = this.enemy.row1[i];
 
       if (pCard && eCard) {
-        const pEval = this.evalCardCombatCR(pCard, eCard, "player");
-        const eEval = this.evalCardCombatCR(eCard, pCard, "enemy");
+        const pEval = this.evalCardCombatCR(pCard, eCard, "player", { laneIdx: i });
+        const eEval = this.evalCardCombatCR(eCard, pCard, "enemy", { laneIdx: i });
 
         if (pEval.total > eEval.total) {
-          // Enemy loses -> Captured into Player Row 2! (Cannot be summoned to Row 1)
           this.enemy.row1[i] = null;
           eCard.ownerSide = "captured_by_player";
+          eCard.captureLane = i;
+          if (pCard.gender === "Male" && eCard.gender === "Female") {
+            eCard.breedingActive = true;
+            eCard.sireCard = pCard;
+            this.pushLog(`💗 Làn ${i + 1}: ${pCard.name} (♂ ${pEval.total}) thắng ${eCard.name} (♀ ${eEval.total}) -> Gửi sang Hàng 2 & kích hoạt Lai Tạo mỗi lượt! (${this.player.row2.length + 1}/3)`);
+          } else {
+            this.pushLog(`🏆 Làn ${i + 1}: ${pCard.name} (${pEval.total} CR) thắng ${eCard.name} (${eEval.total} CR) -> Bắt vào Hàng 2 ta! (${this.player.row2.length + 1}/3)`);
+          }
           this.player.row2.push(eCard);
-          this.pushLog(`🏆 Làn ${i + 1}: ${pCard.name} (${pEval.total} CR) thắng ${eCard.name} (${eEval.total} CR) -> BẮT ${eCard.name} vào Hàng 2 của bạn! (${this.player.row2.length}/3)`);
-          laneResults.push({ lane: i, outcome: "player_win", pTotal: pEval.total, eTotal: eEval.total, captured: eCard.name });
+          laneResults.push({ lane: i, outcome: "player_win", pTotal: pEval.total, eTotal: eEval.total, captured: eCard.name, triggeredBreed: eCard.breedingActive });
         } else if (eEval.total > pEval.total) {
-          // Player loses -> Captured into Enemy Row 2!
           this.player.row1[i] = null;
           pCard.ownerSide = "captured_by_enemy";
+          pCard.captureLane = i;
+          if (eCard.gender === "Male" && pCard.gender === "Female") {
+            pCard.breedingActive = true;
+            pCard.sireCard = eCard;
+            this.pushLog(`💢 Làn ${i + 1}: ${eCard.name} (♂ ${eEval.total}) thắng ${pCard.name} (♀ ${pCard.cr}->${pEval.total}) -> Gửi sang Hàng 2 Địch & lai tạo mỗi lượt! (${this.enemy.row2.length + 1}/3)`);
+          } else {
+            this.pushLog(`💥 Làn ${i + 1}: ${eCard.name} (${eEval.total} CR) áp đảo ${pCard.name} (${pEval.total} CR) -> Đưa vào Hàng 2 Địch! (${this.enemy.row2.length + 1}/3)`);
+          }
           this.enemy.row2.push(pCard);
-          this.pushLog(`💥 Làn ${i + 1}: ${eCard.name} (${eEval.total} CR) áp đảo ${pCard.name} (${pEval.total} CR) -> Bị bắt vào Hàng 2 đối thủ! (${this.enemy.row2.length}/3)`);
-          laneResults.push({ lane: i, outcome: "enemy_win", pTotal: pEval.total, eTotal: eEval.total, captured: pCard.name });
+          laneResults.push({ lane: i, outcome: "enemy_win", pTotal: pEval.total, eTotal: eEval.total, captured: pCard.name, triggeredBreed: pCard.breedingActive });
         } else {
-          // Exact tie: push both back? No, let both clash hold cleanly
-          this.pushLog(`⚖️ Làn ${i + 1}: ${pCard.name} hòa ${eCard.name} ở mức ${pEval.total} CR — cả hai giữ nguyên Hàng 1.`);
+          this.pushLog(`⚖️ Làn ${i + 1}: ${pCard.name} hòa ${eCard.name} tại ${pEval.total} CR — giữ nguyên vị trí.`);
           laneResults.push({ lane: i, outcome: "tie", pTotal: pEval.total, eTotal: eEval.total });
         }
       } else if (pCard && !eCard) {
-        const pEval = this.evalCardCombatCR(pCard, null, "player");
-        this.pushLog(`🛡️ Làn ${i + 1}: ${pCard.name} (${pEval.total} CR) kiểm soát làn trống.`);
+        const pEval = this.evalCardCombatCR(pCard, null, "player", { laneIdx: i });
         laneResults.push({ lane: i, outcome: "player_hold", pTotal: pEval.total, eTotal: 0 });
       } else if (!pCard && eCard) {
-        const eEval = this.evalCardCombatCR(eCard, null, "enemy");
-        this.pushLog(`⚠️ Làn ${i + 1}: ${eCard.name} (${eEval.total} CR) chiếm làn đối diện.`);
+        const eEval = this.evalCardCombatCR(eCard, null, "enemy", { laneIdx: i });
         laneResults.push({ lane: i, outcome: "enemy_hold", pTotal: 0, eTotal: eEval.total });
       }
     }
@@ -466,7 +522,7 @@ export class CardBattleEngine {
       this.over = true;
       this.winner = "player";
       this.winReason = "capture_3";
-      this.pushLog(`🎉 CHIẾN THẮNG! Bạn đã bắt giữ đủ 3 thẻ của đối phương vào Hàng 2!`);
+      this.pushLog(`🎉 CHIẾN THẮNG! Đã bắt đủ 3 thẻ đối thủ vào Hàng 2!`);
       return { ok: true, laneResults, over: true, winner: "player", winReason: "capture_3" };
     }
     if (this.enemy.row2.length >= 3) {
@@ -477,53 +533,70 @@ export class CardBattleEngine {
       return { ok: true, laneResults, over: true, winner: "enemy", winReason: "capture_3" };
     }
 
-    // 4. Row 3 Representative Attack Rule:
-    // Leader in Row 3 CANNOT be attacked while ANY card exists on Row 1.
-    // Once a side's Row 1 is completely EMPTY and the opposing Row 1 has attackers:
-    // Compare Sum(Attacker Row 1 CR) vs Defender Row 3 Leader Effective CR!
+    // 4. Row 3 Outer Representative Breach Check (Only when Row 1 is completely empty!)
     const pRow1Cards = this.getRow1Cards("player");
     const eRow1Cards = this.getRow1Cards("enemy");
 
     if (eRow1Cards.length === 0 && pRow1Cards.length > 0) {
       const totalPAtk = pRow1Cards.reduce((s, c) => s + this.evalCardCombatCR(c, this.enemy.leader, "player", { attackingRow3: true }).total, 0);
       const eRepEval = this.evalCardCombatCR(this.enemy.leader, pRow1Cards[0], "enemy");
-      this.pushLog(`⚡ Hàng 1 địch TRỐNG! Toàn bộ Hàng 1 (${totalPAtk} CR) tấn công thẳng ${this.enemy.leader.name} ở Hàng 3 (${eRepEval.total} CR)!`);
+      this.pushLog(`⚡ Hàng 1 địch TRỐNG! Tổng CR Hàng 1 (${totalPAtk}) công phá ${this.enemy.leader.name} Hàng 3 (${eRepEval.total} CR)!`);
       if (totalPAtk > eRepEval.total) {
         this.over = true;
         this.winner = "player";
         this.winReason = "leader_breach";
-        this.pushLog(`👑 HẠ GỤC THỦ LĨNH HÀNG 3! Tổng CR Hàng 1 (${totalPAtk}) vượt qua ${this.enemy.leader.name} (${eRepEval.total}) -> CHIẾN THẮNG!`);
+        this.pushLog(`👑 HẠ GỤC THỦ LĨNH HÀNG 3! (${totalPAtk} > ${eRepEval.total}) -> CHIẾN THẮNG!`);
         return { ok: true, laneResults, over: true, winner: "player", winReason: "leader_breach", row3Attack: { totalPAtk, repCR: eRepEval.total } };
       } else {
-        this.pushLog(`🛡️ Thủ lĩnh Hàng 3 ${this.enemy.leader.name} (${eRepEval.total} CR) đứng vững trước đợt công phá (${totalPAtk} CR)!`);
+        this.pushLog(`🛡️ Thủ lĩnh Hàng 3 ${this.enemy.leader.name} (${eRepEval.total} CR) phòng thủ thành công!`);
       }
     }
 
     if (pRow1Cards.length === 0 && eRow1Cards.length > 0) {
       const totalEAtk = eRow1Cards.reduce((s, c) => s + this.evalCardCombatCR(c, this.player.leader, "enemy", { attackingRow3: true }).total, 0);
       const pRepEval = this.evalCardCombatCR(this.player.leader, eRow1Cards[0], "player");
-      this.pushLog(`⚠️ Hàng 1 của bạn TRỐNG! Tổng CR địch (${totalEAtk}) công kích thẳng Thủ lĩnh Hàng 3 ${this.player.leader.name} (${pRepEval.total} CR)!`);
+      this.pushLog(`⚠️ Hàng 1 bạn TRỐNG! Tổng CR địch (${totalEAtk}) công kích ${this.player.leader.name} Hàng 3 (${pRepEval.total} CR)!`);
       if (totalEAtk > pRepEval.total) {
         this.over = true;
         this.winner = "enemy";
         this.winReason = "leader_breach";
-        this.pushLog(`💀 GAME OVER! Thủ lĩnh ${this.player.leader.name} (${pRepEval.total} CR) bị đánh bại bởi Tổng CR Hàng 1 địch (${totalEAtk})!`);
+        this.pushLog(`💀 GAME OVER! Thủ lĩnh Hàng 3 ${this.player.leader.name} thất thủ (${totalEAtk} > ${pRepEval.total})!`);
         return { ok: true, laneResults, over: true, winner: "enemy", winReason: "leader_breach", row3Attack: { totalEAtk, repCR: pRepEval.total } };
       } else {
-        this.pushLog(`💪 Thủ lĩnh ${this.player.leader.name} (${pRepEval.total} CR) chặn đứng đợt xung kích vào Hàng 3!`);
+        this.pushLog(`💪 Thủ lĩnh ${this.player.leader.name} (${pRepEval.total} CR) đẩy lùi đợt tổng công kích!`);
       }
     }
 
-    // 5. Advance Turn, Replenish Hands up to 5 cards, Check Exhaustion Stalemate
+    // 5A. END OF TURN: Auto-Breed every active Male×Female pair sitting in Row 2!
+    for (const sideKey of ["player", "enemy"]) {
+      const side = this.getSide(sideKey);
+      for (const cap of side.row2) {
+        if (!cap.breedingActive) continue;
+        const breedRes = this.spawnTokensForCaptive(sideKey, cap);
+        if (breedRes.spawned.length > 0) {
+          for (const tok of breedRes.spawned) {
+            if (sideKey === "player") this.lastNewTokens.push(tok);
+            const sideLbl = sideKey === "player" ? "Ta" : "Địch";
+            const debuffNote = cap.row2Effect?.crPenaltyPct >= 20 ? ` [Bất lợi Người Thuần -${cap.row2Effect.crPenaltyPct}% CR]` : "";
+            this.pushLog(`🧬 [Hàng 2 ${sideLbl} • ${breedRes.chance}%] ${cap.sireCard?.name || "?"} ♂ × ${cap.name} ♀ -> Sinh Token ${tok.name} (CR ${tok.cr})${debuffNote} lên tay!`);
+          }
+        } else {
+          const sideLbl = sideKey === "player" ? "Ta" : "Địch";
+          this.pushLog(`🎲 [Hàng 2 ${sideLbl} • ${breedRes.chance}%] ${cap.name} lượt này chưa kết hợp được Token.`);
+        }
+      }
+    }
+
+    // 5B. END OF TURN: Draw 2 Cards from Deck for BOTH sides!
+    const pDrawn = this.drawCards("player", 2);
+    const eDrawn = this.drawCards("enemy", 2);
+    if (pDrawn > 0 || eDrawn > 0) {
+      this.pushLog(`🃏 Hết Lượt ${this.turn}: Rút +${pDrawn} lá từ Bộ Bài (Địch +${eDrawn}).`);
+    }
+
     this.turn++;
-    this.player.placedThisTurn = 0;
-    this.enemy.placedThisTurn = 0;
-    this.player.fieldBreedUsedThisTurn = false;
-    this.enemy.fieldBreedUsedThisTurn = false;
 
-    this.drawCards("player", Math.max(0, 5 - this.player.hand.length));
-    this.drawCards("enemy", Math.max(0, 5 - this.enemy.hand.length));
-
+    // 6. Stalemate safeguard only if both sides completely exhausted hand + deck
     const stalemate = this.turn > this.maxTurns || (
       this.player.hand.length === 0 && this.player.deck.length === 0 &&
       this.enemy.hand.length === 0 && this.enemy.deck.length === 0
@@ -534,16 +607,15 @@ export class CardBattleEngine {
       this.winReason = "tiebreak";
       if (this.player.row2.length !== this.enemy.row2.length) {
         this.winner = this.player.row2.length > this.enemy.row2.length ? "player" : "enemy";
-        this.pushLog(`⌛ Hết bài chiến thuật — phân định theo số thẻ bắt giữ Hàng 2 (${this.player.row2.length} vs ${this.enemy.row2.length})!`);
       } else {
         const pTotal = this.getRow1Cards("player").reduce((s, c) => s + c.cr, this.player.leader.cr);
         const eTotal = this.getRow1Cards("enemy").reduce((s, c) => s + c.cr, this.enemy.leader.cr);
         this.winner = pTotal >= eTotal ? "player" : "enemy";
-        this.pushLog(`⌛ Phân định thắng bại bằng Tổng CR còn lại trên sân (${pTotal} vs ${eTotal})!`);
       }
-      return { ok: true, laneResults, over: true, winner: this.winner, winReason: "tiebreak" };
+      this.pushLog(`⌛ Hết bài chiến thuật — phân định chung cuộc (${this.winner === "player" ? "Thắng" : "Thua"})!`);
+      return { ok: true, laneResults, over: true, winner: this.winner, winReason: "tiebreak", newTokens: this.lastNewTokens, playerDraws: pDrawn, enemyDraws: eDrawn };
     }
 
-    return { ok: true, laneResults, over: false };
+    return { ok: true, laneResults, over: false, newTokens: this.lastNewTokens, playerDraws: pDrawn, enemyDraws: eDrawn };
   }
 }
