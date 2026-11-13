@@ -5,18 +5,23 @@
 import { FACTIONS, PLAYABLE, SUPERWEAPONS, EVENT_POOL } from "../data/lore.js";
 import { SECTORS, SECTOR_BY_ID } from "../data/galaxy.js";
 import { CHARACTERS, CHAR_BY_ID } from "../data/characters.js";
+import { buildFactionDeck, validateDeckForLeader } from "../data/cards.js";
 
 const SAVE_PREFIX = "CYCLE12_SAVE_V3_";
 
 export const ACHIEVEMENTS = [
-  { id: "first_blood", name: "Chiến Thần Sàn Đấu", desc: "Giành chiến thắng đầu tiên trong Đấu Trường 3D.", rewardCr: 400, rewardInf: 30, check: (g) => (g.stats?.battlesWon || 0) >= 1 },
-  { id: "gladiator_5", name: "Bá Chủ Đấu Trường", desc: "Thắng 5 trận đối kháng 3D.", rewardCr: 1200, rewardInf: 80, check: (g) => (g.stats?.battlesWon || 0) >= 5 },
-  { id: "gotterfall_fire", name: "Cơn Thịnh Nộ Vì Sao", desc: "Khai hỏa một Siêu vũ khí chiến lược cấp hành tinh.", rewardCr: 500, rewardInf: 45, check: (g) => (g.stats?.superweaponsFired || 0) >= 1 },
-  { id: "shadow_intel", name: "Tai Mắt Bóng Đêm", desc: "Thực hiện 2 chiến dịch Tình báo & Phá hoại thành công.", rewardCr: 450, rewardInf: 60, check: (g) => (g.stats?.reconOps || 0) >= 2 },
-  { id: "social_bonds", name: "Tri Kỷ Gaiastra", desc: "Đạt Độ tin cậy >= 50 với ít nhất 3 nhân vật.", rewardCr: 600, rewardInf: 90, check: (g) => Object.values(g.vn?.affinity || {}).filter(v => v >= 50).length >= 3 },
-  { id: "story_half", name: "Biên Niên Sử Giữa Kỷ", desc: "Hoàn thành ít nhất 4 chương Cốt truyện Tương tác.", rewardCr: 800, rewardInf: 100, check: (g) => (g.vn?.completedChapters?.length || 0) >= 4 },
-  { id: "story_master", name: "Huyền Thoại Cycle 12", desc: "Hoàn thành trọn vẹn toàn bộ 8 chương Cốt truyện!", rewardCr: 2500, rewardInf: 250, check: (g) => (g.vn?.completedChapters?.length || 0) >= 8 },
-  { id: "hegemon", name: "Thống Lĩnh Thiên Hà", desc: "Kiểm soát từ 75% lãnh thổ Gaiastra trở lên.", rewardCr: 2000, rewardInf: 200, check: (g) => g.getFactionTerritoryPct(g.playerFaction) >= 75 }
+  { id: "first_blood",   title: "Chiến Thần Sàn Bài",      name: "Chiến Thần Sàn Bài",      desc: "Giành chiến thắng đầu tiên trong Chế Độ Đấu Thẻ Bài.",         rewardCr: 450,  rewardInf: 30,  check: (g) => (g.stats?.battlesWon || 0) >= 1 },
+  { id: "gladiator_5",   title: "Bá Chủ Bộ Bài",           name: "Bá Chủ Bộ Bài",           desc: "Thắng 5 trận Đấu Thẻ Bài chiến thuật.",                       rewardCr: 1200, rewardInf: 80,  check: (g) => (g.stats?.battlesWon || 0) >= 5 },
+  { id: "void_walker",   title: "Chinh Phục Tháp Hư Không", name: "Chinh Phục Tháp Hư Không", desc: "Vượt qua Tầng 3 trong chế độ sinh tồn Tháp Hư Không.",         rewardCr: 1500, rewardInf: 110, check: (g) => (g.stats?.gauntletMax || 0) >= 3 },
+  { id: "first_hybrid",  title: "Kiến Tạo Huyết Thống",    name: "Kiến Tạo Huyết Thống",    desc: "Lai tạo thành công hậu duệ Hybrid đầu tiên trong Phòng Lab.",   rewardCr: 750,  rewardInf: 55,  check: (g) => (g.stats?.hybridsCreated || 0) >= 1 },
+  { id: "gene_architect",title: "Bậc Thầy Di Truyền",     name: "Bậc Thầy Di Truyền",     desc: "Sở hữu ít nhất 3 hậu duệ Lai Tạo trong kho gia phả.",          rewardCr: 1800, rewardInf: 140, check: (g) => (g.hybrids?.length || 0) >= 3 },
+  { id: "lore_seeker",   title: "Người Xem Sử Thi",         name: "Người Xem Sử Thi",         desc: "Hoàn tất Cutscene Lịch Sử Vũ Trụ Gaiastra.",                  rewardCr: 400,  rewardInf: 45,  check: (g) => (g.stats?.cutscenesWatched || 0) >= 1 },
+  { id: "gotterfall_fire",title:"Cơn Thịnh Nộ Vì Sao",     name: "Cơn Thịnh Nộ Vì Sao",     desc: "Khai hỏa một Siêu vũ khí chiến lược cấp hành tinh.",          rewardCr: 600,  rewardInf: 50,  check: (g) => (g.stats?.superweaponsFired || 0) >= 1 },
+  { id: "shadow_intel",  title: "Tai Mắt Bóng Đêm",        name: "Tai Mắt Bóng Đêm",        desc: "Thực hiện 2 chiến dịch Tình báo & Phá hoại thành công.",       rewardCr: 450,  rewardInf: 60,  check: (g) => (g.stats?.reconOps || 0) >= 2 },
+  { id: "social_bonds",  title: "Tri Kỷ Gaiastra",         name: "Tri Kỷ Gaiastra",         desc: "Đạt Độ tin cậy >= 50 với ít nhất 3 nhân vật.",                rewardCr: 650,  rewardInf: 90,  check: (g) => Object.values(g.vn?.affinity || {}).filter(v => v >= 50).length >= 3 },
+  { id: "story_half",    title: "Biên Niên Sử Giữa Kỷ",    name: "Biên Niên Sử Giữa Kỷ",    desc: "Hoàn thành ít nhất 5 chương Cốt truyện Tương tác.",           rewardCr: 900,  rewardInf: 100, check: (g) => (g.vn?.completedChapters?.length || 0) >= 5 },
+  { id: "story_master",  title: "Huyền Thoại Cycle 12",    name: "Huyền Thoại Cycle 12",    desc: "Hoàn thành trọn vẹn toàn bộ 11 chương (Khởi Nguyên + I–X)!",  rewardCr: 3000, rewardInf: 300, check: (g) => (g.vn?.completedChapters?.length || 0) >= 11 },
+  { id: "hegemon",       title: "Thống Lĩnh Thiên Hà",     name: "Thống Lĩnh Thiên Hà",     desc: "Kiểm soát từ 75% lãnh thổ Gaiastra trở lên.",                 rewardCr: 2200, rewardInf: 220, check: (g) => g.getFactionTerritoryPct(g.playerFaction) >= 75 }
 ];
 
 export class GameState {
@@ -27,6 +32,8 @@ export class GameState {
   reset() {
     this.cycleMajor = 12;
     this.cycleMinor = 1;
+    this.protagonistId = "arisia";
+    this.starterPicked = false;
     this.playerFaction = "sylvarian";
     this.tension = 45;
 
@@ -37,12 +44,18 @@ export class GameState {
     };
 
     this.resources = {
-      sylvarian: { credits: 125000, influence: 520, research: 340, tributes: 40.0 },
-      eris: { credits: 98000, influence: 850, research: 990, tributes: 0.0 },
-      nadirius: { credits: 64000, influence: 410, research: 280, tributes: 12.0 },
-      western_nadir: { credits: 72000, influence: 330, research: 190, tributes: 85.0 },
-      salvic: { credits: 55000, influence: 490, research: 360, tributes: 5.0 }
+      sylvarian:     { credits: 125000, influence: 520, research: 340, tributes: 40.0 },
+      eris:          { credits: 98000,  influence: 850, research: 990, tributes: 0.0 },
+      nadirius:      { credits: 64000,  influence: 410, research: 280, tributes: 12.0 },
+      western_nadir: { credits: 72000,  influence: 330, research: 190, tributes: 85.0 },
+      salvic:        { credits: 55000,  influence: 490, research: 360, tributes: 5.0 },
+      tamarite:      { credits: 92000,  influence: 600, research: 880, tributes: 20.0 },
+      collectors:    { credits: 84000,  influence: 460, research: 640, tributes: 15.0 },
+      independent:   { credits: 48000,  influence: 450, research: 410, tributes: 0.0 }
     };
+
+    this.hybrids = [];
+    this.customDeck = buildFactionDeck(this.protagonistId, this.hybrids);
 
     this.sectors = {};
     for (const s of SECTORS) {
@@ -87,7 +100,7 @@ export class GameState {
 
     // Visual Novel & RPG State
     this.vn = {
-      currentChapterId: "ch1_gotterfall",
+      currentChapterId: "ch0_origin",
       currentNodeId: "start",
       completedChapters: [],
       flags: {},
@@ -107,7 +120,10 @@ export class GameState {
     this.stats = {
       battlesWon: 0,
       superweaponsFired: 0,
-      reconOps: 0
+      reconOps: 0,
+      hybridsCreated: 0,
+      gauntletMax: 0,
+      cutscenesWatched: 0
     };
     this.unlockedAchievements = [];
 
@@ -154,14 +170,82 @@ export class GameState {
   }
 
   getChampionForFaction(facId) {
+    if (facId === this.playerFaction && this.protagonistId) return this.protagonistId;
     const defaults = {
       sylvarian: "arisia",
       eris: "emma",
       nadirius: "magnatere",
       western_nadir: "overlord",
-      salvic: "zarcseid"
+      salvic: "zarcseid",
+      tamarite: "ovalina",
+      collectors: "mrmind",
+      independent: "felicia"
     };
     return defaults[facId] || "arisia";
+  }
+
+  getProtagonist() {
+    if (CHAR_BY_ID[this.protagonistId]) return CHAR_BY_ID[this.protagonistId];
+    const hy = (this.hybrids || []).find((h) => h.id === this.protagonistId);
+    if (hy) {
+      return {
+        id: hy.id,
+        name: hy.name,
+        title: "Hậu Duệ Chủ Tướng Hybrid",
+        fac: hy.fac || this.playerFaction,
+        species: hy.species,
+        race: hy.race,
+        cr: hy.cr,
+        loc: "sylvalon",
+        isHybrid: true
+      };
+    }
+    return CHAR_BY_ID.arisia;
+  }
+
+  selectProtagonist(charId, restartStory = false) {
+    const ch = CHAR_BY_ID[charId];
+    const hy = (this.hybrids || []).find((h) => h.id === charId);
+    const subj = ch || hy;
+    if (!subj) return false;
+
+    this.protagonistId = subj.id;
+    this.starterPicked = true;
+    this.playerFaction = subj.fac && FACTIONS[subj.fac] ? subj.fac : "independent";
+    if (!this.resources[this.playerFaction]) {
+      this.resources[this.playerFaction] = { credits: 50000, influence: 400, research: 350, tributes: 0 };
+    }
+    this.customDeck = buildFactionDeck(subj.id, this.hybrids);
+
+    if (restartStory) {
+      this.vn.currentChapterId = "ch0_origin";
+      this.vn.currentNodeId = "start";
+    }
+    this.addChronicle(`⭐ ${subj.name} (${this.facName(this.playerFaction)}) trở thành Nhân Vật Chính dẫn dắt Cycle ${this.cycleMajor}.${this.cycleMinor}.`);
+    this.saveToSlot("auto");
+    return true;
+  }
+
+  addChronicle(desc, title = "Biên Niên Sử", type = "lore") {
+    this.eventLog.unshift({
+      turn: `Cycle ${this.cycleMajor}.${this.cycleMinor}`,
+      type,
+      title,
+      desc
+    });
+    if (this.eventLog.length > 60) this.eventLog.length = 60;
+  }
+
+  recordGauntletFloor(floor) {
+    if (!this.stats) this.stats = {};
+    this.stats.gauntletMax = Math.max(this.stats.gauntletMax || 0, floor);
+    this.saveToSlot("auto");
+  }
+
+  recordCutsceneWatched() {
+    if (!this.stats) this.stats = {};
+    this.stats.cutscenesWatched = (this.stats.cutscenesWatched || 0) + 1;
+    this.saveToSlot("auto");
   }
 
   getFactionTerritoryPct(facId) {
@@ -541,10 +625,12 @@ export class GameState {
   // --- SAVE / LOAD MULTI-SLOT ---
   serialize() {
     return JSON.stringify({
-      version: 3,
+      version: 5,
       savedAt: new Date().toLocaleString("vi-VN"),
       cycleMajor: this.cycleMajor,
       cycleMinor: this.cycleMinor,
+      protagonistId: this.protagonistId,
+      starterPicked: this.starterPicked,
       playerFaction: this.playerFaction,
       tension: this.tension,
       pact: this.pact,
@@ -552,6 +638,8 @@ export class GameState {
       sectors: this.sectors,
       relations: this.relations,
       superweaponCooldowns: this.superweaponCooldowns,
+      hybrids: this.hybrids,
+      customDeck: this.customDeck,
       vn: this.vn,
       stats: this.stats,
       unlockedAchievements: this.unlockedAchievements,
@@ -575,15 +663,31 @@ export class GameState {
       const data = JSON.parse(raw);
       this.cycleMajor = data.cycleMajor ?? 12;
       this.cycleMinor = data.cycleMinor ?? 1;
+      this.protagonistId = data.protagonistId ?? "arisia";
+      this.starterPicked = Boolean(data.starterPicked);
       this.playerFaction = data.playerFaction ?? "sylvarian";
       this.tension = data.tension ?? 45;
       if (data.pact) this.pact = data.pact;
-      if (data.resources) this.resources = data.resources;
+      if (data.resources) {
+        this.resources = {
+          tamarite: { credits: 92000, influence: 600, research: 880, tributes: 20.0 },
+          collectors: { credits: 84000, influence: 460, research: 640, tributes: 15.0 },
+          independent: { credits: 48000, influence: 450, research: 410, tributes: 0.0 },
+          ...data.resources
+        };
+      }
       if (data.sectors) this.sectors = data.sectors;
       if (data.relations) this.relations = data.relations;
       if (data.superweaponCooldowns) this.superweaponCooldowns = data.superweaponCooldowns;
+      this.hybrids = Array.isArray(data.hybrids) ? data.hybrids : [];
+      const validated = Array.isArray(data.customDeck) && data.customDeck.length > 0
+        ? validateDeckForLeader(data.customDeck, this.protagonistId, this.hybrids)
+        : [];
+      this.customDeck = validated.length >= 6
+        ? validated
+        : buildFactionDeck(this.protagonistId, this.hybrids);
       if (data.vn) this.vn = data.vn;
-      if (data.stats) this.stats = data.stats;
+      this.stats = { battlesWon: 0, superweaponsFired: 0, reconOps: 0, hybridsCreated: 0, gauntletMax: 0, cutscenesWatched: 0, ...(data.stats || {}) };
       if (Array.isArray(data.unlockedAchievements)) this.unlockedAchievements = data.unlockedAchievements;
       if (data.eventLog) this.eventLog = data.eventLog;
       return true;

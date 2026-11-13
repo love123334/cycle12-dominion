@@ -5,3 +5,4 @@ _backup_v1/
 *.tmp
 .DS_Store
 Thumbs.db
+grok_portrait_prompts.md

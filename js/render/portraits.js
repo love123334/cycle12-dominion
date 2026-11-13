@@ -207,6 +207,36 @@ export function getPortraitUrl(char) {
   return url;
 }
 
+export function getHybridPortraitUrl(hybrid) {
+  if (!hybrid) return "";
+  const id = hybrid.id || "hybrid";
+  if (SVG_CACHE.has(id)) return SVG_CACHE.get(id);
+  const cA = hybrid.auraA || "#38bdf8";
+  const cB = hybrid.auraB || "#f472b6";
+  const initial = (hybrid.name || "H")[0].toUpperCase();
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 230">
+    <defs>
+      <linearGradient id="hbg_${id}" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#090d1f"/>
+        <stop offset="50%" stop-color="${cA}" stop-opacity="0.35"/>
+        <stop offset="100%" stop-color="${cB}" stop-opacity="0.45"/>
+      </linearGradient>
+    </defs>
+    <rect width="200" height="230" rx="16" fill="url(#hbg_${id})"/>
+    <circle cx="100" cy="96" r="68" fill="none" stroke="${cA}" stroke-width="2" stroke-dasharray="10 5"/>
+    <circle cx="100" cy="96" r="52" fill="none" stroke="${cB}" stroke-width="2.5"/>
+    <polygon points="100,40 144,96 100,152 56,96" fill="${cB}" fill-opacity="0.18" stroke="#fde047" stroke-width="2"/>
+    <path d="M68,72 C132,72 68,120 132,120" fill="none" stroke="#38bdf8" stroke-width="3.2" stroke-linecap="round"/>
+    <path d="M132,72 C68,72 132,120 68,120" fill="none" stroke="#f472b6" stroke-width="3.2" stroke-linecap="round"/>
+    <text x="100" y="106" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="38" font-weight="900" fill="#ffffff" stroke="#020617" stroke-width="1.5">${initial}</text>
+    <rect x="0" y="200" width="200" height="30" fill="#020617" fill-opacity="0.86"/>
+    <text x="100" y="219" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" font-weight="800" fill="#fde047">🧬 HYBRID CR ${hybrid.cr || 500}</text>
+  </svg>`;
+  const url = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+  SVG_CACHE.set(id, url);
+  return url;
+}
+
 export function moodLabel(mood) {
   switch (mood) {
     case "angry": return "🔥 Sát khí";

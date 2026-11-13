@@ -1,16 +1,27 @@
 // ============================================================================
-// CYCLE 12: AGE OF DOMINION — MAIN APPLICATION CONTROLLER (v3 PWA)
-// Interactive Visual Novel + 3D Galaxy Strategy + Real-Time 3D Arena +
-// 72-Character 3D Inspector + Diplomacy / Lore Codex / Offline Save System
+// CYCLE 12: AGE OF DOMINION — MAIN APPLICATION CONTROLLER (v5.0)
+// Tactical Card Game + Free Protagonist POV (72+Hybrids) + Cosmic Cutscenes +
+// 11-Chapter Branching VN + 3D Galaxy Conquest + Sci-Fi Genetics Breeding Lab
 // ============================================================================
 
 import { META, FACTIONS, PLAYABLE, SUPERWEAPONS, SPECIES, TIMELINE } from "./data/lore.js";
 import { SECTORS, SECTOR_BY_ID, findLocation, SECTOR_KIND_LABEL, BODY_KIND_LABEL, PLACE_KIND_LABEL } from "./data/galaxy.js";
 import { CHARACTERS, CHAR_BY_ID, RELATIONS, RACE_STYLE } from "./data/characters.js";
-import { CHAPTERS, CHAPTER_BY_ID, buildEncounterScene } from "./data/story.js";
+import { CHAPTERS, CHAPTER_BY_ID, buildEncounterScene, resolveStoryChar, resolveStorySector } from "./data/story.js";
+import {
+  CARD_BY_ID,
+  resolveCard,
+  getCardPortrait,
+  getFactionCardPool,
+  buildFactionDeck,
+  validateDeckForLeader
+} from "./data/cards.js";
+import { buildHistoryCutscenes } from "./data/cutscenes.js";
 import { GameState, ACHIEVEMENTS } from "./game/state.js";
+import { CardBattleEngine } from "./game/card_engine.js";
+import { CATALYSTS, previewBreeding, executeBreeding, resolveGeneticSubject } from "./game/breeding.js";
 import { UniverseEngine3D } from "./render/engine.js";
-import { getPortraitUrl, moodLabel } from "./render/portraits.js";
+import { getPortraitUrl, getHybridPortraitUrl, moodLabel } from "./render/portraits.js";
 import { SFX } from "./render/sfx.js";
 
 const ESC = (s) => String(s ?? "")
@@ -25,10 +36,12 @@ class Cycle12App {
     const hadAutoSave = this.game.loadFromSlot("auto");
 
     this.currentMode = "vn";
+    this.duelTab = "skirmish"; // 'skirmish' | 'gauntlet' | 'deck'
+    this.codexTab = "roster";  // 'roster' | 'cutscenes' | 'diplomacy' | 'events' | 'achievements' | 'species' | 'relations' | 'system'
+
     this.selectedSectorId = "sylvalon";
     this.selectedBodyId = null;
-    this.inspectedCharId = "arisia";
-    this.codexTab = "diplomacy";
+    this.inspectedRosterId = this.game.protagonistId || "arisia";
 
     // Visual Novel runtime
     this.activeEncounterScript = null;
@@ -41,27 +54,34 @@ class Cycle12App {
     this.pendingStoryBattle = null;
     this.pendingInvasionSectorId = null;
 
-    // Floating label DOM pool
+    // Card Game runtime
+    this.duelEngine = null;
+    this.duelContext = { kind: "skirmish", enemyId: "overlord", floor: 0, carryHp: null };
+
+    // Cutscene runtime
+    this.cutsceneSlides = [];
+    this.cutsceneIdx = 0;
+
+    // Floating 3D labels
     this.labelDomCache = new Map();
     this.deferredInstallPrompt = null;
 
-    // Khởi tạo Three.js 3D Engine
+    // Three.js Cosmic Engine (Galaxy + VN Backdrops + DNA Helix + Cutscenes)
     this.engine = new UniverseEngine3D("canvas3d-container", {
       onSectorSelect: (secId) => this.selectSector(secId, true),
       onBodySelect: (secId, bodyId) => this.selectBody(secId, bodyId),
-      onCombatTick: (tick) => this.handleCombatTick(tick),
-      onCombatEnd: (res) => this.handleCombatEnd(res),
-      onProjectLabels: (labels) => this.renderFloatingLabels(labels),
-      onFloatingDamage: (evt) => this.spawnFloatingDamage(evt)
+      onProjectLabels: (labels) => this.renderFloatingLabels(labels)
     });
 
     this.registerPWA();
     this.initNavigation();
     this.initTopHUD();
+    this.initProtagonistModal();
+    this.initCutsceneOverlay();
     this.initVNUI();
+    this.initDuelUI();
     this.initGalaxyUI();
-    this.initArenaUI();
-    this.initInspectorUI();
+    this.initBreedingUI();
     this.initCodexUI();
 
     this.engine.updateSectorColors(this.game);
@@ -69,13 +89,26 @@ class Cycle12App {
     this.renderVNNode();
     this.switchMode("vn");
 
-    if (hadAutoSave) {
-      this.showToast("Đã khôi phục tiến trình", `Chu kỳ ${this.game.cycleMajor}.${this.game.cycleMinor} • ${this.game.facName(this.game.playerFaction)}`);
+    if (hadAutoSave && this.game.starterPicked) {
+      const hero = this.game.getProtagonist();
+      this.showToast("Đã khôi phục tiến trình", `${hero.name} • Chu kỳ ${this.game.cycleMajor}.${this.game.cycleMinor}`);
     } else {
-      this.showToast("CYCLE 12: AGE OF DOMINION", "Sẵn sàng trải nghiệm Visual Novel & Vũ trụ 3D!");
+      // Fresh campaign: invite player to pick any of 72 characters + optionally watch Universe Cutscene
+      this.openProtagonistPicker(true);
     }
+  }
 
-    this.startUiLoop();
+  resolvePortrait(id) {
+    if (CHAR_BY_ID[id]) return getPortraitUrl(CHAR_BY_ID[id]);
+    const hy = (this.game.hybrids || []).find((h) => h.id === id);
+    if (hy) return getHybridPortraitUrl(hy);
+    return getPortraitUrl(CHAR_BY_ID.arisia);
+  }
+
+  resolveActorName(id) {
+    if (CHAR_BY_ID[id]) return CHAR_BY_ID[id].name;
+    const hy = (this.game.hybrids || []).find((h) => h.id === id);
+    return hy ? hy.name : id;
   }
 
   // ==========================================================================
@@ -99,17 +132,14 @@ class Cycle12App {
       SFX.click();
       if (!this.deferredInstallPrompt) return;
       this.deferredInstallPrompt.prompt();
-      const res = await this.deferredInstallPrompt.userChoice;
-      if (res.outcome === "accepted") {
-        this.showToast("Đã cài App!", "CYCLE 12 đã sẵn sàng trên màn hình chính.");
-        installBtn.classList.add("hidden");
-      }
+      const { outcome } = await this.deferredInstallPrompt.userChoice;
+      if (outcome === "accepted") installBtn.classList.add("hidden");
       this.deferredInstallPrompt = null;
     });
   }
 
   // ==========================================================================
-  // NAVIGATION & MODE SWITCHING
+  // NAVIGATION & MODE SWITCHER
   // ==========================================================================
   initNavigation() {
     document.querySelectorAll("[data-mode]").forEach((btn) => {
@@ -123,18 +153,15 @@ class Cycle12App {
   switchMode(mode) {
     this.currentMode = mode;
 
-    // Sync active buttons on desktop & mobile bars
     document.querySelectorAll("[data-mode]").forEach((b) => {
       b.classList.toggle("active", b.dataset.mode === mode);
     });
 
-    // Toggle panels
-    ["vn", "galaxy", "arena", "inspector", "codex"].forEach((m) => {
+    ["vn", "duel", "galaxy", "breeding", "codex"].forEach((m) => {
       const panel = document.getElementById(`panel-${m}`);
       if (panel) panel.classList.toggle("hidden", m !== mode);
     });
 
-    // Clear floating galaxy labels outside galaxy mode
     if (mode !== "galaxy") {
       this.renderFloatingLabels([]);
     }
@@ -145,8 +172,15 @@ class Cycle12App {
 
     if (mode === "vn") {
       const { node } = this.getActiveVNContext();
-      this.engine.setVNBackdrop(node?.sector || "sylvalon");
+      const secId = resolveStorySector(node?.sector || "sylvalon", this.game);
+      this.engine.setVNBackdrop(secId);
       this.renderVNNode();
+    } else if (mode === "duel") {
+      if (!this.duelEngine) {
+        this.startCardMatch({ kind: "skirmish", enemyId: document.getElementById("duel-enemy-select")?.value || "overlord" });
+      } else {
+        this.renderDuelUI();
+      }
     } else if (mode === "galaxy") {
       this.engine.updateSectorColors(this.game);
       if (this.selectedSectorId) {
@@ -157,22 +191,24 @@ class Cycle12App {
       this.renderGalaxyFactionBox();
       this.renderSectorList();
       this.renderSectorDetails();
-    } else if (mode === "arena") {
-      if (!this.engine.arenaState) {
-        this.startConfiguredArenaMatch();
-      }
-    } else if (mode === "inspector") {
-      this.engine.showcaseCharacter(this.inspectedCharId);
-      this.renderInspectorCard();
+    } else if (mode === "breeding") {
+      this.refreshBreedingDropdowns();
+      this.renderBreedingPreview();
+      this.renderBreedingHybrids();
     } else if (mode === "codex") {
       this.renderCodexTab();
     }
   }
 
   // ==========================================================================
-  // TOP HUD & TURN PROGRESSION
+  // TOP HUD, SYNTH BGM & ACHIEVEMENT TOASTS
   // ==========================================================================
   initTopHUD() {
+    document.getElementById("btn-hud-protagonist")?.addEventListener("click", () => {
+      SFX.click();
+      this.openProtagonistPicker(false);
+    });
+
     const sfxBtn = document.getElementById("btn-toggle-sfx");
     sfxBtn.textContent = SFX.muted ? "🔇" : "🔊";
     sfxBtn.addEventListener("click", () => {
@@ -192,10 +228,9 @@ class Cycle12App {
       SFX.toggleBGM();
       SFX.setMusicScene(this.currentMode);
       syncBgmBtn();
-      this.showToast(SFX.bgmOn ? "🎶 Đã bật nhạc nền Synth" : "🎵 Đã tắt nhạc nền", "Âm thanh biến đổi theo VN, Ngân Hà & Đấu Trường 3D.");
+      this.showToast(SFX.bgmOn ? "🎶 Đã bật nhạc nền Synth" : "🎵 Đã tắt nhạc nền", "Âm thanh tự biến đổi theo VN, Đấu Thẻ Bài, Galaxy & Cutscene.");
     });
 
-    // Kích hoạt BGM sau cử chỉ đầu tiên nếu đang bật sẵn trong localStorage
     window.addEventListener("pointerdown", () => {
       if (SFX.bgmOn && !SFX.bgmTimer) {
         SFX.setMusicScene(this.currentMode);
@@ -224,17 +259,20 @@ class Cycle12App {
         SFX.alert();
         this.showToast("⚠️ Hiệp Ước Cursew Đã Hết Hiệu Lực!", "Ranh giới đỏ có thể bùng phát chiến tranh tổng lực bất cứ lúc nào!");
       } else {
-        this.showToast(`⏩ Chu Kỳ ${res.turn}`, `Tất cả thế lực đã thu ngân sách & bình ổn lại các hệ sao.`);
+        this.showToast(`⏩ Chu Kỳ ${res.turn}`, "Tất cả thế lực đã thu ngân sách & bình ổn lại các hệ sao.");
       }
       this.checkAndToastAchievements();
     });
   }
 
   refreshTopResources() {
+    const hero = this.game.getProtagonist();
     const res = this.game.resources[this.game.playerFaction] || { credits: 0 };
     document.getElementById("stat-turn").textContent = `${this.game.cycleMajor}.${this.game.cycleMinor}`;
     document.getElementById("stat-credits").textContent = Number(res.credits || 0).toLocaleString("en-US");
     document.getElementById("stat-tension").textContent = `${Math.round(this.game.tension)}%`;
+    const pNameEl = document.getElementById("hud-protagonist-name");
+    if (pNameEl) pNameEl.textContent = `⭐ ${hero.name.split(" ")[0]}`;
     const facSel = document.getElementById("active-faction-select");
     if (facSel && facSel.value !== this.game.playerFaction) {
       facSel.value = this.game.playerFaction;
@@ -265,61 +303,212 @@ class Cycle12App {
   }
 
   // ==========================================================================
-  // MODE 1: INTERACTIVE VISUAL NOVEL ENGINE
+  // PROTAGONIST PICKER MODAL (TỰ DO CHỌN 1 TRONG 72 NHÂN VẬT + HẬU DUỆ LAI)
+  // ==========================================================================
+  initProtagonistModal() {
+    const facSel = document.getElementById("protag-faction-filter");
+    facSel.innerHTML = `<option value="ALL">Tất cả Phe (${CHARACTERS.length + (this.game.hybrids?.length || 0)})</option>` +
+      Object.entries(FACTIONS).map(([fid, f]) => `<option value="${fid}">${ESC(f.name)}</option>`).join("");
+
+    document.getElementById("protag-search").addEventListener("input", () => this.renderProtagonistGrid());
+    facSel.addEventListener("change", () => this.renderProtagonistGrid());
+    document.getElementById("btn-close-protagonist").addEventListener("click", () => {
+      SFX.click();
+      document.getElementById("protagonist-modal").classList.add("hidden");
+    });
+  }
+
+  openProtagonistPicker(isInitial = false) {
+    const modal = document.getElementById("protagonist-modal");
+    const chk = document.getElementById("chk-watch-intro-cutscene");
+    if (chk) chk.checked = isInitial;
+    const facSel = document.getElementById("protag-faction-filter");
+    if (facSel) facSel.value = "ALL";
+    this.renderProtagonistGrid();
+    modal.classList.remove("hidden");
+  }
+
+  renderProtagonistGrid() {
+    const q = (document.getElementById("protag-search")?.value || "").trim().toLowerCase();
+    const facF = document.getElementById("protag-faction-filter")?.value || "ALL";
+    const pool = [...(this.game.hybrids || []).map((h) => ({ ...h, isHybrid: true })), ...CHARACTERS];
+
+    const filtered = pool.filter((c) => {
+      if (facF !== "ALL" && c.fac !== facF) return false;
+      if (q && !(`${c.name} ${c.species} ${c.title || ""} ${this.game.facName(c.fac)}`.toLowerCase().includes(q))) return false;
+      return true;
+    }).sort((a, b) => (b.cr || 0) - (a.cr || 0));
+
+    const grid = document.getElementById("protag-grid");
+    grid.innerHTML = filtered.map((c) => {
+      const active = c.id === this.game.protagonistId ? "active" : "";
+      const facCol = FACTIONS[c.fac]?.color || "#38bdf8";
+      const img = c.isHybrid ? getHybridPortraitUrl(c) : getPortraitUrl(c);
+      return `
+        <button class="protag-card ${active}" data-pick-protag="${ESC(c.id)}">
+          <img src="${img}" alt="${ESC(c.name)}" loading="lazy" />
+          <div style="min-width:0;">
+            <div style="font-weight:800;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ESC(c.name)}</div>
+            <div style="font-size:11px;color:${facCol};font-weight:700;">${ESC(this.game.facName(c.fac))}</div>
+            <div class="muted" style="font-size:10.5px;">CR ${c.cr} • ${ESC(c.species)}</div>
+          </div>
+        </button>
+      `;
+    }).join("");
+
+    grid.querySelectorAll("[data-pick-protag]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = btn.dataset.pickProtag;
+        const watchCut = document.getElementById("chk-watch-intro-cutscene")?.checked;
+        SFX.choice();
+        this.game.selectProtagonist(id, true);
+        this.activeEncounterScript = null;
+        this.lastAppliedNodeKey = null;
+        this.duelEngine = null; // rebuild starter deck match
+        this.inspectedRosterId = id;
+        this.refreshTopResources();
+        this.engine.updateSectorColors(this.game);
+        document.getElementById("protagonist-modal").classList.add("hidden");
+        this.switchMode("vn");
+        this.showToast(`⭐ Góc nhìn: ${this.resolveActorName(id)}`, `Khởi đầu Chương Khởi Nguyên cùng Bộ Bài Chủ Tướng mới!`);
+        if (watchCut) {
+          this.playUniverseCutscene();
+        }
+      });
+    });
+  }
+
+  // ==========================================================================
+  // ANIMATED 3D UNIVERSE HISTORY CUTSCENE PLAYER
+  // ==========================================================================
+  initCutsceneOverlay() {
+    document.getElementById("btn-play-cutscene")?.addEventListener("click", () => {
+      SFX.click();
+      this.playUniverseCutscene();
+    });
+    document.getElementById("btn-cutscene-prev").addEventListener("click", () => {
+      SFX.click();
+      if (this.cutsceneIdx > 0) {
+        this.cutsceneIdx--;
+        this.renderCutsceneSlide();
+      }
+    });
+    document.getElementById("btn-cutscene-next").addEventListener("click", () => {
+      SFX.choice();
+      if (this.cutsceneIdx < this.cutsceneSlides.length - 1) {
+        this.cutsceneIdx++;
+        this.renderCutsceneSlide();
+      } else {
+        this.closeCutscene(true);
+      }
+    });
+    document.getElementById("btn-cutscene-skip").addEventListener("click", () => {
+      SFX.click();
+      this.closeCutscene(false);
+    });
+  }
+
+  playUniverseCutscene() {
+    this.cutsceneSlides = buildHistoryCutscenes(this.game);
+    this.cutsceneIdx = 0;
+    document.getElementById("cutscene-overlay").classList.remove("hidden");
+    this.engine.switchMode("cutscene");
+    SFX.setMusicScene("cutscene");
+    if (SFX.bgmOn && !SFX.bgmTimer) SFX.startBGM();
+    this.renderCutsceneSlide();
+  }
+
+  renderCutsceneSlide() {
+    const slide = this.cutsceneSlides[this.cutsceneIdx];
+    if (!slide) return;
+    SFX.cutscene();
+    this.engine.setCutsceneStage(slide.scene3d, slide.sector, slide.accent);
+
+    document.getElementById("cutscene-era-badge").textContent = slide.era;
+    document.getElementById("cutscene-title").textContent = slide.title;
+    document.getElementById("cutscene-narration").textContent = slide.narration;
+
+    document.getElementById("cutscene-dots").innerHTML = this.cutsceneSlides
+      .map((_, i) => `<span class="cutscene-dot ${i === this.cutsceneIdx ? "active" : ""}"></span>`)
+      .join("");
+
+    document.getElementById("btn-cutscene-prev").disabled = this.cutsceneIdx === 0;
+    document.getElementById("btn-cutscene-next").textContent =
+      this.cutsceneIdx === this.cutsceneSlides.length - 1 ? "🚀 Bắt Đầu Chiến Dịch!" : "Tiếp Theo ▶";
+  }
+
+  closeCutscene(completed) {
+    document.getElementById("cutscene-overlay").classList.add("hidden");
+    this.game.recordCutsceneWatched();
+    this.checkAndToastAchievements();
+    this.switchMode("vn");
+    if (completed) {
+      this.showToast("🎬 Kết thúc Sử Thi Gaiastra", "Chúc bạn dẫn dắt vận mệnh Chu Kỳ 12 thành công!");
+    }
+  }
+
+  // ==========================================================================
+  // MODE 1: INTERACTIVE VISUAL NOVEL ENGINE (11 CHAPTERS + POV)
   // ==========================================================================
   initVNUI() {
-    const chapSel = document.getElementById("vn-chapter-select");
     this.populateChapterSelect();
 
-    chapSel.addEventListener("change", () => {
+    document.getElementById("btn-open-protagonist")?.addEventListener("click", () => {
       SFX.click();
+      this.openProtagonistPicker(false);
+    });
+
+    document.getElementById("vn-chapter-select").addEventListener("change", (e) => {
+      const val = e.target.value;
+      SFX.click();
+      if (val === "__encounter__") return;
       this.activeEncounterScript = null;
-      this.game.vn.currentChapterId = chapSel.value;
+      this.game.vn.currentChapterId = val;
       this.game.vn.currentNodeId = "start";
       this.lastAppliedNodeKey = null;
-      this.game.saveToSlot("auto");
       this.renderVNNode();
     });
 
-    document.getElementById("btn-vn-auto").addEventListener("click", (e) => {
+    const autoBtn = document.getElementById("btn-vn-auto");
+    autoBtn.addEventListener("click", () => {
       SFX.click();
       this.vnAutoPlay = !this.vnAutoPlay;
-      e.currentTarget.classList.toggle("active", this.vnAutoPlay);
-      e.currentTarget.textContent = this.vnAutoPlay ? "⏸ Đang tự đọc" : "▶ Tự đọc";
-      if (this.vnAutoPlay && !this.isTyping) {
-        this.scheduleVNAutoAdvance();
-      } else if (!this.vnAutoPlay) {
-        clearTimeout(this.vnAutoTimer);
-      }
+      autoBtn.classList.toggle("active", this.vnAutoPlay);
+      autoBtn.textContent = this.vnAutoPlay ? "⏸ Đang tự đọc" : "▶ Tự đọc";
+      if (this.vnAutoPlay && !this.isTyping) this.scheduleVNAutoAdvance();
+      else clearTimeout(this.vnAutoTimer);
     });
 
     document.getElementById("btn-vn-restart").addEventListener("click", () => {
       SFX.click();
       this.game.vn.currentNodeId = "start";
       this.lastAppliedNodeKey = null;
-      this.game.saveToSlot("auto");
       this.renderVNNode();
-      this.showToast("↺ Đã khởi động lại chương", "Bạn có thể chọn nhánh rẽ khác!");
     });
 
-    const histModal = document.getElementById("vn-history-modal");
+    const hModal = document.getElementById("vn-history-modal");
     document.getElementById("btn-vn-history").addEventListener("click", () => {
       SFX.click();
       const list = document.getElementById("vn-history-list");
-      const items = (this.game.vn.history || []).slice().reverse();
-      list.innerHTML = items.length
-        ? items.map(h => `<div class="vn-history-item"><strong style="color:var(--gold);">${ESC(h.speaker)}</strong> <span class="muted">(${ESC(h.chapter)})</span><div style="margin-top:3px;">${ESC(h.text)}</div></div>`).join("")
-        : `<div class="muted">Chưa có dòng thoại nào được ghi lại.</div>`;
-      histModal.classList.remove("hidden");
-    });
-    document.getElementById("btn-close-vn-history").addEventListener("click", () => {
-      SFX.click();
-      histModal.classList.add("hidden");
+      const items = this.game.vn.history.slice().reverse();
+      list.innerHTML = items.length === 0
+        ? `<div class="muted">Chưa có dòng hội thoại nào được lưu.</div>`
+        : items.map(h => `
+          <div class="vn-history-item">
+            <div style="font-size:11px;color:var(--primary);font-weight:700;">${ESC(h.speaker)} <span class="muted">• ${ESC(h.chapter)}</span></div>
+            <div style="margin-top:4px;font-size:13px;">${ESC(h.text)}</div>
+          </div>
+        `).join("");
+      hModal.classList.remove("hidden");
     });
 
-    // Click dialogue box to skip typing or advance linear node
+    document.getElementById("btn-close-vn-history").addEventListener("click", () => {
+      SFX.click();
+      hModal.classList.add("hidden");
+    });
+
     document.getElementById("vn-dialogue-box").addEventListener("click", (e) => {
-      if (e.target.closest(".vn-choice-btn")) return;
+      if (e.target.closest("button")) return;
       this.advanceVN();
     });
   }
@@ -327,7 +516,7 @@ class Cycle12App {
   populateChapterSelect() {
     const sel = document.getElementById("vn-chapter-select");
     const doneSet = new Set(this.game.vn.completedChapters || []);
-    let opts = CHAPTERS.map((ch) => {
+    const opts = CHAPTERS.map((ch) => {
       const mark = doneSet.has(ch.id) ? "✓ " : "";
       return `<option value="${ch.id}">${mark}${ESC(ch.num)}: ${ESC(ch.title)}</option>`;
     });
@@ -389,7 +578,6 @@ class Cycle12App {
       }
     }
 
-    // Áp dụng side-effects của node 1 lần duy nhất
     const nodeKey = `${script.id}:${nodeId}`;
     if (this.lastAppliedNodeKey !== nodeKey) {
       this.lastAppliedNodeKey = nodeKey;
@@ -406,42 +594,44 @@ class Cycle12App {
       this.checkAndToastAchievements();
     }
 
-    // Cập nhật 3D backdrop theo hệ sao của cảnh truyện
-    const sec = SECTOR_BY_ID[node.sector];
+    const secId = resolveStorySector(node.sector, this.game);
+    const sec = SECTOR_BY_ID[secId];
     document.getElementById("vn-location-pill").textContent = `📍 ${sec ? sec.name : "Vũ Trụ Gaiastra"}${sec?.realm ? " • " + sec.realm : ""}`;
+
+    const leftId = node.leftChar ? resolveStoryChar(node.leftChar, this.game) : null;
+    const rightId = node.rightChar ? resolveStoryChar(node.rightChar, this.game) : null;
+    const speakerId = node.speaker === "narrator" ? "narrator" : resolveStoryChar(node.speaker, this.game);
+
     if (this.currentMode === "vn") {
-      const moodGlow = node.speaker !== "narrator" && CHAR_BY_ID[node.speaker]
-        ? (RACE_STYLE[CHAR_BY_ID[node.speaker].race]?.aura || "#38bdf8")
+      const spObj = CHAR_BY_ID[speakerId];
+      const moodGlow = speakerId !== "narrator" && spObj
+        ? (RACE_STYLE[spObj.race]?.aura || "#38bdf8")
         : "#38bdf8";
-      this.engine.setVNBackdrop(node.sector || "sylvalon", moodGlow);
+      this.engine.setVNBackdrop(secId || "sylvalon", moodGlow);
     }
 
-    // Nhân vật 2 bên
-    this.updateVNSprite("left", node.leftChar, node.leftMood, node.speaker);
-    this.updateVNSprite("right", node.rightChar, node.rightMood, node.speaker);
+    this.updateVNSprite("left", leftId, node.leftMood, speakerId);
+    this.updateVNSprite("right", rightId, node.rightMood, speakerId);
 
-    // Speaker badge
     const badge = document.getElementById("vn-speaker-badge");
     const titleEl = document.getElementById("vn-speaker-title");
     let speakerLabel = "NGƯỜI DẪN CHUYỆN";
-    if (node.speaker === "narrator") {
+    if (speakerId === "narrator") {
       badge.textContent = speakerLabel;
       badge.classList.add("narrator");
       titleEl.textContent = `${script.num}: ${script.title}`;
     } else {
-      const c = CHAR_BY_ID[node.speaker];
-      speakerLabel = c ? c.name : node.speaker;
+      const c = CHAR_BY_ID[speakerId] || this.game.hybrids?.find((h) => h.id === speakerId);
+      speakerLabel = c ? c.name : speakerId;
       badge.textContent = speakerLabel;
       badge.classList.remove("narrator");
       const fac = c ? FACTIONS[c.fac] : null;
-      titleEl.textContent = c ? `${c.title} • ${fac?.name || ""}` : "";
+      titleEl.textContent = c ? `${c.title || "Hậu Duệ"} • ${fac?.name || ""}` : "";
     }
 
-    // Văn bản đối thoại (hỗ trợ hàm động theo state)
     const rawText = typeof node.text === "function" ? node.text(this.game) : String(node.text || "");
     this.fullVnText = rawText;
 
-    // Lưu lịch sử hội thoại nếu chưa trùng dòng vừa ghi
     const hist = this.game.vn.history;
     const last = hist[hist.length - 1];
     if (!last || last.text !== rawText || last.speaker !== speakerLabel) {
@@ -449,7 +639,6 @@ class Cycle12App {
       if (hist.length > 60) hist.shift();
     }
 
-    // Gọi hiệu ứng đánh chữ (typewriter)
     const textEl = document.getElementById("vn-text");
     const choicesEl = document.getElementById("vn-choices");
     const hintEl = document.getElementById("vn-tap-hint");
@@ -467,7 +656,7 @@ class Cycle12App {
         return;
       }
       textEl.textContent = this.fullVnText.slice(0, idx);
-      if (idx % 10 === 0) SFX.blip(node.speaker === "narrator" ? 380 : 520);
+      if (idx % 10 === 0) SFX.blip(speakerId === "narrator" ? 380 : 520);
       this.typeTimer = setTimeout(stepType, 16);
     };
     stepType();
@@ -479,26 +668,24 @@ class Cycle12App {
     const nameEl = document.getElementById(`vn-${side}-name`);
     const moodEl = document.getElementById(`vn-${side}-mood`);
 
-    if (!charId || !CHAR_BY_ID[charId]) {
+    if (!charId) {
       slot.classList.add("hidden");
-      slot.classList.remove("speaking", "dim");
       return;
     }
-
-    const c = CHAR_BY_ID[charId];
-    slot.classList.remove("hidden");
-    img.src = getPortraitUrl(c);
-    img.alt = c.name;
-    nameEl.textContent = c.name;
-    moodEl.textContent = moodLabel(mood || "neutral");
-
-    if (activeSpeaker === charId) {
-      slot.classList.add("speaking");
-      slot.classList.remove("dim");
-    } else {
-      slot.classList.remove("speaking");
-      slot.classList.add("dim");
+    const c = CHAR_BY_ID[charId] || this.game.hybrids?.find((h) => h.id === charId);
+    if (!c) {
+      slot.classList.add("hidden");
+      return;
     }
+    slot.classList.remove("hidden");
+    img.src = this.resolvePortrait(charId);
+    nameEl.textContent = c.name;
+    moodEl.textContent = moodLabel(mood);
+
+    const isSpeaking = activeSpeaker === charId;
+    const someoneElseSpeaking = activeSpeaker && activeSpeaker !== "narrator" && activeSpeaker !== charId;
+    slot.classList.toggle("speaking", isSpeaking);
+    slot.classList.toggle("dim", Boolean(someoneElseSpeaking));
   }
 
   finishTypingAndShowControls(node, isEncounter, script) {
@@ -510,13 +697,16 @@ class Cycle12App {
     const hintEl = document.getElementById("vn-tap-hint");
     choicesEl.innerHTML = "";
 
-    if (node.choices && node.choices.length > 0) {
-      hintEl.textContent = "Chọn một quyết định bên trên";
-      const visibleChoices = node.choices.filter(ch => !ch.cond || ch.cond(this.game));
-      visibleChoices.forEach((ch) => {
+    const validChoices = (node.choices || []).filter((ch) => !ch.cond || ch.cond(this.game));
+    if (validChoices.length > 0) {
+      hintEl.textContent = "Chọn một hướng đi bên trên";
+      validChoices.forEach((ch) => {
         const btn = document.createElement("button");
-        btn.className = `vn-choice-btn ${ch.battle ? "battle-choice" : ""}`;
-        btn.innerHTML = `<span>${ESC(ch.label)}</span>${ch.hint ? `<span class="vn-choice-hint">${ESC(ch.hint)}</span>` : ""}`;
+        btn.className = `vn-choice-btn ${ch.battle ? "battle" : ""}`;
+        btn.innerHTML = `
+          <div>${ESC(ch.label)}</div>
+          ${ch.hint ? `<span class="choice-hint">${ESC(ch.hint)}</span>` : ""}
+        `;
         btn.addEventListener("click", (e) => {
           e.stopPropagation();
           SFX.choice();
@@ -524,79 +714,77 @@ class Cycle12App {
         });
         choicesEl.appendChild(btn);
       });
-    } else if (node.end) {
-      hintEl.textContent = `🏁 ${node.end.title} — ${node.end.summary}`;
-      const wrap = document.createElement("div");
-      wrap.style.display = "flex";
-      wrap.style.flexWrap = "wrap";
-      wrap.style.gap = "8px";
+      return;
+    }
+
+    if (node.end) {
+      hintEl.textContent = node.end.title || "Kết thúc chương";
+      const curIdx = CHAPTERS.findIndex((c) => c.id === script.id);
+      const fallbackNext = !isEncounter && curIdx >= 0 && curIdx < CHAPTERS.length - 1 ? CHAPTERS[curIdx + 1].id : null;
+      const nextChapId = node.end.nextChapter || fallbackNext;
 
       if (isEncounter) {
+        if (script.id.startsWith("enc_")) {
+          const cid = script.id.slice(4);
+          const breedBtn = document.createElement("button");
+          breedBtn.className = "vn-choice-btn";
+          breedBtn.innerHTML = `<div>🧬 Đưa ${ESC(this.resolveActorName(cid))} vào Phòng Lab Lai Tạo Gen</div><span class="choice-hint">Tạo Hậu Duệ Hybrid mới cho Bộ Bài của bạn</span>`;
+          breedBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            SFX.choice();
+            this.openBreedingWith(cid);
+          });
+          choicesEl.appendChild(breedBtn);
+        }
+
         const backBtn = document.createElement("button");
-        backBtn.className = "btn-primary";
-        backBtn.textContent = "↩️ Quay Lại Cốt Truyện Chính";
+        backBtn.className = "vn-choice-btn battle";
+        backBtn.innerHTML = `<div>↩️ Trở Về Bản Đồ & Hồ Sơ</div><span class="choice-hint">${ESC(node.end.summary || "")}</span>`;
         backBtn.addEventListener("click", (e) => {
           e.stopPropagation();
           SFX.click();
           this.activeEncounterScript = null;
+          this.lastAppliedNodeKey = null;
+          this.switchMode("codex");
+        });
+        choicesEl.appendChild(backBtn);
+      } else if (nextChapId && CHAPTER_BY_ID[nextChapId]) {
+        const nextChap = CHAPTER_BY_ID[nextChapId];
+        const nextBtn = document.createElement("button");
+        nextBtn.className = "vn-choice-btn";
+        nextBtn.innerHTML = `<div>📖 Sang ${ESC(nextChap.num)}: ${ESC(nextChap.title)} ➔</div><span class="choice-hint">${ESC(node.end.summary || "")}</span>`;
+        nextBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          SFX.choice();
+          this.game.vn.currentChapterId = nextChapId;
           this.game.vn.currentNodeId = "start";
           this.lastAppliedNodeKey = null;
           this.renderVNNode();
         });
-        wrap.appendChild(backBtn);
-
-        const inspBtn = document.createElement("button");
-        inspBtn.className = "btn-glass";
-        inspBtn.textContent = "🌌 Mở Bản Đồ Ngân Hà";
-        inspBtn.addEventListener("click", (e) => {
-          e.stopPropagation();
-          this.activeEncounterScript = null;
-          this.switchMode("galaxy");
-        });
-        wrap.appendChild(inspBtn);
+        choicesEl.appendChild(nextBtn);
       } else {
-        const curIdx = CHAPTERS.findIndex(c => c.id === script.id);
-        const nextChap = curIdx >= 0 && curIdx + 1 < CHAPTERS.length ? CHAPTERS[curIdx + 1] : null;
-        if (nextChap) {
-          const nextBtn = document.createElement("button");
-          nextBtn.className = "btn-gold";
-          nextBtn.textContent = `📖 Tiếp Sang ${nextChap.num}: ${nextChap.title}`;
-          nextBtn.addEventListener("click", (e) => {
-            e.stopPropagation();
-            SFX.choice();
-            this.game.vn.currentChapterId = nextChap.id;
-            this.game.vn.currentNodeId = "start";
-            this.lastAppliedNodeKey = null;
-            this.renderVNNode();
-          });
-          wrap.appendChild(nextBtn);
-        }
-        const galBtn = document.createElement("button");
-        galBtn.className = "btn-primary";
-        galBtn.textContent = "🌌 Quản Lý Ngân Hà 3D";
-        galBtn.addEventListener("click", (e) => {
+        const mapBtn = document.createElement("button");
+        mapBtn.className = "vn-choice-btn";
+        mapBtn.innerHTML = `<div>🌌 Chinh Phục Ngân Hà / 🃏 Leo Tháp Hư Không</div><span class="choice-hint">${ESC(node.end.summary || "")}</span>`;
+        mapBtn.addEventListener("click", (e) => {
           e.stopPropagation();
+          SFX.click();
           this.switchMode("galaxy");
         });
-        wrap.appendChild(galBtn);
+        choicesEl.appendChild(mapBtn);
       }
-      choicesEl.appendChild(wrap);
-    } else {
-      hintEl.textContent = "Chạm / Click để tiếp tục ▸";
-      if (this.vnAutoPlay) {
-        this.scheduleVNAutoAdvance();
-      }
+      return;
     }
+
+    hintEl.textContent = "Chạm / Click để tiếp tục ▸";
+    if (this.vnAutoPlay) this.scheduleVNAutoAdvance();
   }
 
   scheduleVNAutoAdvance() {
     clearTimeout(this.vnAutoTimer);
     this.vnAutoTimer = setTimeout(() => {
       if (this.currentMode === "vn" && this.vnAutoPlay && !this.isTyping) {
-        const { node } = this.getActiveVNContext();
-        if (node && node.next && !(node.choices && node.choices.length)) {
-          this.advanceVN();
-        }
+        this.advanceVN();
       }
     }, 2400);
   }
@@ -608,7 +796,8 @@ class Cycle12App {
       this.finishTypingAndShowControls(node, isEncounter, script);
       return;
     }
-    if (node.choices && node.choices.length > 0) return;
+    if ((node.choices && node.choices.length > 0) || node.end) return;
+
     if (node.next && script.nodes[node.next]) {
       SFX.click();
       this.game.vn.currentNodeId = node.next;
@@ -624,7 +813,10 @@ class Cycle12App {
     }
 
     if (choice.battle) {
-      // Lưu ngữ cảnh trận đấu cốt truyện và chuyển thẳng sang Đấu trường 3D
+      const pId = resolveStoryChar(choice.battle.playerId, this.game);
+      const eId = resolveStoryChar(choice.battle.enemyId, this.game);
+      const sId = resolveStorySector(choice.battle.stageId, this.game);
+
       this.pendingStoryBattle = {
         isEncounter,
         scriptId: script.id,
@@ -634,11 +826,20 @@ class Cycle12App {
       };
       this.pendingInvasionSectorId = null;
 
-      this.switchMode("arena");
-      document.getElementById("arena-player-select").value = choice.battle.playerId;
-      document.getElementById("arena-enemy-select").value = choice.battle.enemyId;
-      document.getElementById("arena-stage-select").value = choice.battle.stageId;
-      this.startConfiguredArenaMatch();
+      this.switchMode("duel");
+      this.setDuelTab("skirmish");
+      this.startCardMatch({
+        kind: "story",
+        playerCharId: pId,
+        enemyId: eId,
+        stageId: sId,
+        modeLabel: "Đấu Thẻ Cốt Truyện"
+      });
+      return;
+    }
+
+    if (choice.breedTargetId) {
+      this.openBreedingWith(choice.breedTargetId);
       return;
     }
 
@@ -650,11 +851,526 @@ class Cycle12App {
   }
 
   // ==========================================================================
-  // MODE 2: 3D GALAXY CONQUEST & SECTOR HIERARCHY
+  // MODE 2: TACTICAL 3-ROW FACTION & CR CARD DUEL (HÀNG 1 / HÀNG 2 / HÀNG 3)
+  // ==========================================================================
+  initDuelUI() {
+    const eSel = document.getElementById("duel-enemy-select");
+    const sorted = [...CHARACTERS].sort((a, b) => b.cr - a.cr);
+    eSel.innerHTML = sorted.map(c => `<option value="${c.id}">${ESC(c.name)} (${ESC(FACTIONS[c.fac]?.name || c.fac)} • CR ${c.cr})</option>`).join("");
+    eSel.value = "overlord";
+
+    document.querySelectorAll("[data-dtab]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        SFX.click();
+        this.setDuelTab(btn.dataset.dtab);
+      });
+    });
+
+    document.getElementById("btn-start-duel").addEventListener("click", () => {
+      SFX.choice();
+      this.pendingStoryBattle = null;
+      this.pendingInvasionSectorId = null;
+      this.startCardMatch({
+        kind: "skirmish",
+        enemyId: eSel.value,
+        modeLabel: "Đấu Thẻ 3 Hàng"
+      });
+    });
+
+    document.getElementById("btn-start-gauntlet").addEventListener("click", () => {
+      SFX.choice();
+      this.pendingStoryBattle = null;
+      this.pendingInvasionSectorId = null;
+      this.startGauntletFloor(1);
+    });
+
+    document.getElementById("btn-resolve-clash").addEventListener("click", () => {
+      if (!this.duelEngine || this.duelEngine.over) return;
+      const res = this.duelEngine.resolveClashTurn();
+      if (!res.ok) {
+        SFX.alert();
+        this.showToast("Chưa thể giao chiến", res.reason || "Đặt thẻ ra Hàng 1 trước khi đấu!");
+        return;
+      }
+      SFX.cardHit();
+      this.renderDuelUI();
+      if (this.duelEngine.over) this.showDuelOutcome();
+    });
+
+    document.getElementById("btn-auto-deck").addEventListener("click", () => {
+      SFX.choice();
+      this.game.customDeck = buildFactionDeck(this.game.protagonistId, this.game.hybrids);
+      this.game.saveToSlot("auto");
+      this.renderDeckBuilder();
+      const protag = this.game.getProtagonist();
+      this.showToast("✨ Đã xếp Bộ Bài Phe", `12 lá thuộc phe ${this.game.facName(protag.fac)} theo Thủ lĩnh ${protag.name}.`);
+    });
+
+    document.getElementById("deck-search-input").addEventListener("input", () => this.renderDeckBuilder());
+
+    // Victory / Post-Duel modal handlers
+    const vModal = document.getElementById("duel-victory-modal");
+    document.getElementById("btn-victory-story").addEventListener("click", () => {
+      SFX.choice();
+      vModal.classList.add("hidden");
+      if (!this.pendingStoryBattle) return;
+      const ctx = this.pendingStoryBattle;
+      const won = this.duelEngine?.winner === "player";
+      this.pendingStoryBattle = null;
+      this.activeEncounterScript = ctx.encounterScript;
+      if (!ctx.isEncounter) this.game.vn.currentChapterId = ctx.scriptId;
+      this.game.vn.currentNodeId = won ? ctx.winNext : ctx.loseNext;
+      this.lastAppliedNodeKey = null;
+      this.switchMode("vn");
+    });
+
+    document.getElementById("btn-victory-conquer").addEventListener("click", () => {
+      SFX.victory();
+      vModal.classList.add("hidden");
+      if (this.pendingInvasionSectorId) {
+        const secId = this.pendingInvasionSectorId;
+        this.pendingInvasionSectorId = null;
+        this.game.conquerSector(secId, this.game.playerFaction);
+        this.engine.updateSectorColors(this.game);
+        this.refreshTopResources();
+        this.selectedSectorId = secId;
+        this.switchMode("galaxy");
+        this.showToast("🚩 ĐÃ CHIẾM KHU VỰC!", `${this.game.sectorName(secId)} nay thuộc về ${this.game.facName(this.game.playerFaction)}!`);
+        this.checkAndToastAchievements();
+      }
+    });
+
+    document.getElementById("btn-victory-next-floor").addEventListener("click", () => {
+      SFX.choice();
+      vModal.classList.add("hidden");
+      const nextF = (this.duelContext.floor || 1) + 1;
+      this.startGauntletFloor(nextF);
+    });
+
+    document.getElementById("btn-victory-close").addEventListener("click", () => {
+      SFX.click();
+      vModal.classList.add("hidden");
+      if (this.duelContext.kind === "gauntlet") {
+        this.startGauntletFloor(1);
+      } else {
+        this.startCardMatch({ kind: "skirmish", enemyId: document.getElementById("duel-enemy-select").value });
+      }
+    });
+  }
+
+  setDuelTab(tab) {
+    this.duelTab = tab;
+    document.querySelectorAll("[data-dtab]").forEach((b) => b.classList.toggle("active", b.dataset.dtab === tab));
+    document.getElementById("duel-battle-view").classList.toggle("hidden", tab === "deck");
+    document.getElementById("duel-deck-view").classList.toggle("hidden", tab !== "deck");
+    document.getElementById("duel-skirmish-controls").classList.toggle("hidden", tab !== "skirmish");
+    document.getElementById("duel-gauntlet-controls").classList.toggle("hidden", tab !== "gauntlet");
+
+    if (tab === "deck") {
+      this.renderDeckBuilder();
+    } else if (tab === "gauntlet" && this.duelContext.kind !== "gauntlet") {
+      document.getElementById("gauntlet-floor-badge").textContent = `🗼 Tầng 1 • Kỷ lục: ${this.game.stats?.gauntletMax || 0}`;
+    }
+  }
+
+  startCardMatch({ kind = "skirmish", playerCharId = null, enemyId = "overlord", buffMult = 1, modeLabel = "Đấu Thẻ 3 Hàng", gauntletFloor = 0, difficulty = 1 } = {}) {
+    const pId = playerCharId || this.game.protagonistId || "arisia";
+    const legalDeck = validateDeckForLeader(this.game.customDeck || [], pId, this.game.hybrids || []);
+    const activeDeck = legalDeck.length >= 6 ? legalDeck : buildFactionDeck(pId, this.game.hybrids || []);
+
+    const effDifficulty = buffMult > 1 ? Math.min(difficulty, 0.85) : difficulty;
+    this.duelContext = { kind, enemyId, floor: gauntletFloor, buffMult };
+    this.duelEngine = new CardBattleEngine({
+      playerLeaderId: pId,
+      playerDeckIds: activeDeck,
+      enemyLeaderId: enemyId,
+      hybrids: this.game.hybrids || [],
+      difficulty: effDifficulty,
+      sectorId: this.pendingInvasionSectorId || null,
+      gameStateRef: this.game
+    });
+    this.duelEngine.modeLabel = modeLabel;
+    document.getElementById("duel-victory-modal").classList.add("hidden");
+    this.renderDuelUI();
+  }
+
+  startGauntletFloor(floor = 1) {
+    const sorted = [...CHARACTERS].sort((a, b) => a.cr - b.cr);
+    const bossIdx = Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * Math.min(1, 0.25 + floor * 0.14)));
+    const boss = sorted[bossIdx] || CHAR_BY_ID.overlord;
+    this.setDuelTab("gauntlet");
+    document.getElementById("gauntlet-floor-badge").textContent = `🗼 Đang ở Tầng ${floor} • Kỷ lục: ${this.game.stats?.gauntletMax || 0}`;
+    this.startCardMatch({
+      kind: "gauntlet",
+      enemyId: boss.id,
+      modeLabel: `🗼 Tháp Hư Không Tầng ${floor}`,
+      gauntletFloor: floor,
+      difficulty: 0.9 + floor * 0.2
+    });
+  }
+
+  renderDuelUI() {
+    const eng = this.duelEngine;
+    if (!eng) return;
+
+    const pLeader = eng.player.leader;
+    const eLeader = eng.enemy.leader;
+    const pFacName = FACTIONS[pLeader.fac]?.name || pLeader.fac;
+    const eFacName = FACTIONS[eLeader.fac]?.name || eLeader.fac;
+
+    document.getElementById("deck-count-badge").textContent = validateDeckForLeader(this.game.customDeck || [], this.game.protagonistId, this.game.hybrids).length;
+
+    // Row 3 Outer Leader Slots
+    const eRow3Eval = eng.evalCardCombatCR(eLeader, eng.getRow1Cards("player")[0] || null, "enemy");
+    const pRow3Eval = eng.evalCardCombatCR(pLeader, eng.getRow1Cards("enemy")[0] || null, "player");
+    const eFrontCount = eng.getRow1Cards("enemy").length;
+    const pFrontCount = eng.getRow1Cards("player").length;
+
+    document.getElementById("duel-e-img").src = getCardPortrait(eLeader);
+    document.getElementById("duel-e-name").textContent = eLeader.name;
+    document.getElementById("duel-e-meta").textContent = `${eLeader.species} • Phe ${eFacName} • ${eLeader.row1Effect?.tag || ""}`;
+    document.getElementById("duel-e-row3-cr").textContent = `⚔️ CR Hàng 3: ${eRow3Eval.total} (Gốc ${eLeader.cr})`;
+    document.getElementById("duel-e-row3-state").textContent = eFrontCount > 0 ? `🛡️ Bảo Hộ (${eFrontCount} lá H1)` : "⚡ LỘ DIỆN — Có thể đánh Hàng 3!";
+    document.getElementById("duel-e-captives").textContent = `🔒 Bắt: ${eng.enemy.row2.length}/3`;
+
+    document.getElementById("duel-p-img").src = getCardPortrait(pLeader);
+    document.getElementById("duel-p-name").textContent = pLeader.name;
+    document.getElementById("duel-p-meta").textContent = `${pLeader.species} • Phe ${pFacName} • ${pLeader.row1Effect?.desc || ""}`;
+    document.getElementById("duel-p-row3-cr").textContent = `⚔️ CR Hàng 3: ${pRow3Eval.total} (Gốc ${pLeader.cr})`;
+    document.getElementById("duel-p-row3-state").textContent = pFrontCount > 0 ? `🛡️ Hàng 1 Bảo Hộ (${pFrontCount} lá)` : "⚠️ HÀNG 1 TRỐNG — Hàng 3 bị uy hiếp!";
+    document.getElementById("duel-p-captives").textContent = `🔒 Bắt: ${eng.player.row2.length}/3`;
+    document.getElementById("duel-p-deck-count").textContent = `📚 Bộ bài: ${eng.player.deck.length}`;
+
+    document.getElementById("duel-turn-badge").textContent = `${eng.modeLabel || "Đấu Thẻ 3 Hàng"} • Lượt ${eng.turn}`;
+    const lastLog = eng.log[eng.log.length - 1];
+    document.getElementById("duel-log-latest").textContent = lastLog || "";
+
+    // Row 2 Captives & Support/Breeding Zones
+    document.getElementById("duel-e-row2-aura").textContent = `Aura Hàng 1 Địch: +${eng.getRow2SupportAura("enemy")} CR`;
+    const eRow2El = document.getElementById("duel-e-row2");
+    eRow2El.innerHTML = eng.enemy.row2.length
+      ? eng.enemy.row2.map((c) => `
+          <div class="row2-captive-chip" title="${ESC(c.row2Effect?.desc || "")}">
+            <img src="${getCardPortrait(c)}" alt="${ESC(c.name)}" />
+            <div>
+              <strong>${ESC(c.name)}</strong> <span class="muted">(${ESC(c.species)})</span>
+              <div style="font-size:10px;color:#fda4af;">H2: +${c.row2Effect?.crAura || 60} CR • Khóa Hàng 1</div>
+            </div>
+          </div>
+        `).join("")
+      : `<span class="muted" style="font-size:11.5px;">Chưa có tù binh nào bị bắt (Mất 3 lá = Thua!)</span>`;
+
+    document.getElementById("duel-p-row2-aura").textContent = `Hỗ trợ Hàng 1: +${eng.getRow2SupportAura("player")} CR`;
+    const pRow2El = document.getElementById("duel-p-row2");
+    pRow2El.innerHTML = eng.player.row2.length
+      ? eng.player.row2.map((c, idx) => {
+          const canBreed = !c.bredUsed && !eng.player.fieldBreedUsedThisTurn && !eng.over;
+          return `
+            <div class="row2-captive-chip" title="${ESC(c.row2Effect?.desc || "")}">
+              <img src="${getCardPortrait(c)}" alt="${ESC(c.name)}" />
+              <div>
+                <strong>${ESC(c.name)}</strong> <span class="muted">(${ESC(c.species)})</span>
+                <div style="font-size:10px;color:#fbcfe8;">H2: +${c.row2Effect?.crAura || 60} CR • ${ESC(c.row2Effect?.tag || "Lai Gen")}</div>
+              </div>
+              ${canBreed
+                ? `<button class="btn-accent btn-compact" data-breed-row2="${idx}" style="font-size:10.5px;padding:4px 8px;">🧬 Lai Tại Trận</button>`
+                : `<span class="badge" style="font-size:9.5px;">${c.bredUsed ? "✓ Đã Lai" : "⏳ Chờ lượt"}</span>`}
+            </div>
+          `;
+        }).join("")
+      : `<span class="muted" style="font-size:11.5px;">Hàng 2 trống — Thắng giao chiến chiều dọc để bắt thẻ địch vào đây (3 lá = Thắng!)</span>`;
+
+    pRow2El.querySelectorAll("[data-breed-row2]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const res = eng.breedFromRow2(Number(btn.dataset.breedRow2));
+        if (res.ok) {
+          SFX.breed();
+          this.renderDuelUI();
+          this.showToast("🧬 Lai Tạo Tại Trận!", `Sinh ra thẻ ${res.hybridCard.name} (CR ${res.hybridCard.cr}, phe ${pFacName}) lên tay bài!`);
+        } else {
+          SFX.alert();
+          this.showToast("Không thể Lai Tại Trận", res.reason);
+        }
+      });
+    });
+
+    // Enemy Row 1 (3 Vertical Lanes)
+    document.getElementById("duel-e-row1").innerHTML = eng.enemy.row1.map((u, i) => {
+      if (!u) return `<div class="board-slot">Địch Làn ${i + 1} (Trống)</div>`;
+      const pOpp = eng.player.row1[i];
+      const evalCR = eng.evalCardCombatCR(u, pOpp, "enemy");
+      return `
+        <div class="board-slot">
+          <div class="board-card enemy-unit" title="${ESC(u.row1Effect?.desc || "")}">
+            <img src="${getCardPortrait(u)}" alt="${ESC(u.name)}" />
+            <div style="min-width:0; flex:1;">
+              <div style="font-weight:800;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ESC(u.name)}</div>
+              <div style="font-size:10px;color:#cbd5e1;">${ESC(u.species)} • ${ESC(FACTIONS[u.fac]?.name || u.fac)}</div>
+              <div style="font-size:11px;color:#fda4af;font-weight:800;">⚔️ Tổng CR: ${evalCR.total} <span class="muted">(Gốc ${u.cr})</span></div>
+              <div class="muted" style="font-size:9.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">H1: ${ESC(u.row1Effect?.tag || "")}</div>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join("");
+
+    // Player Row 1 (3 Vertical Lanes)
+    const pRow1El = document.getElementById("duel-p-row1");
+    const hasSelectedHand = eng.selectedHandIdx !== null && eng.player.hand[eng.selectedHandIdx];
+    pRow1El.innerHTML = eng.player.row1.map((u, i) => {
+      if (!u) {
+        return `
+          <button class="board-slot ${hasSelectedHand ? "droppable" : ""}" data-deploy-lane="${i}">
+            ${hasSelectedHand ? `📥 Đặt vào Làn ${i + 1}` : `Hàng 1 — Làn ${i + 1}`}
+          </button>
+        `;
+      }
+      const eOpp = eng.enemy.row1[i];
+      const evalCR = eng.evalCardCombatCR(u, eOpp, "player");
+      const canRecall = u.deployedTurn === eng.turn && !eng.over;
+      return `
+        <div class="board-slot">
+          <button class="board-card ${canRecall ? "ready" : ""}" data-recall-lane="${i}" title="${canRecall ? "Bấm để thu hồi về tay trước khi Giao Chiến" : ESC(u.row1Effect?.desc || "")}">
+            <img src="${getCardPortrait(u)}" alt="${ESC(u.name)}" />
+            <div style="min-width:0; flex:1;">
+              <div style="font-weight:800;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ESC(u.name)}</div>
+              <div style="font-size:10px;color:#cbd5e1;">${ESC(u.species)} • ${ESC(FACTIONS[u.fac]?.name || u.fac)}</div>
+              <div style="font-size:11px;color:#86efac;font-weight:800;">⚔️ Tổng CR: ${evalCR.total} <span class="muted">(Gốc ${u.cr})</span></div>
+              <div class="muted" style="font-size:9.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${canRecall ? "↩️ Bấm thu hồi • " : ""}H1: ${ESC(u.row1Effect?.tag || "")}</div>
+            </div>
+          </button>
+        </div>
+      `;
+    }).join("");
+
+    pRow1El.querySelectorAll("[data-deploy-lane]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const lane = Number(btn.dataset.deployLane);
+        if (eng.selectedHandIdx === null) {
+          this.showToast("Chọn thẻ trên tay", "Hãy bấm chọn 1 thẻ phe bạn ở dưới tay trước khi chọn Làn Hàng 1!");
+          return;
+        }
+        const res = eng.deployCardToRow1(eng.selectedHandIdx, lane);
+        if (res.ok) {
+          SFX.cardPlay();
+          this.renderDuelUI();
+        } else {
+          SFX.alert();
+          this.showToast("Không thể đặt bài", res.reason);
+        }
+      });
+    });
+
+    pRow1El.querySelectorAll("[data-recall-lane]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const res = eng.recallFromRow1(Number(btn.dataset.recallLane));
+        if (res.ok) {
+          SFX.click();
+          this.renderDuelUI();
+        } else if (res.reason) {
+          this.showToast("Đang trấn giữ", res.reason);
+        }
+      });
+    });
+
+    // Player Hand
+    const handEl = document.getElementById("duel-p-hand");
+    const openLane = eng.player.row1.findIndex((s) => s === null);
+    handEl.innerHTML = eng.player.hand.map((c, idx) => {
+      const isSelected = eng.selectedHandIdx === idx;
+      const canDeploy = !eng.over && openLane >= 0;
+      const facLabel = FACTIONS[c.fac]?.name || c.fac;
+      return `
+        <button class="hand-card ${canDeploy ? "playable" : "unaffordable"} ${isSelected ? "selected" : ""} ${c.isHybrid ? "rarity-hybrid" : ""}"
+                data-hand-idx="${idx}"
+                title="H1: ${ESC(c.row1Effect?.desc || "")} | H2: ${ESC(c.row2Effect?.desc || "")}">
+          <span class="card-cr-pill">CR ${c.cr}</span>
+          <img class="hand-card-thumb" src="${getCardPortrait(c)}" alt="${ESC(c.name)}" />
+          <div style="font-weight:800;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:3px;">${ESC(c.name)}</div>
+          <div style="font-size:9.5px;color:#cbd5e1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ESC(c.species)} • ${ESC(facLabel)}</div>
+          <div style="font-size:9px;color:#7dd3fc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">⚔️ H1: ${ESC(c.row1Effect?.tag || "")}</div>
+          <div style="font-size:9px;color:#fbcfe8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">🧬 H2: +${c.row2Effect?.crAura || 60} CR</div>
+        </button>
+      `;
+    }).join("");
+
+    handEl.querySelectorAll("[data-hand-idx]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const idx = Number(btn.dataset.handIdx);
+        const firstEmpty = eng.player.row1.findIndex((s) => s === null);
+        if (firstEmpty < 0) {
+          SFX.alert();
+          this.showToast("Hàng 1 đã đủ 3 lá", "Hãy bấm Đấu Theo Chiều Dọc hoặc thu hồi 1 lá vừa đặt để đổi làn!");
+          return;
+        }
+        // Second click on already-selected card auto-deploys into first open Row 1 lane;
+        // First click highlights open lanes so player can place into an exact vertical lane!
+        if (eng.selectedHandIdx === idx) {
+          const res = eng.deployCardToRow1(idx, firstEmpty);
+          if (res.ok) {
+            SFX.cardPlay();
+            this.renderDuelUI();
+          } else {
+            SFX.alert();
+            this.showToast("Không thể ra bài", res.reason);
+          }
+        } else {
+          SFX.click();
+          eng.selectedHandIdx = idx;
+          this.renderDuelUI();
+        }
+      });
+    });
+  }
+
+  showDuelOutcome() {
+    const eng = this.duelEngine;
+    const won = eng.winner === "player";
+    won ? SFX.victory() : SFX.alert();
+
+    if (won) {
+      this.game.recordBattleWin();
+      this.game.addRes(this.game.playerFaction, "credits", 600);
+      this.game.addRes(this.game.playerFaction, "influence", 25);
+      if (this.duelContext.kind === "gauntlet") {
+        this.game.recordGauntletFloor(this.duelContext.floor || 1);
+      }
+      this.refreshTopResources();
+      this.checkAndToastAchievements();
+    }
+
+    const reasonMap = {
+      capture_3: won ? "Bắt đủ 3 lá bài địch vào Hàng 2!" : "Để đối phương bắt đủ 3 lá vào Hàng 2!",
+      leader_breach: won ? "Đánh bại Thủ lĩnh Hàng 3 khi Hàng 1 địch trống!" : "Thủ lĩnh Hàng 3 của bạn bị Tổng CR Hàng 1 địch khuất phục!",
+      tiebreak: "Phân định thắng bại cuối trận!"
+    };
+
+    const modal = document.getElementById("duel-victory-modal");
+    document.getElementById("victory-title").textContent = won ? "🏆 CHIẾN THẮNG VÁN BÀI!" : "💀 THẤT BẠI!";
+    document.getElementById("victory-title").style.color = won ? "var(--gold)" : "var(--danger)";
+    document.getElementById("victory-desc").textContent = won
+      ? `${eng.player.leader.name} thắng ${eng.enemy.leader.name} (${reasonMap[eng.winReason] || ""}) (+600 Credits, +25 Ảnh hưởng)!`
+      : `${eng.enemy.leader.name} thắng trận (${reasonMap[eng.winReason] || ""}). Hãy chỉnh Bộ Bài Phe hoặc dùng Hàng 2 Lai Tạo!`;
+
+    document.getElementById("btn-victory-story").classList.toggle("hidden", !this.pendingStoryBattle);
+    document.getElementById("btn-victory-conquer").classList.toggle("hidden", !(won && this.pendingInvasionSectorId));
+    document.getElementById("btn-victory-next-floor").classList.toggle("hidden", !(won && this.duelContext.kind === "gauntlet"));
+
+    // Offer Faction-Pure Card Draft reward on Gauntlet win
+    const draftBox = document.getElementById("gauntlet-draft-box");
+    const pFac = eng.player.leader.fac;
+    if (won && this.duelContext.kind === "gauntlet") {
+      const picks = getFactionCardPool(pFac, this.game.hybrids).filter((c) => c.id !== eng.player.leader.id).slice(0, 2);
+      draftBox.classList.remove("hidden");
+      draftBox.innerHTML = `<div class="muted" style="margin-bottom:6px;">🎁 Thưởng Tháp (Cùng phe ${ESC(FACTIONS[pFac]?.name || pFac)}):</div>` +
+        picks.map(c => `<button class="btn-glass btn-compact" data-draft-card="${c.id}" style="margin:3px;">+ ${ESC(c.name)} (CR ${c.cr})</button>`).join("");
+      draftBox.querySelectorAll("[data-draft-card]").forEach(b => {
+        b.addEventListener("click", () => {
+          const cid = b.dataset.draftCard;
+          if (!this.game.customDeck.includes(cid)) {
+            if (this.game.customDeck.length < 12) this.game.customDeck.push(cid);
+            else this.game.customDeck[this.game.customDeck.length - 1] = cid;
+          }
+          this.game.addRes(this.game.playerFaction, "credits", 500);
+          this.refreshTopResources();
+          this.showToast("🎁 Đã thêm lá thưởng!", `Lá bài phe đã được thêm vào Bộ Bài (+500 Cr).`);
+          draftBox.innerHTML = `<span class="badge" style="color:#4ade80;">✓ Đã nhận thưởng!</span>`;
+        });
+      });
+    } else {
+      draftBox.classList.add("hidden");
+      draftBox.innerHTML = "";
+    }
+
+    modal.classList.remove("hidden");
+  }
+
+  renderDeckBuilder() {
+    const protag = this.game.getProtagonist();
+    const fac = protag.fac || this.game.playerFaction;
+    const facName = this.game.facName(fac);
+    const hybrids = this.game.hybrids || [];
+
+    // Strictly sanitize stored deck against current Leader & Faction
+    this.game.customDeck = validateDeckForLeader(this.game.customDeck || [], protag.id, hybrids);
+    const deck = this.game.customDeck;
+    document.getElementById("deck-count-badge").textContent = deck.length;
+
+    const ruleBanner = document.getElementById("deck-faction-rule");
+    if (ruleBanner) {
+      ruleBanner.innerHTML = `🔒 <strong>Luật Phe Phái & 3 Hàng:</strong> Thủ lĩnh <strong>${ESC(protag.name)}</strong> (CR ${protag.cr}) trấn thủ <strong>Hàng 3</strong>. Bộ bài 12 lá chỉ được dùng các thẻ thuộc phe <strong style="color:var(--gold);">${ESC(facName)}</strong>!`;
+    }
+
+    const activeEl = document.getElementById("deck-active-list");
+    activeEl.innerHTML = deck.map((cid, idx) => {
+      const c = resolveCard(cid, hybrids);
+      if (!c) return "";
+      return `<button class="deck-chip ${c.isHybrid ? "hybrid" : ""}" data-remove-idx="${idx}">[CR ${c.cr}] ${ESC(c.name)} ✕</button>`;
+    }).join("");
+
+    activeEl.querySelectorAll("[data-remove-idx]").forEach((b) => {
+      b.addEventListener("click", () => {
+        SFX.click();
+        this.game.customDeck.splice(Number(b.dataset.removeIdx), 1);
+        this.game.saveToSlot("auto");
+        this.renderDeckBuilder();
+      });
+    });
+
+    const q = (document.getElementById("deck-search-input")?.value || "").trim().toLowerCase();
+    const factionPool = getFactionCardPool(fac, hybrids).filter((c) => {
+      if (c.id === protag.id) return false; // Leader is permanently seated on Row 3!
+      if (!q) return true;
+      return `${c.name} ${c.species || ""} ${c.row1Effect?.desc || ""} ${c.row2Effect?.desc || ""}`.toLowerCase().includes(q);
+    });
+
+    const poolEl = document.getElementById("deck-pool-grid");
+    poolEl.innerHTML = factionPool.map((c) => `
+      <button class="hand-card playable ${c.isHybrid ? "rarity-hybrid" : ""}" style="width:auto;min-width:0;" data-add-card="${ESC(c.id)}"
+              title="H1: ${ESC(c.row1Effect?.desc || "")} | H2: ${ESC(c.row2Effect?.desc || "")}">
+        <span class="card-cr-pill">CR ${c.cr}</span>
+        <img class="hand-card-thumb" src="${getCardPortrait(c)}" alt="${ESC(c.name)}" loading="lazy" />
+        <div style="font-weight:800;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:4px;">${ESC(c.name)}</div>
+        <div class="muted" style="font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ESC(c.species)} • ${ESC(facName)}</div>
+        <div style="font-size:9.5px;color:#7dd3fc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">⚔️ H1: ${ESC(c.row1Effect?.tag || "")}</div>
+        <div style="font-size:9.5px;color:#fbcfe8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">🧬 H2: +${c.row2Effect?.crAura || 60} CR</div>
+      </button>
+    `).join("");
+
+    poolEl.querySelectorAll("[data-add-card]").forEach((b) => {
+      b.addEventListener("click", () => {
+        if (this.game.customDeck.length >= 12) {
+          SFX.alert();
+          this.showToast("Bộ bài đã đủ 12 lá", "Bấm vào lá phía trên để gỡ bớt trước khi thêm mới!");
+          return;
+        }
+        const cid = b.dataset.addCard;
+        const card = resolveCard(cid, hybrids);
+        const count = this.game.customDeck.filter((id) => id === cid).length;
+        if (card?.unique && count >= 1) {
+          SFX.alert();
+          this.showToast("Nhân vật Độc Nhất", `${card.name} là thẻ độc nhất, mỗi bộ bài chỉ có 1 lá!`);
+          return;
+        }
+        if (!card?.unique && count >= 3) {
+          SFX.alert();
+          this.showToast("Tối đa 3 bản sao", `Mỗi đơn vị Quân Dự Bị chỉ mang tối đa 3 lá!`);
+          return;
+        }
+        SFX.cardPlay();
+        this.game.customDeck.push(cid);
+        this.game.saveToSlot("auto");
+        this.renderDeckBuilder();
+      });
+    });
+  }
+
+  // ==========================================================================
+  // MODE 3: 3D GALAXY CONQUEST & SECTOR HIERARCHY
   // ==========================================================================
   initGalaxyUI() {
     const facSel = document.getElementById("active-faction-select");
-    facSel.innerHTML = PLAYABLE.map(id => {
+    facSel.innerHTML = Object.keys(FACTIONS).map(id => {
       const f = FACTIONS[id];
       return `<option value="${id}">${ESC(f.name)} (${ESC(f.realm)})</option>`;
     }).join("");
@@ -663,6 +1379,9 @@ class Cycle12App {
     facSel.addEventListener("change", () => {
       SFX.click();
       this.game.playerFaction = facSel.value;
+      if (!this.game.resources[this.game.playerFaction]) {
+        this.game.resources[this.game.playerFaction] = { credits: 50000, influence: 400, research: 350, tributes: 0 };
+      }
       this.game.saveToSlot("auto");
       this.refreshTopResources();
       this.renderGalaxyFactionBox();
@@ -679,7 +1398,6 @@ class Cycle12App {
       this.renderSectorDetails();
     });
 
-    // Mobile bottom-sheet switcher for Galaxy panels
     document.querySelectorAll("[data-gsheet]").forEach((btn) => {
       btn.addEventListener("click", () => {
         SFX.click();
@@ -690,7 +1408,6 @@ class Cycle12App {
       });
     });
 
-    // Strategic sector action buttons
     document.getElementById("btn-invade-sector").addEventListener("click", () => {
       if (!this.selectedSectorId) return;
       const sData = SECTOR_BY_ID[this.selectedSectorId];
@@ -714,14 +1431,15 @@ class Cycle12App {
       const secDefense = this.game.sectors[sData.id]?.defense ?? 50;
       const buffMult = secDefense < 35 ? 1.15 : 1;
 
-      this.switchMode("arena");
-      document.getElementById("arena-player-select").value = playerChamp;
-      document.getElementById("arena-enemy-select").value = enemyChamp;
-      document.getElementById("arena-stage-select").value = sData.id;
-      this.startConfiguredArenaMatch({ buffMult });
-      if (buffMult > 1) {
-        this.pushArenaLog("system", "🕵️ Lợi thế Tình Báo: Phòng thủ địch < 35, tướng bạn nhận +15% công lực!");
-      }
+      this.switchMode("duel");
+      this.setDuelTab("skirmish");
+      this.startCardMatch({
+        kind: "invasion",
+        playerCharId: playerChamp,
+        enemyId: enemyChamp,
+        buffMult,
+        modeLabel: `🚩 Xâm Chiếm ${sData.name}`
+      });
     });
 
     document.getElementById("btn-fortify-sector").addEventListener("click", () => {
@@ -758,7 +1476,7 @@ class Cycle12App {
     document.getElementById("btn-goto-vn-sector").addEventListener("click", () => {
       SFX.click();
       const secId = this.selectedSectorId || "sylvalon";
-      const matchChap = CHAPTERS.find(ch => ch.sector === secId);
+      const matchChap = CHAPTERS.find(ch => resolveStorySector(ch.sector, this.game) === secId);
       if (matchChap) {
         this.activeEncounterScript = null;
         this.game.vn.currentChapterId = matchChap.id;
@@ -779,18 +1497,21 @@ class Cycle12App {
   }
 
   renderGalaxyFactionBox() {
-    const fac = FACTIONS[this.game.playerFaction];
-    const res = this.game.resources[this.game.playerFaction] || { credits: 0, influence: 0, research: 0, tributes: 0 };
-    const pct = this.game.getFactionTerritoryPct(this.game.playerFaction);
-
+    const f = FACTIONS[this.game.playerFaction] || FACTIONS.sylvarian;
+    const res = this.game.resources[this.game.playerFaction] || { credits: 0, influence: 0, research: 0 };
+    const terr = this.game.getFactionTerritoryPct(this.game.playerFaction);
     document.getElementById("faction-info-box").innerHTML = `
-      <div class="planet-meta-grid">
-        <div><strong>Lãnh đạo:</strong><br/>${ESC(fac.leader)}</div>
-        <div><strong>Lãnh thổ:</strong><br/><span style="color:${fac.color};font-weight:800;">${pct}% Ngân hà</span></div>
-        <div><strong>Ảnh hưởng:</strong> ${Math.round(res.influence)}</div>
-        <div><strong>Nghiên cứu:</strong> ${Math.round(res.research)}</div>
-        <div style="grid-column:span 2;"><strong>Chính phủ:</strong> ${ESC(fac.gov)}</div>
-        <div style="grid-column:span 2;" class="muted">${ESC(fac.desc)}</div>
+      <div style="background:rgba(15,23,42,0.75);border:1px solid ${f.color};border-radius:10px;padding:9px;font-size:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <strong style="color:${f.color};">${ESC(f.name)}</strong>
+          <span class="badge">${terr}% Lãnh thổ</span>
+        </div>
+        <div class="muted" style="margin:4px 0;">Thủ đô: ${ESC(f.capital)}</div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:11.5px;color:#e2e8f0;">
+          <span>🪙 ${Number(res.credits || 0).toLocaleString()}</span>
+          <span>👑 ${res.influence || 0} Inf</span>
+          <span>🔬 ${res.research || 0} Res</span>
+        </div>
       </div>
     `;
   }
@@ -798,32 +1519,26 @@ class Cycle12App {
   renderSectorList() {
     const list = document.getElementById("galaxy-sector-list");
     list.innerHTML = SECTORS.map((sec) => {
+      const owner = this.game.ownerOf(sec.id);
+      const col = FACTIONS[owner]?.color || "#64748b";
       const dyn = this.game.sectors[sec.id];
-      const ownerFac = FACTIONS[dyn.owner];
       const active = this.selectedSectorId === sec.id ? "active" : "";
-      const col = ownerFac?.color || (sec.lost ? "#f472b6" : "#94a3b8");
-
+      const kindIcon = sec.kind === "mega" ? "🔶" : sec.kind === "cluster" ? "🌌" : sec.kind === "star_system" ? "🪐" : "🌀";
       return `
-        <div class="sector-card ${active}" data-secid="${sec.id}">
-          <div class="sector-head">
-            <strong style="font-size:13px;">${ESC(sec.name)}${sec.inferred ? " *" : ""}</strong>
-            <span class="badge" style="color:${col};border-color:${col};">${ESC(SECTOR_KIND_LABEL[sec.kind] || sec.kind)}</span>
-          </div>
-          <div class="muted" style="margin-top:3px;">
-            <span style="color:${col};font-weight:700;">${ESC(this.game.facName(dyn.owner))}</span>
-            • Thủ ${dyn.defense}/${dyn.maxDefense} • Ổn định ${dyn.stability}%
+        <div class="roster-item ${active}" data-secid="${sec.id}">
+          <span style="width:10px;height:10px;border-radius:50%;background:${col};flex-shrink:0;"></span>
+          <div style="flex:1;min-width:0;">
+            <div style="font-weight:700;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${kindIcon} ${ESC(sec.name)}</div>
+            <div class="muted" style="font-size:11px;">${ESC(this.game.facName(owner))} • Thủ ${dyn.defense} • Ổn định ${dyn.stability}%</div>
           </div>
         </div>
       `;
     }).join("");
 
-    list.querySelectorAll(".sector-card").forEach((card) => {
-      card.addEventListener("click", () => {
+    list.querySelectorAll("[data-secid]").forEach((el) => {
+      el.addEventListener("click", () => {
         SFX.click();
-        this.selectSector(card.dataset.secid, true);
-        if (window.innerWidth <= 960) {
-          document.querySelector('[data-gsheet="right"]')?.click();
-        }
+        this.selectSector(el.dataset.secid, true);
       });
     });
   }
@@ -834,7 +1549,6 @@ class Cycle12App {
     if (zoom) this.engine.zoomToSector(secId);
     this.renderSectorList();
     this.renderSectorDetails();
-    this.renderSuperweaponButtons();
   }
 
   selectBody(secId, bodyId) {
@@ -842,58 +1556,48 @@ class Cycle12App {
     this.selectedBodyId = bodyId;
     this.engine.zoomToBody(secId, bodyId);
     this.renderSectorDetails();
-    const sec = SECTOR_BY_ID[secId];
-    const body = sec?.bodies?.find(b => b.id === bodyId);
-    if (body) {
-      SFX.click();
-      this.showToast(`🪐 ${body.name}`, body.desc || "Thiên thể trực thuộc hệ sao.");
-    }
   }
 
   renderSectorDetails() {
     const box = document.getElementById("planet-detail-box");
     const sec = SECTOR_BY_ID[this.selectedSectorId];
     if (!sec) {
-      box.innerHTML = `<div class="muted">Đang ở chế độ Toàn cảnh Ngân Hà Gaiastra. Hãy chạm vào một quả cầu hệ sao 3D hoặc chọn trong danh sách để khảo sát.</div>`;
+      box.innerHTML = `<div class="muted">Chọn một hệ sao bên trái hoặc bấm trực tiếp vào quả cầu 3D để xem chi tiết thiên thể & đồn trú.</div>`;
       return;
     }
 
     const dyn = this.game.sectors[sec.id];
-    const ownerFac = FACTIONS[dyn.owner];
-    const col = ownerFac?.color || "#94a3b8";
+    const col = FACTIONS[dyn.owner]?.color || "#64748b";
 
-    const bodiesHtml = (sec.bodies || []).length
-      ? sec.bodies.map((b) => {
-          const isSel = this.selectedBodyId === b.id;
-          return `
-            <div class="body-card" data-bodyid="${b.id}" style="${isSel ? "border-color:var(--gold);background:rgba(251,191,36,0.1);" : ""}">
-              <div style="display:flex;justify-content:space-between;align-items:center;">
-                <strong style="color:${b.color || "#38bdf8"};">● ${ESC(b.name)}</strong>
-                <span class="badge">${ESC(BODY_KIND_LABEL[b.kind] || b.kind)}</span>
-              </div>
-              <div class="muted" style="margin-top:3px;">${ESC(b.desc || "")}</div>
-              ${(b.places || []).length ? `<div class="chip-row">${b.places.map(p => `<span class="chip">📍 ${ESC(p.name)}</span>`).join("")}</div>` : ""}
-            </div>
-          `;
-        }).join("")
-      : `<div class="muted">Không phải hệ sao hành tinh (Vùng không gian / Chiều dị biệt).</div>`;
+    const bodiesHtml = (sec.bodies || []).map((b) => {
+      const moonsStr = (b.moons && b.moons.length) ? ` (+${b.moons.length} vệ tinh)` : "";
+      const placesStr = (b.places && b.places.length) ? ` — 🏛️ ${b.places.map(p => p.name).join(", ")}` : "";
+      const selectedCls = this.selectedBodyId === b.id ? "style=\"border-color:var(--gold);background:rgba(250,204,21,0.12);\"" : "";
+      return `
+        <div class="body-subcard" data-bodyid="${b.id}" ${selectedCls}>
+          <div style="display:flex;justify-content:space-between;">
+            <strong style="color:${b.color || "#38bdf8"};">${ESC(b.name)}${moonsStr}</strong>
+            <span class="badge">${ESC(BODY_KIND_LABEL[b.kind] || b.kind)}</span>
+          </div>
+          <div class="muted" style="margin-top:2px;">${ESC(b.desc || "")}${ESC(placesStr)}</div>
+        </div>
+      `;
+    }).join("");
 
-    const placesHtml = (sec.places || []).length
-      ? `<div style="margin-top:8px;"><strong style="font-size:11.5px;">Địa danh trực thuộc:</strong><div class="chip-row">${sec.places.map(p => `<span class="chip">${ESC(PLACE_KIND_LABEL[p.kind] || "Địa danh")}: ${ESC(p.name)}</span>`).join("")}</div></div>`
+    const placesHtml = (sec.places && sec.places.length > 0)
+      ? `<div style="margin-top:6px;">${sec.places.map(p => `<span class="badge" style="margin-right:4px;">🏛️ ${ESC(p.name)} (${ESC(PLACE_KIND_LABEL[p.kind] || p.kind)})</span>`).join("")}</div>`
       : "";
 
-    const garrisonHtml = (dyn.garrison || []).length
-      ? `<div style="margin-top:8px;"><strong style="font-size:11.5px;">Nhân vật đang đóng quân (${dyn.garrison.length}):</strong>
-           <div class="chip-row">${dyn.garrison.map(cid => {
-             const ch = CHAR_BY_ID[cid];
-             return ch ? `<span class="chip clickable" data-garrison-char="${ch.id}">💬 ${ESC(ch.name)} (CR ${ch.cr})</span>` : "";
-           }).join("")}</div>
-         </div>`
+    const garrisonChars = (dyn.garrison || []).map(id => CHAR_BY_ID[id]).filter(Boolean);
+    const garrisonHtml = garrisonChars.length > 0
+      ? `<div style="margin-top:8px;"><strong style="font-size:11.5px;color:var(--gold);">Nhân vật đóng quân (bấm để đối thoại):</strong><div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:5px;">` +
+        garrisonChars.slice(0, 12).map(c => `<button class="btn-glass btn-compact" data-garrison-char="${c.id}">💬 ${ESC(c.name)}</button>`).join("") +
+        `</div></div>`
       : "";
 
     box.innerHTML = `
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-        <h3 style="margin:0;color:${col};font-size:16px;">${ESC(sec.name)}${sec.inferred ? " (Suy luận)" : ""}</h3>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;">
+        <strong style="color:${col};font-size:15px;">${ESC(sec.name)}</strong>
         <span class="badge" style="color:${col};border-color:${col};">${ESC(this.game.facName(dyn.owner))}</span>
       </div>
       <div class="planet-meta-grid">
@@ -962,7 +1666,7 @@ class Cycle12App {
           this.checkAndToastAchievements();
         } else {
           SFX.alert();
-          this.showToast("Không thể khai hỏa", res.msg);
+          this.showToast("Chưa thể khai hỏa", res.msg);
         }
       });
     });
@@ -970,529 +1674,204 @@ class Cycle12App {
 
   renderFloatingLabels(labels) {
     const layer = document.getElementById("galaxy-labels-layer");
-    const activeIds = new Set();
+    const activeIds = new Set(labels.map(l => `${l.kind}:${l.id}`));
 
-    for (const item of labels) {
-      if (item.x < 10 || item.x > window.innerWidth - 10 || item.y < 58 || item.y > window.innerHeight - 20) {
-        continue;
+    for (const [key, dom] of this.labelDomCache.entries()) {
+      if (!activeIds.has(key)) {
+        dom.remove();
+        this.labelDomCache.delete(key);
       }
-      const key = `${item.kind}:${item.id}`;
-      activeIds.add(key);
+    }
 
-      let el = this.labelDomCache.get(key);
-      if (!el) {
-        el = document.createElement("button");
-        el.className = "floating-label";
-        el.innerHTML = `<span class="dot"></span><span class="lbl"></span>`;
-        el.addEventListener("click", (e) => {
+    labels.forEach((lbl) => {
+      const key = `${lbl.kind}:${lbl.id}`;
+      let dom = this.labelDomCache.get(key);
+      if (!dom) {
+        dom = document.createElement("button");
+        dom.className = `planet-label ${lbl.kind}`;
+        dom.addEventListener("click", (e) => {
           e.stopPropagation();
           SFX.click();
-          if (item.kind === "body") {
-            this.selectBody(item.sectorId, item.id);
-          } else {
-            this.selectSector(item.sectorId, true);
-          }
+          if (lbl.kind === "sector") this.selectSector(lbl.sectorId, true);
+          else this.selectBody(lbl.sectorId, lbl.id);
         });
-        this.labelDomCache.set(key, el);
-        layer.appendChild(el);
+        layer.appendChild(dom);
+        this.labelDomCache.set(key, dom);
       }
-
-      el.style.left = `${item.x.toFixed(1)}px`;
-      el.style.top = `${item.y.toFixed(1)}px`;
-      el.querySelector(".dot").style.background = item.color || "#38bdf8";
-      el.querySelector(".lbl").textContent = item.text;
-      const isSelected = (item.kind === "sector" && this.selectedSectorId === item.id) || (item.kind === "body" && this.selectedBodyId === item.id);
-      el.classList.toggle("selected", isSelected);
-      el.style.display = "inline-flex";
-    }
-
-    for (const [key, el] of this.labelDomCache.entries()) {
-      if (!activeIds.has(key)) {
-        el.style.display = "none";
-      }
-    }
+      dom.style.left = `${lbl.x}px`;
+      dom.style.top = `${lbl.y}px`;
+      dom.style.borderColor = lbl.color;
+      dom.textContent = lbl.text;
+    });
   }
 
   // ==========================================================================
-  // MODE 3: REAL-TIME 3D ARENA & VIRTUAL JOYSTICK
+  // MODE 4: GENETICS & BREEDING LAB (LAI TẠO GEN + THẺ HYBRID)
   // ==========================================================================
-  initArenaUI() {
-    const pSel = document.getElementById("arena-player-select");
-    const eSel = document.getElementById("arena-enemy-select");
-    const sSel = document.getElementById("arena-stage-select");
-
-    const sortedChars = [...CHARACTERS].sort((a, b) => b.cr - a.cr);
-    const charOpts = sortedChars.map(c => `<option value="${c.id}">${ESC(c.name)} (CR ${c.cr} • ${ESC(c.species)})</option>`).join("");
-    pSel.innerHTML = charOpts;
-    eSel.innerHTML = charOpts;
-    pSel.value = "arisia";
-    eSel.value = "overlord";
-
-    sSel.innerHTML = SECTORS.map(s => `<option value="${s.id}">${ESC(s.name)} (${ESC(s.realm)})</option>`).join("");
-    sSel.value = "western_march";
-
-    // Mobile setup drawer toggle
-    const drawer = document.getElementById("arena-setup-drawer");
-    document.getElementById("btn-arena-toggle-setup").addEventListener("click", () => {
-      SFX.click();
-      drawer.classList.toggle("open");
-    });
-
-    document.getElementById("btn-start-match").addEventListener("click", () => {
-      SFX.choice();
-      this.pendingStoryBattle = null;
-      this.pendingInvasionSectorId = null;
-      drawer.classList.remove("open");
-      this.startConfiguredArenaMatch();
-    });
-
-    const toggleAuto = () => {
-      if (!this.engine.arenaState) return;
-      SFX.click();
-      this.engine.arenaState.autoPilot = !this.engine.arenaState.autoPilot;
-      const on = this.engine.arenaState.autoPilot;
-      document.getElementById("btn-toggle-autopilot").textContent = on ? "🤖 Tắt Tự Động Đánh [F]" : "🤖 Bật Tự Động Đánh [F]";
-      document.getElementById("btn-arena-auto-mob").classList.toggle("active", on);
-      this.pushArenaLog("system", on ? "🤖 Đã bật Tự động chiến đấu!" : "🕹️ Đã chuyển sang điều khiển thủ công!");
-    };
-    document.getElementById("btn-toggle-autopilot").addEventListener("click", toggleAuto);
-    document.getElementById("btn-arena-auto-mob").addEventListener("click", toggleAuto);
-
-    // Skill & Dodge triggers
-    [0, 1, 2].forEach((slot) => {
-      document.getElementById(`btn-skill-${slot}`).addEventListener("click", () => this.fireArenaSkill(slot));
-    });
-
-    document.getElementById("btn-dodge").addEventListener("click", () => {
-      const res = this.engine.triggerDodge();
-      if (res.ok) {
-        SFX.dodge();
-        this.pushArenaLog("player", res.msg);
-      } else if (res.msg) {
-        this.pushArenaLog("system", res.msg);
-      }
-    });
-
-    // Keyboard Arena shortcuts
-    window.addEventListener("keydown", (e) => {
-      if (this.currentMode !== "arena") return;
-      const k = (e.key || "").toLowerCase();
-      if (k === "1" || k === "q") this.fireArenaSkill(0);
-      else if (k === "2" || k === "e") this.fireArenaSkill(1);
-      else if (k === "3" || k === "r") this.fireArenaSkill(2);
-      else if (k === " ") {
-        e.preventDefault();
-        document.getElementById("btn-dodge").click();
-      } else if (k === "f") {
-        toggleAuto();
-      }
-    });
-
-    this.setupVirtualJoystick();
-
-    // Victory Modal handlers
-    const vModal = document.getElementById("arena-victory-modal");
-    document.getElementById("btn-victory-story").addEventListener("click", () => {
-      SFX.choice();
-      vModal.classList.add("hidden");
-      if (!this.pendingStoryBattle) return;
-      const ctx = this.pendingStoryBattle;
-      const won = this._lastBattleWon;
-      this.pendingStoryBattle = null;
-
-      this.activeEncounterScript = ctx.encounterScript;
-      if (!ctx.isEncounter) {
-        this.game.vn.currentChapterId = ctx.scriptId;
-      }
-      this.game.vn.currentNodeId = won ? ctx.winNext : ctx.loseNext;
-      this.lastAppliedNodeKey = null;
-      this.switchMode("vn");
-    });
-
-    document.getElementById("btn-victory-conquer").addEventListener("click", () => {
-      SFX.victory();
-      vModal.classList.add("hidden");
-      if (this.pendingInvasionSectorId) {
-        const secId = this.pendingInvasionSectorId;
-        this.pendingInvasionSectorId = null;
-        this.game.conquerSector(secId, this.game.playerFaction);
-        this.engine.updateSectorColors(this.game);
-        this.refreshTopResources();
-        this.selectedSectorId = secId;
-        this.switchMode("galaxy");
-        this.showToast("🚩 ĐÃ CHIẾM KHU VỰC!", `${this.game.sectorName(secId)} nay thuộc về ${this.game.facName(this.game.playerFaction)}!`);
-        this.checkAndToastAchievements();
-      }
-    });
-
-    document.getElementById("btn-victory-close").addEventListener("click", () => {
-      SFX.click();
-      vModal.classList.add("hidden");
-    });
-  }
-
-  setupVirtualJoystick() {
-    const zone = document.getElementById("arena-joystick");
-    const knob = document.getElementById("arena-joystick-knob");
-    let activePointer = null;
-    const maxR = 36;
-
-    const updateStick = (clientX, clientY) => {
-      const rect = zone.getBoundingClientRect();
-      const cx = rect.left + rect.width / 2;
-      const cy = rect.top + rect.height / 2;
-      let dx = clientX - cx;
-      let dy = clientY - cy;
-      const dist = Math.hypot(dx, dy);
-      if (dist > maxR) {
-        dx = (dx / dist) * maxR;
-        dy = (dy / dist) * maxR;
-      }
-      knob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
-      this.engine.setJoystickInput(dx / maxR, dy / maxR);
-    };
-
-    const resetStick = () => {
-      activePointer = null;
-      knob.style.transform = "translate(-50%, -50%)";
-      this.engine.setJoystickInput(0, 0);
-    };
-
-    zone.addEventListener("pointerdown", (e) => {
-      activePointer = e.pointerId;
-      zone.setPointerCapture(e.pointerId);
-      updateStick(e.clientX, e.clientY);
-    });
-    zone.addEventListener("pointermove", (e) => {
-      if (activePointer === e.pointerId) updateStick(e.clientX, e.clientY);
-    });
-    zone.addEventListener("pointerup", (e) => {
-      if (activePointer === e.pointerId) resetStick();
-    });
-    zone.addEventListener("pointercancel", resetStick);
-  }
-
-  startConfiguredArenaMatch(opts = {}) {
-    const pId = document.getElementById("arena-player-select").value;
-    const eId = document.getElementById("arena-enemy-select").value;
-    const sId = document.getElementById("arena-stage-select").value;
-
-    this.engine.setupArenaStage(sId, pId, eId, opts);
-    document.getElementById("arena-victory-modal").classList.add("hidden");
-    document.getElementById("arena-combat-log").innerHTML = "";
-
-    const pChar = CHAR_BY_ID[pId];
-    const eChar = CHAR_BY_ID[eId];
-    const pFac = FACTIONS[pChar?.fac]?.name || pChar?.species;
-    const eFac = FACTIONS[eChar?.fac]?.name || eChar?.species;
-
-    document.getElementById("hud-p-img").src = getPortraitUrl(pChar);
-    document.getElementById("hud-p-name").textContent = pChar.name;
-    document.getElementById("hud-p-meta").textContent = `CR ${pChar.cr} • ${pFac}`;
-
-    document.getElementById("hud-e-img").src = getPortraitUrl(eChar);
-    document.getElementById("hud-e-name").textContent = eChar.name;
-    document.getElementById("hud-e-meta").textContent = `CR ${eChar.cr} • ${eFac}`;
-
-    [0, 1, 2].forEach((slot) => {
-      const skName = (pChar.skills && pChar.skills[slot]) || `Kỹ năng ${slot + 1}`;
-      document.querySelector(`#btn-skill-${slot} .skill-label`).textContent = `[${slot + 1}] ${skName}`;
-    });
-
-    document.getElementById("btn-toggle-autopilot").textContent = "🤖 Bật Tự Động Đánh [F]";
-    document.getElementById("btn-arena-auto-mob").classList.remove("active");
-
-    this.updateArenaBars();
-    this.pushArenaLog("system", `🔥 Trận đấu tại ${this.game.sectorName(sId)}: ${pChar.name} vs ${eChar.name}!`);
-  }
-
-  fireArenaSkill(slot) {
-    const wasFullOd = (this.engine.arenaState?.player?.overdrive || 0) >= 100;
-    const res = this.engine.triggerArenaSkill(slot);
-    if (!res) return;
-    if (res.ok) {
-      if (slot === 2 && wasFullOd) SFX.overdrive();
-      else slot === 2 ? SFX.heavyHit() : SFX.laser();
-      this.pushArenaLog("player", res.msg);
-      this.updateArenaBars();
-    } else if (res.msg) {
-      this.pushArenaLog("system", res.msg);
-    }
-  }
-
-  handleCombatTick(tick) {
-    if (tick.type === "enemy_attack") SFX.heavyHit();
-    this.pushArenaLog(tick.type === "enemy_attack" ? "enemy" : "player", tick.msg);
-    this.updateArenaBars();
-  }
-
-  handleCombatEnd(res) {
-    const won = res.winner === "player";
-    this._lastBattleWon = won;
-    if (won) {
-      SFX.victory();
-      this.game.recordBattleWin();
-      this.checkAndToastAchievements();
-    } else {
-      SFX.alert();
-    }
-    this.updateArenaBars();
-    this.pushArenaLog("system", res.msg);
-
-    const modal = document.getElementById("arena-victory-modal");
-    document.getElementById("victory-title").textContent = won ? "🏆 CHIẾN THẮNG!" : "💀 THẤT BẠI!";
-    document.getElementById("victory-title").style.color = won ? "var(--gold)" : "var(--danger)";
-    document.getElementById("victory-desc").textContent = res.msg;
-
-    const storyBtn = document.getElementById("btn-victory-story");
-    const conquerBtn = document.getElementById("btn-victory-conquer");
-
-    storyBtn.classList.toggle("hidden", !this.pendingStoryBattle);
-    conquerBtn.classList.toggle("hidden", !(won && this.pendingInvasionSectorId));
-
-    modal.classList.remove("hidden");
-  }
-
-  updateArenaBars() {
-    const st = this.engine.arenaState;
-    if (!st) return;
-    const pPct = Math.max(0, Math.min(100, (st.player.hp / st.player.maxHp) * 100));
-    const ePct = Math.max(0, Math.min(100, (st.enemy.hp / st.enemy.maxHp) * 100));
-
-    document.getElementById("hud-p-bar").style.width = `${pPct}%`;
-    document.getElementById("hud-p-hp-text").textContent = `${Math.round(st.player.hp).toLocaleString()} / ${st.player.maxHp.toLocaleString()} HP`;
-
-    document.getElementById("hud-e-bar").style.width = `${ePct}%`;
-    document.getElementById("hud-e-hp-text").textContent = `${Math.round(st.enemy.hp).toLocaleString()} / ${st.enemy.maxHp.toLocaleString()} HP`;
-  }
-
-  pushArenaLog(cls, text) {
-    const log = document.getElementById("arena-combat-log");
-    const line = document.createElement("div");
-    line.className = `combat-log-line ${cls}`;
-    line.textContent = text;
-    log.appendChild(line);
-    while (log.children.length > 18) log.removeChild(log.firstChild);
-    log.scrollTop = log.scrollHeight;
-  }
-
-  spawnFloatingDamage(evt) {
-    const layer = document.getElementById("arena-damage-layer");
-    const el = document.createElement("div");
-    el.className = `damage-float ${Math.abs(parseInt(evt.text, 10)) > 600 ? "crit" : ""}`;
-    el.style.left = `${evt.x}px`;
-    el.style.top = `${evt.y}px`;
-    el.style.color = evt.color || "#38bdf8";
-    el.textContent = evt.text;
-    layer.appendChild(el);
-    setTimeout(() => el.remove(), 950);
-  }
-
-  startUiLoop() {
-    const tick = () => {
-      if (this.currentMode === "arena" && this.engine.arenaState) {
-        const p = this.engine.arenaState.player;
-        [0, 1, 2].forEach((slot) => {
-          const btn = document.getElementById(`btn-skill-${slot}`);
-          const cd = p.cooldowns[slot] || 0;
-          btn.classList.toggle("on-cd", cd > 0);
-          btn.querySelector(".skill-cd").textContent = cd > 0 ? `${cd.toFixed(1)}s` : "Sẵn sàng";
-        });
-        const dodgeBtn = document.getElementById("btn-dodge");
-        dodgeBtn.classList.toggle("on-cd", p.dodgeCd > 0);
-        dodgeBtn.querySelector(".skill-cd").textContent = p.dodgeCd > 0 ? `${p.dodgeCd.toFixed(1)}s` : (p.shieldTime > 0 ? "🛡️ KHIÊN" : "Sẵn sàng");
-
-        const comboEl = document.getElementById("arena-combo-badge");
-        if (comboEl) comboEl.textContent = `COMBO x${p.combo || 0}`;
-        const odPct = Math.max(0, Math.min(100, p.overdrive || 0));
-        const odBar = document.getElementById("arena-od-bar");
-        const odText = document.getElementById("arena-od-text");
-        if (odBar) {
-          odBar.style.width = `${odPct}%`;
-          odBar.classList.toggle("ready", odPct >= 100);
-        }
-        if (odText) {
-          odText.textContent = odPct >= 100 ? "OVERDRIVE READY! (1.5x [3])" : `OVERDRIVE ${Math.round(odPct)}%`;
-        }
-      }
-      requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
-  }
-
-  // ==========================================================================
-  // MODE 4: 3D CHARACTER INSPECTOR (72 CHARACTERS)
-  // ==========================================================================
-  initInspectorUI() {
-    const facSel = document.getElementById("char-faction-filter");
-    const uniqueFacs = [...new Set(CHARACTERS.map(c => c.fac))];
-    facSel.innerHTML = `<option value="ALL">Tất cả Phe (${CHARACTERS.length})</option>` +
-      uniqueFacs.map(fid => `<option value="${fid}">${ESC(FACTIONS[fid]?.name || fid)}</option>`).join("");
-
-    const searchInput = document.getElementById("char-search-input");
-    const genderSel = document.getElementById("char-gender-filter");
-
-    const rerender = () => this.renderRosterList();
-    searchInput.addEventListener("input", rerender);
-    genderSel.addEventListener("change", rerender);
-    facSel.addEventListener("change", rerender);
-
-    // Mobile sheet toggles
-    document.querySelectorAll("[data-isheet]").forEach((btn) => {
+  initBreedingUI() {
+    document.querySelectorAll("[data-bsheet]").forEach((btn) => {
       btn.addEventListener("click", () => {
         SFX.click();
-        const mode = btn.dataset.isheet;
-        document.querySelectorAll("[data-isheet]").forEach(b => b.classList.toggle("active", b === btn));
-        document.getElementById("inspector-left-sidebar").classList.toggle("mobile-sheet-active", mode === "left");
-        document.getElementById("inspector-right-sidebar").classList.toggle("mobile-sheet-active", mode === "right");
+        const mode = btn.dataset.bsheet;
+        document.querySelectorAll("[data-bsheet]").forEach(b => b.classList.toggle("active", b === btn));
+        document.getElementById("breeding-left-sidebar").classList.toggle("mobile-sheet-active", mode === "left");
+        document.getElementById("breeding-right-sidebar").classList.toggle("mobile-sheet-active", mode === "right");
       });
     });
 
-    this.renderRosterList();
-    this.renderInspectorCard();
+    const catSel = document.getElementById("breed-catalyst-select");
+    catSel.innerHTML = CATALYSTS.map((c) => `<option value="${c.id}">${ESC(c.name)} (${c.cost} Cr)</option>`).join("");
+
+    document.getElementById("breed-a-select").addEventListener("change", () => this.renderBreedingPreview());
+    document.getElementById("breed-b-select").addEventListener("change", () => this.renderBreedingPreview());
+    catSel.addEventListener("change", () => this.renderBreedingPreview());
+
+    document.getElementById("btn-execute-breed").addEventListener("click", () => {
+      const aId = document.getElementById("breed-a-select").value;
+      const bId = document.getElementById("breed-b-select").value;
+      const catId = catSel.value;
+      const res = executeBreeding(this.game, aId, bId, catId);
+      if (res.ok) {
+        SFX.breed();
+        this.engine.pulseBreedingHelix();
+        this.refreshTopResources();
+        this.refreshBreedingDropdowns();
+        this.renderBreedingPreview();
+        this.renderBreedingHybrids();
+        this.showToast("🧬 Hợp Nhất Gen Thành Công!", res.msg);
+        this.checkAndToastAchievements();
+      } else {
+        SFX.alert();
+        this.showToast("⚠️ Từ Chối Hợp Nhất", res.msg);
+      }
+    });
+
+    this.refreshBreedingDropdowns();
+    this.renderBreedingPreview();
+    this.renderBreedingHybrids();
   }
 
-  renderRosterList() {
-    const q = (document.getElementById("char-search-input").value || "").trim().toLowerCase();
-    const gFilter = document.getElementById("char-gender-filter").value;
-    const fFilter = document.getElementById("char-faction-filter").value;
+  openBreedingWith(charId) {
+    this.switchMode("breeding");
+    const subj = resolveGeneticSubject(charId, this.game.hybrids);
+    const aSel = document.getElementById("breed-a-select");
+    const bSel = document.getElementById("breed-b-select");
+    if (subj.gender === "Male" && bSel) bSel.value = charId;
+    else if (aSel) aSel.value = charId;
+    this.renderBreedingPreview();
+  }
 
-    const filtered = CHARACTERS
-      .filter((c) => {
-        if (gFilter === "Female" && c.g !== "F") return false;
-        if (gFilter === "Male" && c.g !== "M") return false;
-        if (fFilter !== "ALL" && c.fac !== fFilter) return false;
-        if (!q) return true;
-        const hay = `${c.name} ${c.species} ${c.title} ${(c.skills || []).join(" ")} ${FACTIONS[c.fac]?.name || ""}`.toLowerCase();
-        return hay.includes(q);
-      })
-      .sort((a, b) => b.cr - a.cr);
+  refreshBreedingDropdowns() {
+    const aSel = document.getElementById("breed-a-select");
+    const bSel = document.getElementById("breed-b-select");
+    const prevA = aSel.value || "meralina";
+    const prevB = bSel.value || "ragnaroir";
 
-    const list = document.getElementById("char-roster-list");
-    list.innerHTML = filtered.map((c) => {
-      const active = this.inspectedCharId === c.id ? "active" : "";
-      const col = FACTIONS[c.fac]?.color || "#38bdf8";
+    const hybOpts = (this.game.hybrids || []).map((h) => ({ id: h.id, label: `🧬 ${h.name} (CR ${h.cr})`, gender: "Hybrid" }));
+    const femOpts = CHARACTERS.filter(c => c.gender === "Female").map(c => ({ id: c.id, label: `♀ ${c.name} (${c.species} • CR ${c.cr})` }));
+    const maleOpts = CHARACTERS.filter(c => c.gender === "Male").map(c => ({ id: c.id, label: `♂ ${c.name} (${c.species} • CR ${c.cr})` }));
+
+    aSel.innerHTML = [...hybOpts, ...femOpts, ...maleOpts].map(o => `<option value="${ESC(o.id)}">${ESC(o.label)}</option>`).join("");
+    bSel.innerHTML = [...maleOpts, ...hybOpts, ...femOpts].map(o => `<option value="${ESC(o.id)}">${ESC(o.label)}</option>`).join("");
+
+    aSel.value = (hybOpts.some(o => o.id === prevA) || CHAR_BY_ID[prevA]) ? prevA : "meralina";
+    bSel.value = (hybOpts.some(o => o.id === prevB) || CHAR_BY_ID[prevB]) ? prevB : "ragnaroir";
+  }
+
+  renderBreedingPreview() {
+    const aId = document.getElementById("breed-a-select")?.value || "meralina";
+    const bId = document.getElementById("breed-b-select")?.value || "ragnaroir";
+    const catId = document.getElementById("breed-catalyst-select")?.value || "None";
+    const prev = previewBreeding(aId, bId, catId, this.game.hybrids);
+
+    const box = document.getElementById("breed-preview-box");
+    box.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+        <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+          <img src="${this.resolvePortrait(prev.parentA.id)}" style="width:44px;height:52px;border-radius:8px;object-fit:cover;object-position:top center;" alt="" />
+          <div style="min-width:0;">
+            <strong style="color:#f472b6;">${ESC(prev.parentA.name)}</strong>
+            <div class="muted" style="font-size:10.5px;">CR ${prev.parentA.cr} • ${ESC(prev.parentA.species)}</div>
+          </div>
+        </div>
+        <strong style="color:var(--gold);font-size:18px;">×</strong>
+        <div style="display:flex;align-items:center;gap:8px;min-width:0;text-align:right;">
+          <div style="min-width:0;">
+            <strong style="color:#38bdf8;">${ESC(prev.parentB.name)}</strong>
+            <div class="muted" style="font-size:10.5px;">CR ${prev.parentB.cr} • ${ESC(prev.parentB.species)}</div>
+          </div>
+          <img src="${this.resolvePortrait(prev.parentB.id)}" style="width:44px;height:52px;border-radius:8px;object-fit:cover;object-position:top center;" alt="" />
+        </div>
+      </div>
+      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px;padding-top:4px;border-top:1px solid rgba(255,255,255,0.08);">
+        <span>Dự kiến CR: <strong style="color:#fde047;">${prev.estCrMin}–${prev.estCrMax}</strong></span>
+        <span>Đột biến trội: <strong style="color:#c084fc;">${prev.mutChance}%</strong></span>
+        <span>Phí: <strong>${prev.cost.toLocaleString()} Cr</strong></span>
+      </div>
+      ${prev.notes.length ? `<div style="display:flex;flex-direction:column;gap:4px;">${prev.notes.map(n => `<div class="muted" style="color:${prev.blocked ? "#fb7185" : "#cbd5e1"};">${ESC(n)}</div>`).join("")}</div>` : `<div class="muted">✅ Sẵn sàng đồng bộ chuỗi DNA tại Buồng Gen 3D!</div>`}
+    `;
+  }
+
+  renderBreedingHybrids() {
+    const list = document.getElementById("breed-hybrids-list");
+    const hybs = this.game.hybrids || [];
+    if (hybs.length === 0) {
+      list.innerHTML = `<div class="muted">Chưa có hậu duệ nào được tạo. Hãy chọn 2 cá thể bên trái và nhấn Kích Hoạt Hợp Nhất Gen!</div>`;
+      return;
+    }
+
+    list.innerHTML = hybs.map((h) => {
+      const inDeck = (this.game.customDeck || []).includes(h.id);
+      const isProtag = this.game.protagonistId === h.id;
       return `
-        <div class="roster-item ${active}" data-charid="${c.id}">
-          <img class="roster-thumb" src="${getPortraitUrl(c)}" alt="${ESC(c.name)}" />
-          <div style="flex:1;min-width:0;">
-            <div class="roster-head">
-              <strong style="font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ESC(c.name)}</strong>
-              <span class="badge" style="color:${col};border-color:${col};">CR ${c.cr}</span>
+        <div class="codex-card" style="border-color:rgba(244,114,182,0.45);">
+          <div style="display:flex;gap:10px;align-items:center;">
+            <img src="${getHybridPortraitUrl(h)}" style="width:52px;height:62px;border-radius:10px;object-fit:cover;" alt="${ESC(h.name)}" />
+            <div style="flex:1;min-width:0;">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
+                <strong style="color:#fbcfe8;">${ESC(h.name)}</strong>
+                <span class="badge" style="color:#fde047;">CR ${h.cr}</span>
+              </div>
+              <div class="muted" style="font-size:11px;">${ESC(h.parentsLabel)} • Chu kỳ ${ESC(h.createdCycle)}</div>
+              <div style="font-size:11px;color:#7dd3fc;">✨ ${ESC(h.signatureSkill)} ${h.mutated ? "• 🔥 ĐỘT BIẾN TRỘI" : ""}</div>
             </div>
-            <div class="muted" style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
-              ${ESC(c.species)} • ${c.h}m • ${ESC(FACTIONS[c.fac]?.name || c.fac)}
-            </div>
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;">
+            <button class="btn-glass btn-compact" data-hyb-deck="${ESC(h.id)}">${inDeck ? "✓ Đang trong Bộ Bài" : "🃏 Cho Vào Bộ Bài"}</button>
+            <button class="btn-gold btn-compact" data-hyb-protag="${ESC(h.id)}">${isProtag ? "⭐ Đang Làm Chủ Tướng" : "⭐ Chọn Làm Chủ Tướng"}</button>
           </div>
         </div>
       `;
-    }).join("") || `<div class="muted">Không tìm thấy nhân vật khớp bộ lọc.</div>`;
+    }).join("");
 
-    list.querySelectorAll(".roster-item").forEach((el) => {
-      el.addEventListener("click", () => {
-        SFX.click();
-        this.inspectedCharId = el.dataset.charid;
-        this.engine.showcaseCharacter(this.inspectedCharId);
-        this.renderRosterList();
-        this.renderInspectorCard();
-        if (window.innerWidth <= 960) {
-          document.querySelector('[data-isheet="right"]')?.click();
+    list.querySelectorAll("[data-hyb-deck]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const hid = btn.dataset.hybDeck;
+        if (!this.game.customDeck.includes(hid)) {
+          if (this.game.customDeck.length >= 16) this.game.customDeck[this.game.customDeck.length - 1] = hid;
+          else this.game.customDeck.push(hid);
+          this.game.saveToSlot("auto");
+          SFX.cardPlay();
+          this.renderBreedingHybrids();
+          this.showToast("🃏 Đã đưa Hậu Duệ vào Bộ Bài!", "Hậu duệ lai sẵn sàng ra sân trong chế độ Đấu Thẻ Bài.");
         }
       });
     });
-  }
 
-  renderInspectorCard() {
-    const c = CHAR_BY_ID[this.inspectedCharId];
-    if (!c) return;
-    const fac = FACTIONS[c.fac];
-    const col = fac?.color || "#38bdf8";
-    const loc = findLocation(c.loc);
-    const affinity = this.game.getAffinity(c.id);
-
-    const kinChips = (c.kin || [])
-      .map(kid => CHAR_BY_ID[kid])
-      .filter(Boolean)
-      .map(k => `<span class="chip clickable" data-kin="${k.id}">👤 ${ESC(k.name)}</span>`)
-      .join("");
-
-    const card = document.getElementById("inspector-detail-card");
-    card.innerHTML = `
-      <div class="inspector-portrait-hero">
-        <img src="${getPortraitUrl(c)}" alt="${ESC(c.name)}" />
-        <div style="flex:1;min-width:0;">
-          <h3 style="margin:0;color:${col};font-size:16px;">${ESC(c.name)}</h3>
-          <div class="muted" style="color:var(--gold);font-weight:700;">${ESC(c.title)}</div>
-          <div class="muted">${ESC(c.species)} • ${c.g === "F" ? "Nữ" : "Nam"} • ${ESC(fac?.name || c.fac)}</div>
-          <div style="margin-top:6px;font-size:11px;display:flex;justify-content:space-between;">
-            <span>Độ tin cậy / Gắn kết:</span><strong>${affinity}/100</strong>
-          </div>
-          <div class="affinity-bar-wrap"><div class="affinity-bar-fill" style="width:${affinity}%;"></div></div>
-        </div>
-      </div>
-
-      <div class="planet-meta-grid" style="margin-top:9px;">
-        <div><strong>Combat Rating:</strong> <span style="color:var(--primary);font-weight:800;">${c.cr}</span></div>
-        <div><strong>Chiều cao 3D:</strong> <span style="color:var(--gold);font-weight:800;">${c.h}m</span></div>
-        <div><strong>IQ:</strong> ${c.iq}</div>
-        <div><strong>Tuổi:</strong> ${ESC(c.age)}</div>
-        <div style="grid-column:span 2;">
-          <strong>Vị trí hiện tại:</strong>
-          ${loc ? `<span class="chip clickable" id="btn-insp-loc" style="margin-left:4px;">📍 ${ESC(loc.label)}</span>` : ESC(c.loc)}
-        </div>
-      </div>
-
-      <p class="muted" style="margin-top:9px;">${ESC(c.bio)}</p>
-
-      <div style="margin-top:8px;">
-        <strong style="font-size:11.5px;color:var(--primary);">Kỹ năng chiến đấu:</strong>
-        <div class="chip-row">${(c.skills || []).map(sk => `<span class="chip">⚡ ${ESC(sk)}</span>`).join("")}</div>
-      </div>
-
-      ${kinChips ? `<div style="margin-top:8px;"><strong style="font-size:11.5px;">Quan hệ huyết thống / liên đới:</strong><div class="chip-row">${kinChips}</div></div>` : ""}
-
-      <div class="action-grid-2" style="margin-top:11px;">
-        <button class="btn-accent" id="btn-insp-talk">💬 Trò Chuyện (VN)</button>
-        <button class="btn-primary" id="btn-insp-duel">⚔️ Ra Đấu Trường</button>
-      </div>
-    `;
-
-    card.querySelector("#btn-insp-talk").addEventListener("click", () => {
-      SFX.choice();
-      this.startEncounter(c.id);
-    });
-
-    card.querySelector("#btn-insp-duel").addEventListener("click", () => {
-      SFX.choice();
-      this.pendingStoryBattle = null;
-      this.pendingInvasionSectorId = null;
-      this.switchMode("arena");
-      document.getElementById("arena-player-select").value = c.id;
-      this.startConfiguredArenaMatch();
-    });
-
-    card.querySelector("#btn-insp-loc")?.addEventListener("click", () => {
-      if (!loc?.sector) return;
-      SFX.click();
-      this.selectedSectorId = loc.sector.id;
-      this.selectedBodyId = loc.body?.id || null;
-      this.switchMode("galaxy");
-      if (loc.body) this.engine.zoomToBody(loc.sector.id, loc.body.id);
-    });
-
-    card.querySelectorAll("[data-kin]").forEach((el) => {
-      el.addEventListener("click", () => {
-        SFX.click();
-        this.inspectedCharId = el.dataset.kin;
-        this.engine.showcaseCharacter(this.inspectedCharId);
-        this.renderRosterList();
-        this.renderInspectorCard();
+    list.querySelectorAll("[data-hyb-protag]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const hid = btn.dataset.hybProtag;
+        SFX.choice();
+        this.game.selectProtagonist(hid, false);
+        this.refreshTopResources();
+        this.renderBreedingHybrids();
+        this.showToast("⭐ Chủ Tướng Mới!", "Hậu duệ lai đã trở thành Nhân Vật Chính dẫn dắt câu chuyện!");
       });
     });
   }
 
   // ==========================================================================
-  // MODE 5: DIPLOMACY, CHRONICLE, LORE CODEX & APP SAVE SLOTS
+  // MODE 5: UNIFIED 72-CHARACTER CARD ROSTER, CUTSCENES, DIPLOMACY & CODEX
   // ==========================================================================
   initCodexUI() {
     document.querySelectorAll("[data-ctab]").forEach((btn) => {
@@ -1509,106 +1888,253 @@ class Cycle12App {
     const body = document.getElementById("codex-main-content");
     const t = this.codexTab;
 
-    if (t === "diplomacy") {
-      const pFac = FACTIONS[this.game.playerFaction];
-      const pct = this.game.getFactionTerritoryPct(this.game.playerFaction);
+    if (t === "roster") {
+      const all = [...(this.game.hybrids || []).map(h => ({ ...h, isHybrid: true })), ...CHARACTERS].sort((a, b) => b.cr - a.cr);
+      const selected = resolveGeneticSubject(this.inspectedRosterId, this.game.hybrids);
+      const card = resolveCard(selected.id, this.game.hybrids);
+      const fac = FACTIONS[selected.fac] || FACTIONS.independent;
+      const loc = selected.loc ? findLocation(selected.loc) : null;
+      const aff = this.game.getAffinity(selected.id);
+      const imgUrl = this.resolvePortrait(selected.id);
 
-      const territoryBars = PLAYABLE.map((fid) => {
-        const f = FACTIONS[fid];
-        const fPct = this.game.getFactionTerritoryPct(fid);
-        return `
-          <div style="margin-bottom:8px;">
-            <div style="display:flex;justify-content:space-between;font-size:12px;">
-              <strong style="color:${f.color};">${ESC(f.name)}</strong>
-              <span>${fPct}% Ngân hà</span>
+      body.innerHTML = `
+        <div class="roster-split-layout">
+          <div>
+            <input type="text" id="roster-filter-q" placeholder="Tìm nhanh trong 72+ nhân vật..." style="margin-bottom:8px;" />
+            <div id="roster-items-box" class="roster-list" style="max-height:520px;">
+              ${all.map(c => {
+                const fc = FACTIONS[c.fac]?.color || "#38bdf8";
+                const act = c.id === selected.id ? "active" : "";
+                const portrait = this.resolvePortrait(c.id);
+                return `
+                  <div class="roster-item ${act}" data-pick-roster="${ESC(c.id)}">
+                    <img class="roster-thumb" src="${portrait}" alt="${ESC(c.name)}" loading="lazy" />
+                    <div style="flex:1;min-width:0;">
+                      <div style="font-weight:700;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ESC(c.name)}</div>
+                      <div style="font-size:10.5px;color:${fc};">CR ${c.cr} • ${ESC(c.species)}</div>
+                    </div>
+                  </div>
+                `;
+              }).join("")}
             </div>
-            <div class="hp-track" style="height:8px;margin-top:3px;"><div style="width:${fPct}%;height:100%;background:${f.color};"></div></div>
           </div>
-        `;
-      }).join("");
 
-      const diploRows = PLAYABLE.filter(fid => fid !== this.game.playerFaction).map((fid) => {
-        const f = FACTIONS[fid];
-        const rel = this.game.getRelation(this.game.playerFaction, fid);
-        const badgeCol = rel >= 25 ? "#34d399" : (rel <= -25 ? "#fb7185" : "#fbbf24");
-        const statusTxt = rel >= 40 ? "Đồng minh thân cận" : (rel >= 10 ? "Hòa hoãn" : (rel <= -40 ? "Thù địch sâu sắc" : "Căng thẳng"));
+          <div class="codex-card" style="padding:18px; gap:12px;">
+            <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;">
+              <img src="${imgUrl}" style="width:106px;height:132px;border-radius:14px;object-fit:cover;object-position:top center;border:2px solid ${fac.color};" alt="${ESC(selected.name)}" />
+              <div style="flex:1;min-width:200px;">
+                <h2 style="margin:0;color:#fff;font-size:20px;">${ESC(selected.name)}</h2>
+                <div style="color:${fac.color};font-weight:700;font-size:13px;margin:2px 0;">${ESC(selected.title || "Chiến Binh Gaiastra")} • ${ESC(fac.name)}</div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">
+                  <span class="badge">CR ${selected.cr}</span>
+                  <span class="badge">${ESC(selected.species)}</span>
+                  <span class="badge">Thẻ: ⚡${card?.cost || 3} | ⚔️${card?.atk || 4} | ❤️${card?.hp || 5}</span>
+                  <span class="badge" style="color:#f472b6;">Độ tin cậy: ${aff}/100</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="planet-meta-grid">
+              <div><strong>Căn cứ:</strong> ${ESC(loc ? loc.label : (selected.loc || "Gaiastra"))}</div>
+              <div><strong>Chiều cao:</strong> ${selected.h || 1.8}m</div>
+              <div><strong>Năng lực Thẻ Bài:</strong> ${ESC(card?.desc || "")}</div>
+              <div><strong>Chiêu thức đặc trưng:</strong> ${ESC((selected.skills || []).join(", "))}</div>
+            </div>
+
+            <p class="muted" style="line-height:1.6;">${ESC(selected.bio || "Hậu duệ dòng gen mới kiến tạo trong Chu Kỳ 12.")}</p>
+
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <button class="btn-gold" id="btn-roster-make-protag">⭐ Chọn Làm Nhân Vật Chính (Chơi Góc Nhìn NV Này)</button>
+              <button class="btn-primary" id="btn-roster-talk">💬 Đối Thoại Tương Tác</button>
+              <button class="btn-accent" id="btn-roster-breed">🧬 Đưa Vào Lai Tạo Gen</button>
+              <button class="btn-glass" id="btn-roster-duel">🃏 Đấu Thử Thẻ Bài</button>
+            </div>
+          </div>
+        </div>
+      `;
+
+      body.querySelectorAll("[data-pick-roster]").forEach(el => {
+        el.addEventListener("click", () => {
+          SFX.click();
+          this.inspectedRosterId = el.dataset.pickRoster;
+          this.renderCodexTab();
+        });
+      });
+
+      const qInput = document.getElementById("roster-filter-q");
+      qInput?.addEventListener("input", () => {
+        const needle = qInput.value.trim().toLowerCase();
+        body.querySelectorAll("[data-pick-roster]").forEach(item => {
+          item.style.display = item.textContent.toLowerCase().includes(needle) ? "flex" : "none";
+        });
+      });
+
+      document.getElementById("btn-roster-make-protag")?.addEventListener("click", () => {
+        SFX.choice();
+        this.game.selectProtagonist(selected.id, true);
+        this.duelEngine = null;
+        this.refreshTopResources();
+        this.switchMode("vn");
+        this.showToast(`⭐ Chủ Tướng Mới: ${selected.name}`, "Cốt truyện đã chuyển sang Khởi Nguyên theo góc nhìn của nhân vật này!");
+      });
+      document.getElementById("btn-roster-talk")?.addEventListener("click", () => {
+        SFX.click();
+        this.startEncounter(selected.id);
+      });
+      document.getElementById("btn-roster-breed")?.addEventListener("click", () => {
+        SFX.click();
+        this.openBreedingWith(selected.id);
+      });
+      document.getElementById("btn-roster-duel")?.addEventListener("click", () => {
+        SFX.alert();
+        this.pendingStoryBattle = null;
+        this.pendingInvasionSectorId = null;
+        this.switchMode("duel");
+        this.setDuelTab("skirmish");
+        this.startCardMatch({ kind: "skirmish", enemyId: selected.id, modeLabel: `🃏 Đấu Thử vs ${selected.name}` });
+      });
+      return;
+    }
+
+    if (t === "cutscenes") {
+      body.innerHTML = `
+        <div class="codex-card" style="margin-bottom:12px;border-color:rgba(250,204,21,0.45);">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+            <div>
+              <strong style="color:var(--gold);font-size:15px;">🎬 Cutscene Hoạt Cảnh: Lịch Sử Vũ Trụ Gaiastra</strong>
+              <div class="muted">Xem lại toàn cảnh từ Hỗn Mang Nguyên Thủy, Vòng Lặp Reset của Eris Union tới thời điểm Nhân Vật Chính của bạn thức tỉnh!</div>
+            </div>
+            <button class="btn-gold" id="btn-codex-launch-cutscene">▶ Phát Cutscene 3D Ngay</button>
+          </div>
+        </div>
+        <div class="codex-grid">
+          ${TIMELINE.map(item => `
+            <div class="codex-card">
+              <strong style="color:var(--gold);font-size:13.5px;">⏳ ${ESC(item.era)}</strong>
+              <div style="font-weight:700;color:#e2e8f0;">${ESC(item.title)}</div>
+              <div class="muted">${ESC(item.text)}</div>
+            </div>
+          `).join("")}
+        </div>
+      `;
+      document.getElementById("btn-codex-launch-cutscene")?.addEventListener("click", () => {
+        SFX.choice();
+        this.playUniverseCutscene();
+      });
+      return;
+    }
+
+    if (t === "diplomacy") {
+      const pactBadge = this.game.pact.active
+        ? `<span class="badge" style="color:#4ade80;border-color:#4ade80;">✓ Đang hiệu lực (${this.game.pact.turnsRemaining} chu kỳ)</span>`
+        : `<span class="badge" style="color:#fb7185;border-color:#fb7185;">✕ Đã đổ vỡ</span>`;
+
+      const rows = PLAYABLE.filter(id => id !== this.game.playerFaction).map((id) => {
+        const f = FACTIONS[id];
+        const rel = this.game.getRelation(this.game.playerFaction, id);
+        const relCol = rel >= 20 ? "#4ade80" : rel <= -30 ? "#fb7185" : "#fde68a";
         return `
           <div class="diplo-row">
             <div>
-              <strong style="color:${f.color};font-size:13.5px;">${ESC(f.name)}</strong>
-              <div class="muted">Lãnh đạo: ${ESC(f.leader)} • <strong style="color:${badgeCol};">${statusTxt} (${rel > 0 ? "+" : ""}${rel})</strong></div>
+              <strong style="color:${f.color};font-size:14px;">${ESC(f.name)}</strong>
+              <div class="muted">Thủ đô: ${ESC(f.capital)} • Lãnh thổ: ${this.game.getFactionTerritoryPct(id)}%</div>
             </div>
-            <div style="display:flex;gap:6px;">
-              <button class="btn-accent btn-compact" data-impr="${fid}">🤝 Cải Thiện (+14)</button>
-              <button class="btn-danger btn-compact" data-deno="${fid}">⚡ Lên Án</button>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <span class="badge" style="color:${relCol};">Quan hệ: ${rel > 0 ? "+" : ""}${rel}</span>
+              <button class="btn-primary btn-compact" data-diplo-good="${id}">🕊️ Thân thiện (300 Cr)</button>
+              <button class="btn-danger btn-compact" data-diplo-bad="${id}">⚔️ Lên án (25 Inf)</button>
             </div>
           </div>
         `;
       }).join("");
 
       body.innerHTML = `
-        <div class="codex-grid">
-          <div class="codex-card">
-            <div class="panel-section-title">🕊️ Hiệp Ước Cursew Pact</div>
-            <p class="muted">Trạng thái: <strong style="color:${this.game.pact.active ? "#34d399" : "#fb7185"};">${this.game.pact.active ? `ĐANG HIỆU LỰC (Còn ${this.game.pact.turnsRemaining} chu kỳ)` : `ĐÃ SỤP ĐỔ${this.game.pact.brokenBy ? " (Bởi " + this.game.facName(this.game.pact.brokenBy) + ")" : ""}`}</strong></p>
-            <p class="muted">Biên giới thỏa thuận giữa Sylvarian & Western Nadir tránh một cuộc chiến hủy diệt ngay lập tức, nhưng khiến Đế chế Nadirius và các nhánh đối lập bất mãn.</p>
-            <button class="btn-gold" id="btn-toggle-pact">${this.game.pact.active ? "🔥 Xé Bỏ Hiệp Ước Cursew" : "✍️ Tái Ký Hiệp Ước (120 Ảnh hưởng)"}</button>
+        <div class="codex-card" style="margin-bottom:12px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+            <div>
+              <strong style="color:var(--gold);font-size:15px;">📜 Hiệp Ước Đình Chiến Cursew Pact (Sylvarian ↔ Western Nadir)</strong>
+              <div class="muted">Ngăn chiến tranh toàn diện giữa 2 siêu cường. Phá vỡ sẽ khiến mọi mặt trận nóng rực.</div>
+            </div>
+            ${pactBadge}
           </div>
-
-          <div class="codex-card">
-            <div class="panel-section-title">🗺️ Cán Cân Lãnh Thổ Ngân Hà (${ESC(pFac.name)}: ${pct}%)</div>
-            ${territoryBars}
+          <div>
+            <button class="${this.game.pact.active ? "btn-danger" : "btn-gold"}" id="btn-toggle-pact">
+              ${this.game.pact.active ? "🔥 Xé Bỏ Hiệp Ước Cursew" : "🕊️ Tái Lập Hiệp Ước Cursew (120 Inf)"}
+            </button>
           </div>
         </div>
-
-        <div class="codex-card" style="margin-top:12px;">
-          <div class="panel-section-title">🤝 Quan Hệ Ngoại Giao Phe ${ESC(pFac.name)}</div>
-          <div style="display:flex;flex-direction:column;gap:8px;margin-top:6px;">${diploRows}</div>
-        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;">${rows}</div>
       `;
 
       body.querySelector("#btn-toggle-pact").addEventListener("click", () => {
         const res = this.game.toggleCursewPact();
+        res.ok ? SFX.choice() : SFX.alert();
+        this.refreshTopResources();
+        this.renderCodexTab();
+        this.showToast(res.ok ? "Hiệp Ước Đã Thay Đổi" : "Không thể thực hiện", res.msg);
+      });
+      body.querySelectorAll("[data-diplo-good]").forEach(b => b.addEventListener("click", () => {
+        const res = this.game.improveRelation(b.dataset.diploGood);
+        res.ok ? SFX.choice() : SFX.alert();
+        this.refreshTopResources();
+        this.renderCodexTab();
+        this.showToast(res.ok ? "Ngoại Giao Thành Công" : "Thiếu Tài Nguyên", res.msg);
+      }));
+      body.querySelectorAll("[data-diplo-bad]").forEach(b => b.addEventListener("click", () => {
+        const res = this.game.denounceFaction(b.dataset.diploBad);
         res.ok ? SFX.alert() : SFX.click();
         this.refreshTopResources();
         this.renderCodexTab();
-        this.showToast("Hiệp Ước Cursew", res.msg);
-      });
-
-      body.querySelectorAll("[data-impr]").forEach((b) => {
-        b.addEventListener("click", () => {
-          const res = this.game.improveRelation(b.dataset.impr);
-          res.ok ? SFX.choice() : SFX.alert();
-          this.refreshTopResources();
-          this.renderCodexTab();
-          this.showToast("Ngoại Giao", res.msg);
-        });
-      });
-
-      body.querySelectorAll("[data-deno]").forEach((b) => {
-        b.addEventListener("click", () => {
-          const res = this.game.denounceFaction(b.dataset.deno);
-          SFX.alert();
-          this.refreshTopResources();
-          this.renderCodexTab();
-          this.showToast("Tuyên Bố Chính Trị", res.msg);
-        });
-      });
+        this.showToast("Cảnh Báo Ngoại Giao", res.msg);
+      }));
       return;
     }
 
     if (t === "events") {
-      body.innerHTML = `<div style="display:flex;flex-direction:column;gap:8px;">${
+      body.innerHTML = `<div style="display:flex;flex-direction:column;gap:8px;">` +
         this.game.eventLog.map(ev => `
           <div class="codex-card">
-            <div style="display:flex;justify-content:space-between;align-items:center;">
-              <strong style="color:var(--gold);">${ESC(ev.title)}</strong>
+            <div style="display:flex;justify-content:space-between;">
+              <strong style="color:var(--primary);">${ESC(ev.title)}</strong>
               <span class="badge">${ESC(ev.turn)}</span>
             </div>
             <div class="muted">${ESC(ev.desc)}</div>
           </div>
-        `).join("")
-      }</div>`;
+        `).join("") + `</div>`;
+      return;
+    }
+
+    if (t === "achievements") {
+      const doneCount = this.game.unlockedAchievements?.length || 0;
+      const stats = this.game.stats || {};
+      const cardsHtml = ACHIEVEMENTS.map((ach) => {
+        const unlocked = this.game.unlockedAchievements?.includes(ach.id);
+        return `
+          <div class="ach-card ${unlocked ? "unlocked" : ""}">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+              <strong style="color:${unlocked ? "var(--gold)" : "#e2e8f0"};font-size:13.5px;">${unlocked ? "🏆" : "🔒"} ${ESC(ach.title || ach.name)}</strong>
+              <span class="badge">${unlocked ? "ĐÃ MỞ KHÓA" : "CHƯA ĐẠT"}</span>
+            </div>
+            <div class="muted">${ESC(ach.desc)}</div>
+            <div style="font-size:11.5px;color:#7dd3fc;margin-top:2px;">Thưởng: +${ach.rewardCr.toLocaleString()} Cr • +${ach.rewardInf} Inf</div>
+          </div>
+        `;
+      }).join("");
+
+      body.innerHTML = `
+        <div class="codex-card" style="margin-bottom:12px;">
+          <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px;">
+            <strong style="color:var(--gold);font-size:14px;">🏅 Chiến Công Gaiastra (${doneCount}/${ACHIEVEMENTS.length})</strong>
+            <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:#cbd5e1;">
+              <span>🃏 Trận bài thắng: <strong>${stats.battlesWon || 0}</strong></span>
+              <span>🗼 Tháp Hư Không cao nhất: <strong>Tầng ${stats.gauntletMax || 0}</strong></span>
+              <span>🧬 Hậu duệ lai gen: <strong>${this.game.hybrids?.length || 0}</strong></span>
+              <span>📖 Chương xong: <strong>${this.game.vn.completedChapters?.length || 0}/11</strong></span>
+            </div>
+          </div>
+        </div>
+        <div class="codex-grid">${cardsHtml}</div>
+      `;
       return;
     }
 
@@ -1616,24 +2142,12 @@ class Cycle12App {
       body.innerHTML = `<div class="codex-grid">${
         SPECIES.map(sp => `
           <div class="codex-card">
-            <strong style="color:${sp.color || "var(--primary)"};font-size:14.5px;">🧬 ${ESC(sp.name)}</strong>
-            <div class="muted"><strong>Thể chất:</strong> ${ESC(sp.physic)} • <strong>Công nghệ:</strong> ${ESC(sp.tech)} • <strong>Dân số:</strong> ${ESC(sp.pop)}</div>
-            <div class="muted">${ESC(sp.traits)}</div>
-          </div>
-        `).join("")
-      }</div>`;
-      return;
-    }
-
-    if (t === "timeline") {
-      body.innerHTML = `<div style="display:flex;flex-direction:column;gap:10px;">${
-        TIMELINE.map(tm => `
-          <div class="codex-card">
             <div style="display:flex;justify-content:space-between;align-items:center;">
-              <strong style="color:var(--gold);">${ESC(tm.title)}</strong>
-              <span class="badge">${ESC(tm.era)}</span>
+              <strong style="color:${sp.color};font-size:14px;">${ESC(sp.name)}</strong>
+              <span class="badge">Dân số: ${ESC(sp.pop)}</span>
             </div>
-            <div class="muted">${ESC(tm.text)}</div>
+            <div class="muted"><strong>Thể chất:</strong> ${ESC(sp.physic)} • <strong>Công nghệ:</strong> ${ESC(sp.tech)}</div>
+            <div style="font-size:12px;color:#cbd5e1;">${ESC(sp.traits)}</div>
           </div>
         `).join("")
       }</div>`;
@@ -1649,40 +2163,6 @@ class Cycle12App {
           </div>
         `).join("")
       }</div>`;
-      return;
-    }
-
-    if (t === "achievements") {
-      const doneCount = this.game.unlockedAchievements?.length || 0;
-      const stats = this.game.stats || {};
-      const cardsHtml = ACHIEVEMENTS.map((ach) => {
-        const unlocked = this.game.unlockedAchievements?.includes(ach.id);
-        return `
-          <div class="ach-card ${unlocked ? "unlocked" : ""}">
-            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-              <strong style="color:${unlocked ? "var(--gold)" : "#e2e8f0"};font-size:13.5px;">${unlocked ? "🏆" : "🔒"} ${ESC(ach.title)}</strong>
-              <span class="badge">${unlocked ? "ĐÃ MỞ KHÓA" : "CHƯA ĐẠT"}</span>
-            </div>
-            <div class="muted">${ESC(ach.desc)}</div>
-            <div style="font-size:11.5px;color:#7dd3fc;margin-top:2px;">Thưởng: +${ach.rewardCr.toLocaleString()} Cr • +${ach.rewardInf} Inf</div>
-          </div>
-        `;
-      }).join("");
-
-      body.innerHTML = `
-        <div class="codex-card" style="margin-bottom:12px;">
-          <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px;">
-            <strong style="color:var(--gold);font-size:14px;">🏅 Chiến Công Gaiastra (${doneCount}/${ACHIEVEMENTS.length})</strong>
-            <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:#cbd5e1;">
-              <span>⚔️ Trận thắng: <strong>${stats.battlesWon || 0}</strong></span>
-              <span>☄️ Siêu vũ khí: <strong>${stats.superweaponsFired || 0}</strong></span>
-              <span>🕵️ Tình báo: <strong>${stats.reconOps || 0}</strong></span>
-              <span>📖 Chương hoàn thành: <strong>${this.game.vn.completedChapters?.length || 0}/8</strong></span>
-            </div>
-          </div>
-        </div>
-        <div class="codex-grid">${cardsHtml}</div>
-      `;
       return;
     }
 
@@ -1710,25 +2190,21 @@ class Cycle12App {
         <div class="codex-grid">
           <div class="codex-card">
             <div class="panel-section-title">📱 Cài Thành App Trên Điện Thoại & PC</div>
-            <p class="muted"><strong>Android (Chrome / Edge):</strong> Bấm biểu tượng <em>📲 Cài App</em> trên góc phải hoặc mở Menu (⋮) → <strong>Thêm vào Màn hình chính / Install App</strong>.</p>
-            <p class="muted"><strong>iPhone / iPad (Safari):</strong> Bấm nút <strong>Chia sẻ (Share ⬆️)</strong> ở thanh dưới cùng → chọn <strong>Thêm vào MH chính (Add to Home Screen)</strong>.</p>
-            <p class="muted"><strong>Chế độ Offline:</strong> Toàn bộ Three.js 3D, cốt truyện & chân dung đã được Service Worker lưu đệm để chơi không cần mạng.</p>
+            <p class="muted"><strong>Android (Chrome / Edge):</strong> Bấm nút <em>📲 Cài App</em> ở góc phải hoặc chọn Menu (⋮) → <strong>Thêm vào Màn hình chính</strong>.</p>
+            <p class="muted"><strong>iPhone / iPad (Safari):</strong> Bấm nút <strong>Chia sẻ (Share ⬆️)</strong> → chọn <strong>Thêm vào MH chính</strong>.</p>
           </div>
-
           <div class="codex-card">
-            <div class="panel-section-title">📤 Xuất / Nhập Dữ Liệu & Khởi Tạo Lại</div>
+            <div class="panel-section-title">📤 Xuất / Nhập Save & Chọn Lại Chiến Dịch</div>
             <p class="muted">${ESC(META.title)} — ${ESC(META.subtitle)}</p>
             <div style="display:flex;flex-wrap:wrap;gap:8px;">
-              <button class="btn-accent btn-compact" id="btn-export-save">⬇️ Xuất File Save (.json)</button>
+              <button class="btn-accent btn-compact" id="btn-export-save">⬇️ Xuất Save (.json)</button>
               <label class="btn-glass btn-compact" style="cursor:pointer;">
-                ⬆️ Nhập File Save
-                <input type="file" id="inp-import-save" accept=".json" style="display:none;" />
+                ⬆️ Nhập Save <input type="file" id="inp-import-save" accept=".json" style="display:none;" />
               </label>
               <button class="btn-danger btn-compact" id="btn-reset-campaign">🔄 Reset Toàn Bộ Game</button>
             </div>
           </div>
         </div>
-
         <div class="codex-grid" style="margin-top:12px;">${slotsHtml}</div>
       `;
 
@@ -1747,59 +2223,61 @@ class Cycle12App {
             SFX.choice();
             this.activeEncounterScript = null;
             this.lastAppliedNodeKey = null;
+            this.duelEngine = null;
             this.engine.updateSectorColors(this.game);
             this.refreshTopResources();
             this.populateChapterSelect();
             this.renderCodexTab();
-            this.showToast("📂 Tải Dữ Liệu Thành Công", `Đã khôi phục Chu kỳ ${this.game.cycleMajor}.${this.game.cycleMinor}!`);
+            this.showToast("📂 Tải Thành Công", `Đã khôi phục Chu kỳ ${this.game.cycleMajor}.${this.game.cycleMinor}!`);
           }
         });
       });
 
       body.querySelector("#btn-export-save").addEventListener("click", () => {
-        SFX.click();
         const blob = new Blob([this.game.serialize()], { type: "application/json" });
-        const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
-        a.href = url;
-        a.download = `cycle12-save-c${this.game.cycleMajor}.${this.game.cycleMinor}.json`;
+        a.href = URL.createObjectURL(blob);
+        a.download = `cycle12_save_${this.game.cycleMajor}_${this.game.cycleMinor}.json`;
         a.click();
-        URL.revokeObjectURL(url);
+        SFX.choice();
       });
 
-      body.querySelector("#inp-import-save").addEventListener("change", async (e) => {
+      body.querySelector("#inp-import-save").addEventListener("change", (e) => {
         const file = e.target.files?.[0];
         if (!file) return;
-        try {
-          const text = await file.text();
-          JSON.parse(text);
-          localStorage.setItem("CYCLE12_SAVE_V3_auto", text);
-          this.game.loadFromSlot("auto");
-          this.activeEncounterScript = null;
-          this.lastAppliedNodeKey = null;
-          this.engine.updateSectorColors(this.game);
-          this.refreshTopResources();
-          this.renderCodexTab();
-          SFX.victory();
-          this.showToast("⬆️ Đã Nhập Save", "Dữ liệu cốt truyện & bản đồ đã được khôi phục!");
-        } catch {
-          SFX.alert();
-          this.showToast("Lỗi file Save", "File JSON không đúng định dạng Cycle 12.");
-        }
+        const reader = new FileReader();
+        reader.onload = () => {
+          try {
+            localStorage.setItem("CYCLE12_SAVE_V3_auto", String(reader.result));
+            if (this.game.loadFromSlot("auto")) {
+              this.duelEngine = null;
+              this.engine.updateSectorColors(this.game);
+              this.refreshTopResources();
+              this.populateChapterSelect();
+              this.renderCodexTab();
+              SFX.victory();
+              this.showToast("📂 Nhập File Save Thành Công", "Dữ liệu đã được đồng bộ!");
+            }
+          } catch {
+            SFX.alert();
+            this.showToast("Lỗi file Save", "Tệp JSON không hợp lệ.");
+          }
+        };
+        reader.readAsText(file);
       });
 
       body.querySelector("#btn-reset-campaign").addEventListener("click", () => {
-        if (!window.confirm("Bạn chắc chắn muốn reset toàn bộ tiến trình Chu kỳ & Cốt truyện về mốc Cycle 12.1?")) return;
-        SFX.alert();
+        if (!confirm("Bạn có chắc chắn muốn khởi tạo lại chiến dịch mới từ Chu kỳ 12.1?")) return;
         this.game.reset();
         this.game.saveToSlot("auto");
         this.activeEncounterScript = null;
         this.lastAppliedNodeKey = null;
+        this.duelEngine = null;
+        this.selectedSectorId = "sylvalon";
         this.engine.updateSectorColors(this.game);
         this.refreshTopResources();
         this.populateChapterSelect();
-        this.renderCodexTab();
-        this.showToast("🔄 Đã Reset", "Vũ trụ đã quay về mốc khởi đầu Cycle 12.1!");
+        this.openProtagonistPicker(true);
       });
     }
   }

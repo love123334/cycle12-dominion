@@ -8,7 +8,121 @@ import { CHAR_BY_ID } from "./characters.js";
 import { FACTIONS } from "./lore.js";
 import { findLocation } from "./galaxy.js";
 
+export function resolveStoryChar(token, gameState) {
+  if (token === "__PROTAGONIST__") return gameState?.protagonistId || "arisia";
+  return token;
+}
+
+export function resolveStorySector(token, gameState) {
+  if (token === "__PROTAGONIST_SECTOR__") {
+    const hero = gameState?.getProtagonist ? gameState.getProtagonist() : CHAR_BY_ID[gameState?.protagonistId || "arisia"];
+    const loc = hero?.loc ? findLocation(hero.loc) : null;
+    return loc?.sector?.id || "sylvalon";
+  }
+  return token;
+}
+
 export const CHAPTERS = [
+  {
+    id: "ch0_origin",
+    num: "KHỞI NGUYÊN",
+    title: "Góc Nhìn Tự Do: Định Mệnh Chu Kỳ 12",
+    subtitle: "Căn cứ Khởi Đầu Của Nhân Vật Bạn Chọn",
+    sector: "__PROTAGONIST_SECTOR__",
+    leadChar: "__PROTAGONIST__",
+    summary: "Tùy biến hoàn toàn theo nhân vật bạn lựa chọn (bất kỳ trong 72 chiến binh hoặc hậu duệ Lai Gen). Lựa chọn học thuyết mở đầu sẽ định hình tài nguyên, đồng minh và trận Đấu Thẻ Bài đầu tiên.",
+    nodes: {
+      start: {
+        sector: "__PROTAGONIST_SECTOR__",
+        leftChar: "__PROTAGONIST__", rightChar: "emma", leftMood: "combat", rightMood: "secret",
+        speaker: "narrator",
+        text: (g) => {
+          const hero = g.getProtagonist();
+          const loc = hero.loc ? findLocation(hero.loc) : null;
+          const fac = FACTIONS[g.playerFaction] || FACTIONS.independent;
+          return `Chu kỳ ${g.cycleMajor}.${g.cycleMinor} chính thức chuyển động. Tại ${loc ? loc.label : "Gaiastra"}, ${hero.name} (${hero.title} • CR ${hero.cr} • ${fac.name}) nhận tín hiệu khẩn cấp từ hệ thống vệ tinh Outer Layer — cả ngân hà đang đứng bên bờ chiến cuộc mới.`;
+        },
+        next: "ch0_voice"
+      },
+      ch0_voice: {
+        sector: "__PROTAGONIST_SECTOR__",
+        leftChar: "__PROTAGONIST__", rightChar: "emma", leftMood: "smug", rightMood: "tense",
+        speaker: "__PROTAGONIST__",
+        text: (g) => {
+          const hero = g.getProtagonist();
+          const fac = FACTIONS[g.playerFaction] || FACTIONS.independent;
+          return `"Hiệp ước Cursew Pact chẳng thể giữ hòa bình mãi được. Với vị thế của ${hero.name} và nguồn lực ${fac.name}, ta phải quyết định con đường tiến lên ngay từ hôm nay!"`;
+        },
+        choices: [
+          {
+            label: "🃏 Đường lối Quân Sự: Khai hỏa Bộ Bài Sức Mạnh & Luyện Quân",
+            hint: "+2,500 Credits • Bắt đầu trận Đấu Thẻ Bài tập trận ngay lập tức",
+            effects: (g) => g.addRes(g.playerFaction, "credits", 2500),
+            battle: {
+              playerId: "__PROTAGONIST__",
+              enemyId: "ojamon",
+              stageId: "__PROTAGONIST_SECTOR__",
+              winNext: "ch0_win",
+              loseNext: "ch0_diplomacy"
+            }
+          },
+          {
+            label: "🧬 Đường lối Di Truyền: Nghiên Cứu Phóng Xạ & Chuẩn Bị Lai Tạo Gen",
+            hint: "+300 Nghiên cứu • +120 Ảnh hưởng để sẵn sàng mở Buồng Lai Tạo",
+            effects: (g) => {
+              g.addRes(g.playerFaction, "research", 300);
+              g.addRes(g.playerFaction, "influence", 120);
+              g.addAffinity("ovalina", 20);
+            },
+            next: "ch0_gene"
+          },
+          {
+            label: "🤝 Đường lối Ngoại Giao: Củng Cố Liên Minh Toàn Vũ Trụ",
+            hint: "+2,000 Credits • +150 Ảnh hưởng • Giảm Căng thẳng -10%",
+            effects: (g) => {
+              g.addRes(g.playerFaction, "credits", 2000);
+              g.addRes(g.playerFaction, "influence", 150);
+              g.addTension(-10);
+            },
+            next: "ch0_diplomacy"
+          }
+        ]
+      },
+      ch0_win: {
+        sector: "__PROTAGONIST_SECTOR__",
+        leftChar: "__PROTAGONIST__", rightChar: "ojamon", leftMood: "happy", rightMood: "tense",
+        speaker: "ojamon",
+        text: (g) => `"Chiến thuật thẻ bài của ${g.getProtagonist().name} quả nhiên bén như dao cạo! Cả Sylvarian lẫn Western Nadir sẽ phải dè chừng tên tuổi ngươi trong Chu kỳ 12 này."`,
+        end: {
+          title: "KHỞI NGUYÊN HOÀN TẤT: CHIẾN LƯỢC GIA BẤT BẠI",
+          summary: "Đã thiết lập góc nhìn nhân vật chính! Nhấn tiếp để bước vào Chương I: Ánh Chớp Gotterfall.",
+          nextChapter: "ch1_gotterfall"
+        }
+      },
+      ch0_gene: {
+        sector: "__PROTAGONIST_SECTOR__",
+        leftChar: "__PROTAGONIST__", rightChar: "ovalina", leftMood: "happy", rightMood: "happy",
+        speaker: "ovalina",
+        text: (g) => `"Tầm nhìn tuyệt vời đấy, ${g.getProtagonist().name}! Khi kết hợp tinh hoa huyết thống của 15 chủng tộc tại Phòng Lab Lai Tạo Gen, ngươi sẽ tạo ra những lá bài Hậu Duệ không ai cản nổi!"`,
+        end: {
+          title: "KHỞI NGUYÊN HOÀN TẤT: KIẾN TRÚC SƯ HUYẾT THỐNG",
+          summary: "+300 Nghiên cứu & +120 Ảnh hưởng • Sẵn sàng mở màn Chương I.",
+          nextChapter: "ch1_gotterfall"
+        }
+      },
+      ch0_diplomacy: {
+        sector: "__PROTAGONIST_SECTOR__",
+        leftChar: "__PROTAGONIST__", rightChar: "emma", leftMood: "happy", rightMood: "neutral",
+        speaker: "emma",
+        text: (g) => `"Lựa chọn khôn ngoan, ${g.getProtagonist().name}. Khi các siêu cường giữ được kiềm chế, ta chưa phải kích hoạt lệnh Reset Chu kỳ 12."`,
+        end: {
+          title: "KHỞI NGUYÊN HOÀN TẤT: SỨ GIẢ HÒA BÌNH",
+          summary: "+2,000 Credits, +150 Ảnh hưởng, -10% Căng thẳng.",
+          nextChapter: "ch1_gotterfall"
+        }
+      }
+    }
+  },
   {
     id: "ch1_gotterfall",
     num: "CHƯƠNG I",
@@ -59,7 +173,7 @@ export const CHAPTERS = [
           },
           {
             label: "⚔️ Đích thân dẫn quân ngăn Overlord tại Biên khu",
-            hint: "Vào Đấu trường 3D (Arisia vs Overlord) • Thắng sẽ đẩy lùi Nadir mà không đốt tài nguyên",
+            hint: "Đấu Thẻ Bài (Arisia vs Overlord) • Thắng sẽ đẩy lùi Nadir mà không đốt tài nguyên",
             effects: (g) => {
               g.setFlag("ch1_duel_attempt", true);
               g.addAffinity("arisia", 15);
@@ -263,7 +377,7 @@ export const CHAPTERS = [
           },
           {
             label: "⚔️ Trực tiếp đối đầu Ragnaroir để đo sức mạnh kẻ làm Arisia bị thương",
-            hint: "Vào Đấu trường 3D (April Grastra vs Ragnaroir CR 1000)",
+            hint: "Đấu Thẻ Bài (April Grastra vs Ragnaroir CR 1000)",
             battle: {
               playerId: "april",
               enemyId: "ragnaroir",
@@ -383,7 +497,7 @@ export const CHAPTERS = [
           },
           {
             label: "🔥 Đột kích bắt giữ Amily Malicious — kẻ phản bội Hinatian tại Konstantine",
-            hint: "Vào Đấu trường 3D (Malocri vs Amily Malicious) • Thắng sẽ ổn định hậu phương",
+            hint: "Đấu Thẻ Bài (Malocri vs Amily Malicious) • Thắng sẽ ổn định hậu phương",
             battle: {
               playerId: "malocri",
               enemyId: "amily",
@@ -509,7 +623,7 @@ export const CHAPTERS = [
           },
           {
             label: "⚔️ Tướng Zarcseid xuất kích chặn đứng Cipheron bảo vệ Elita",
-            hint: "Vào Đấu trường 3D (Zarcseid Copilus CR 850 vs Cipheron CR 590)",
+            hint: "Đấu Thẻ Bài (Zarcseid Copilus CR 850 vs Cipheron CR 590)",
             battle: {
               playerId: "zarcseid",
               enemyId: "cipheron",
@@ -620,7 +734,7 @@ export const CHAPTERS = [
         choices: [
           {
             label: "⚔️ Xuất kích cùng The Supers đánh chặn Parasoid của The Collectors!",
-            hint: "Vào Đấu trường 3D (Felicia Laurent CR 350 vs Parasoid CR 550) • Thắng sẽ cứu Trái Đất",
+            hint: "Đấu Thẻ Bài (Felicia Laurent CR 350 vs Parasoid CR 550) • Thắng sẽ cứu Trái Đất",
             battle: {
               playerId: "felicia",
               enemyId: "parasoid",
@@ -762,7 +876,7 @@ export const CHAPTERS = [
           },
           {
             label: "⚔️ Thử thách trực diện: Đấu giao hữu với Đại sứ Emma Illumis (CR 1200)",
-            hint: "Vào Đấu trường 3D tại Outer Layer (Bạn chọn tướng mạnh nhất vs Emma CR 1200)",
+            hint: "Đấu Thẻ Bài tại Outer Layer (Tướng bạn chọn vs Emma CR 1200)",
             battle: {
               playerId: "arisia",
               enemyId: "emma",
@@ -859,8 +973,8 @@ export const CHAPTERS = [
         text: "Lựu đạn lượng tử và giáp xương ngoài đã nạp đầy, Felicia! Chunlina đang khóa đường rút ở phố dưới, Hailey canh từ cao ốc. Còn Bill Greedle ở Tokyzhou vẫn chưa chịu giao hồ sơ Sentrion.",
         choices: [
           {
-            label: "⚔️ Trực tiếp xung phong đối đầu Parasoid trên Đấu trường 3D",
-            hint: "Đấu trường 3D (Felicia CR 350 vs Parasoid CR 550) • Phá vỡ mũi nhọn của Collectors",
+            label: "⚔️ Trực tiếp xung phong đối đầu Parasoid bằng Bộ Bài Chiến Thuật",
+            hint: "Đấu Thẻ Bài (Felicia CR 350 vs Parasoid CR 550) • Phá vỡ mũi nhọn của Collectors",
             battle: {
               playerId: "felicia",
               enemyId: "parasoid",
@@ -1045,8 +1159,181 @@ export const CHAPTERS = [
         speaker: "ovalina",
         text: "Thú vị thật đấy! Thay vì lặp lại vòng lặp Reset vô tận của Eris Union, chính bạn đã mở cánh cửa mới sang Đa Vũ Trụ cùng Tamarite!",
         end: {
-          title: "KẾT CỤC IV: SIÊU VIỆT ĐA VŨ TRỤ (TRUE FINALE)",
-          summary: "+500 Nghiên cứu • Hoàn tất toàn bộ 8 chương cốt truyện chính thức của CYCLE 12!"
+          title: "KẾT CỤC IV: SIÊU VIỆT ĐA VŨ TRỤ",
+          summary: "+500 Nghiên cứu • Khe Nứt Hư Không vừa hé mở phía Chương IX!",
+          nextChapter: "ch9_void_reckoning"
+        }
+      }
+    }
+  },
+  {
+    id: "ch9_void_reckoning",
+    num: "CHƯƠNG IX",
+    title: "Khe Nứt Hư Không & Bản Giao Hưởng Huyết Thống",
+    subtitle: "Vực Thẳm Western Nadir → Tamarix Orbit",
+    sector: "western_abyss",
+    leadChar: "__PROTAGONIST__",
+    summary: "Dưới áp lực của Vòng Lặp Reset và các siêu vũ khí, một khe nứt thực tại bùng phát tại Vực Thẳm Tây. Nhân vật chính phải tập hợp đồng minh từ các chủng tộc đối nghịch — thậm chí dùng Hậu Duệ Lai Gen — để bịt kín cửa ngõ Hư Không.",
+    nodes: {
+      start: {
+        sector: "western_abyss",
+        leftChar: "__PROTAGONIST__", rightChar: "kyaria", leftMood: "combat", rightMood: "tense",
+        speaker: "narrator",
+        text: (g) => {
+          const hero = g.getProtagonist();
+          return `Biên giới Vực Thẳm Tây rạn nứt thành những đường tia chớp tím sẫm. ${hero.name} đứng trên đài chỉ huy cùng Kyaria Brigida — dòng Tamarite lai Nadir hiếm hoi đủ khả năng đo đạc chấn động đa chiều.`;
+        },
+        next: "ch9_kyaria"
+      },
+      ch9_kyaria: {
+        sector: "tamarikas",
+        leftChar: "__PROTAGONIST__", rightChar: "kyaria", leftMood: "tense", rightMood: "secret",
+        speaker: "kyaria",
+        text: (g) => {
+          const hybridsCount = g.hybrids?.length || 0;
+          return hybridsCount > 0
+            ? `"Ta cảm nhận rõ ${hybridsCount} dòng gen lai thế hệ mới mà ngươi đã tạo! Năng lượng cộng hưởng giữa các chủng tộc là thứ duy nhất có thể áp chế bóng tối nơi Vực Thẳm này."`
+            : `"Khe nứt này hấp thụ mọi đòn pháo truyền thống! Chỉ có những dòng gen hợp nhất từ Phòng Lab Lai Tạo hoặc một trận quyết đấu chiến thuật cực hạn mới đẩy lùi được lũ Starro & Ravenous."`;
+        },
+        choices: [
+          {
+            label: "🃏 Tung Bộ Bài Mạnh Nhất Quyết Chiến Hộ Vệ Vực Thẳm (Ravenous)",
+            hint: "Đấu Thẻ Bài: Tướng của bạn vs Ravenous — Khép lại Khe Nứt bằng vũ lực",
+            battle: {
+              playerId: "__PROTAGONIST__",
+              enemyId: "ragnaroir",
+              stageId: "western_abyss",
+              winNext: "ch9_win",
+              loseNext: "ch9_retreat"
+            }
+          },
+          {
+            label: "🧬 Kích Hoạt Giao Thức Đồng Bộ Gen Liên Chủng Tộc",
+            hint: "Yêu cầu có >= 1 Hậu duệ Lai Tạo hoặc +200 Nghiên cứu • +1,800 Credits & Bình ổn Khe Nứt",
+            cond: (g) => (g.hybrids?.length || 0) >= 1 || (g.resources[g.playerFaction]?.research || 0) >= 350,
+            effects: (g) => {
+              g.addRes(g.playerFaction, "credits", 1800);
+              g.addRes(g.playerFaction, "influence", 120);
+              g.addTension(-15);
+            },
+            next: "ch9_hybrid_seal"
+          }
+        ]
+      },
+      ch9_win: {
+        sector: "western_abyss",
+        leftChar: "__PROTAGONIST__", rightChar: "magnatere", leftMood: "smug", rightMood: "happy",
+        speaker: "magnatere",
+        text: (g) => `"Cả Đế chế Nadirius cũng phải ngả mũ trước màn trình diễn của ${g.getProtagonist().name}. Khe nứt Hư Không đã khép lại — giờ tất cả hướng mắt về Chương Cuối ở Outer Layer!"`,
+        end: {
+          title: "CHƯƠNG IX HOÀN TẤT: CHỦ NHÂN VỰC THẲM",
+          summary: "Chiến thắng vang dội! Tiến thẳng tới Chương X: Bình Minh Chu Kỳ 13.",
+          nextChapter: "ch10_eternal_cycle"
+        }
+      },
+      ch9_hybrid_seal: {
+        sector: "tamarikas",
+        leftChar: "__PROTAGONIST__", rightChar: "ovalina", leftMood: "happy", rightMood: "happy",
+        speaker: "ovalina",
+        text: "Chuỗi gen tổng hợp vừa vá kín khe nứt thực tại mà không tốn một giọt máu nào! Tamarite, Sylvarian và Nadir vừa chứng kiến kỷ nguyên tiến hóa thực sự.",
+        end: {
+          title: "CHƯƠNG IX HOÀN TẤT: HÀI HÒA ĐA GEN",
+          summary: "+1,800 Credits, +120 Ảnh hưởng, -15% Căng thẳng! Tiến vào Chương X.",
+          nextChapter: "ch10_eternal_cycle"
+        }
+      },
+      ch9_retreat: {
+        sector: "western_abyss",
+        leftChar: "__PROTAGONIST__", rightChar: "zarcseid", leftMood: "tense", rightMood: "combat",
+        speaker: "zarcseid",
+        text: "Không sao cả! Hạm đội Prozonian đã kịp yểm trợ rút lui an toàn. Hãy nâng cấp thêm Bộ Bài hoặc Lai Tạo hậu duệ mới trước khi bước vào trận chung kết!",
+        end: {
+          title: "CHƯƠNG IX: TÁI TẬP HỢP CHIẾN TUYẾN",
+          summary: "Chuẩn bị bước vào Chương X: Định đoạt Chu Kỳ 13.",
+          nextChapter: "ch10_eternal_cycle"
+        }
+      }
+    }
+  },
+  {
+    id: "ch10_eternal_cycle",
+    num: "CHƯƠNG X",
+    title: "Bình Minh Chu Kỳ 13 — Bản Tuyên Ngôn Vũ Trụ",
+    subtitle: "Hệ Eris Core & Khối Đa Diện Outer Layer",
+    sector: "outer_layer",
+    leadChar: "__PROTAGONIST__",
+    summary: "Thời khắc phán quyết tối hậu của toàn bộ Age of Dominion. Dựa trên lịch sử 11 chu kỳ trước, quân lực, ngoại giao và di sản huyết thống của bạn, Gaiastra sẽ bước sang Chu Kỳ 13 dưới kỷ nguyên nào?",
+    nodes: {
+      start: {
+        sector: "outer_layer",
+        leftChar: "__PROTAGONIST__", rightChar: "emma", leftMood: "combat", rightMood: "secret",
+        speaker: "emma",
+        text: (g) => {
+          const hero = g.getProtagonist();
+          const terr = g.getFactionTerritoryPct(g.playerFaction);
+          const hy = g.hybrids?.length || 0;
+          return `"Đã tới lúc viết trang cuối cho Chu Kỳ 12, ${hero.name}. Phe bạn hiện nắm ${terr}% lãnh thổ, sở hữu ${hy} dòng lai thế hệ mới, với mức căng thẳng ${Math.round(g.tension)}%. Quyết định của ngươi sẽ khắc tên lên lịch sử Gaiastra mãi mãi!"`;
+        },
+        choices: [
+          {
+            label: "👑 Đăng Quang Thống Lĩnh: Thành Lập Tân Trật Tự Ngân Hà",
+            hint: "Kỷ nguyên Chinh Phạt • Khẳng định quyền bá chủ không thể chối cãi",
+            effects: (g) => {
+              g.addRes(g.playerFaction, "credits", 5000);
+              g.addRes(g.playerFaction, "influence", 300);
+            },
+            next: "ch10_sovereign"
+          },
+          {
+            label: "🌟 Phá Vỡ Vòng Lặp Reset: Chung Sống Bình Đẳng Toàn Vạn Chủng",
+            hint: "Kỷ nguyên Hòa Bình & Tiến Hóa • Chấm dứt mãi mãi nguy cơ Reset",
+            effects: (g) => {
+              g.addTension(-40);
+              g.addRes(g.playerFaction, "influence", 400);
+            },
+            next: "ch10_horizon"
+          },
+          {
+            label: "⚔️ Trận Quyết Đấu Cuối Cùng Với Thiên Sứ Eris (Emma CR 1200)",
+            hint: "Đấu Thẻ Bài Chung Kết: Nếu thắng, bạn mở ra Đại Kết Cục Huyền Thoại!",
+            battle: {
+              playerId: "__PROTAGONIST__",
+              enemyId: "emma",
+              stageId: "outer_layer",
+              winNext: "ch10_ascension",
+              loseNext: "ch10_horizon"
+            }
+          }
+        ]
+      },
+      ch10_sovereign: {
+        sector: "sylvalon",
+        leftChar: "__PROTAGONIST__", rightChar: "arisia", leftMood: "smug", rightMood: "happy",
+        speaker: "__PROTAGONIST__",
+        text: (g) => `"Chu kỳ 13 mở màn dưới ngọn cờ của ${g.getProtagonist().name} và ${g.facName(g.playerFaction)}. Không còn thế lực nào dám thách thức bản đồ vì sao của chúng ta nữa!"`,
+        end: {
+          title: "ĐẠI KẾT CỤC A: HOÀNG ĐẾ CHU KỲ 13",
+          summary: "+5,000 Credits • +300 Ảnh hưởng • Hoàn thành toàn bộ 11 Chương Cốt Truyện!"
+        }
+      },
+      ch10_horizon: {
+        sector: "predita",
+        leftChar: "__PROTAGONIST__", rightChar: "zarcseid", leftMood: "happy", rightMood: "happy",
+        speaker: "narrator",
+        text: (g) => `Với tài trí của ${g.getProtagonist().name}, mọi phe phái từ Sylvarian, Nadirius đến Salvic Union đều hạ vũ khí đặt nền móng cho Liên Minh Bình Minh Chu Kỳ 13. Căng thẳng ngân hà giảm -40%!`,
+        end: {
+          title: "ĐẠI KẾT CỤC B: CHÂN TRỜI HÒA BÌNH GAIASTRA",
+          summary: "-40% Căng thẳng • +400 Ảnh hưởng • Hoàn thành trọn vẹn Age of Dominion!"
+        }
+      },
+      ch10_ascension: {
+        sector: "outer_layer",
+        leftChar: "__PROTAGONIST__", rightChar: "emma", leftMood: "happy", rightMood: "happy",
+        speaker: "emma",
+        text: (g) => `"Không thể tin được... ${g.getProtagonist().name} đã đánh bại cả Hội Đồng Outer Layer trong trận quyết đấu! Giao thức Reset vĩnh viễn được chuyển giao cho ngươi!"`,
+        end: {
+          title: "ĐẠI KẾT CỤC S+: CHỦ NHÂN VĨNH HẰNG CỦA ĐA VŨ TRỤ",
+          summary: "Bạn đã chinh phục đỉnh cao nhất của Cycle 12: Age of Dominion!"
         }
       }
     }
@@ -1156,8 +1443,8 @@ export function buildEncounterScene(charId, gameState) {
             next: "enc_deal"
           },
           {
-            label: `⚔️ Thách đấu giao hữu 3D với ${c.name}!`,
-            hint: `Đấu trường 3D: ${CHAR_BY_ID[playerCharId]?.name || "Tướng"} vs ${c.name} (CR ${c.cr})`,
+            label: `⚔️ Thách đấu Thẻ Bài giao hữu với ${c.name}!`,
+            hint: `Đấu Thẻ Bài: ${CHAR_BY_ID[playerCharId]?.name || "Tướng"} vs ${c.name} (CR ${c.cr})`,
             battle: {
               playerId: playerCharId,
               enemyId: c.id,
@@ -1165,6 +1452,12 @@ export function buildEncounterScene(charId, gameState) {
               winNext: "enc_duel_win",
               loseNext: "enc_duel_lose"
             }
+          },
+          {
+            label: `🧬 Mời ${c.name} tới Phòng Lab Lai Tạo Gen`,
+            hint: "Mở buồng hợp nhất huyết thống với nhân vật này làm Gen mục tiêu!",
+            breedTargetId: c.id,
+            next: "enc_breed"
           },
           {
             label: "↩️ Kết thúc cuộc trò chuyện",
@@ -1241,6 +1534,19 @@ export function buildEncounterScene(charId, gameState) {
         end: {
           title: "Kết Thúc Trận Giao Hữu",
           summary: "+5 Độ tin cậy qua giao chiến."
+        }
+      },
+      enc_breed: {
+        sector: sectorId,
+        leftChar: playerCharId,
+        rightChar: c.id,
+        leftMood: "happy",
+        rightMood: "smug",
+        speaker: c.id,
+        text: `Thử nghiệm hợp nhất gen sao? Dòng máu ${c.species} của ta chắc chắn sẽ tạo nên hậu duệ đột biến ấn tượng cho bộ bài của ngươi đấy!`,
+        end: {
+          title: `Đã Đưa ${c.name} Vào Phòng Lab Gen`,
+          summary: "Chuyển sang tab 🧬 Lai Tạo để chọn Gen ghép cặp & Xúc tác!"
         }
       },
       enc_bye: {

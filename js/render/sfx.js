@@ -59,12 +59,18 @@ class SoundFX {
     const tick = () => {
       if (this.muted || !this.bgmOn) return;
       const step = this._bgmStep++;
-      if (this.scene === "arena") {
-        // Energetic dark synth bass + pulse
+      if (this.scene === "arena" || this.scene === "duel") {
+        // Energetic tactical card synth bass + pulse
         const bass = [110, 110, 130.8, 98, 110, 146.8, 130.8, 98][step % 8];
         this.tone(bass, 0.28, "sawtooth", 0.018);
         if (step % 2 === 0) this.tone(bass * 2, 0.16, "triangle", 0.014);
-        this._bgmTimer = setTimeout(tick, 320);
+        this._bgmTimer = setTimeout(tick, 340);
+      } else if (this.scene === "cutscene") {
+        // Majestic cosmic swell
+        const chord = [196, 246.9, 293.7, 392, 329.6, 293.7, 246.9, 220][step % 8];
+        this.tone(chord, 1.5, "sine", 0.018);
+        this.tone(chord * 1.5, 1.2, "triangle", 0.01);
+        this._bgmTimer = setTimeout(tick, 900);
       } else {
         // Atmospheric space opera pad chord
         const chord = [220, 261.6, 329.6, 392, 440, 329.6, 293.7, 246.9][step % 8];
@@ -145,6 +151,33 @@ class SoundFX {
 
   alert() {
     this.tone(360, 0.14, "sawtooth", 0.06, 260);
+  }
+
+  cardPlay() {
+    this.tone(540, 0.07, "triangle", 0.07, 840);
+  }
+
+  cardHit() {
+    this.tone(210, 0.14, "square", 0.08, 70);
+  }
+
+  shield() {
+    this.tone(420, 0.18, "sine", 0.07, 680);
+  }
+
+  turn() {
+    this.tone(330, 0.09, "triangle", 0.06, 440);
+    setTimeout(() => this.tone(495, 0.12, "sine", 0.05), 60);
+  }
+
+  breed() {
+    [392, 523.2, 659.2, 784, 1046.5].forEach((f, i) => {
+      setTimeout(() => this.tone(f, 0.2, "sine", 0.07), i * 65);
+    });
+  }
+
+  cutscene() {
+    this.tone(261.6, 0.35, "sine", 0.06, 392);
   }
 }
 

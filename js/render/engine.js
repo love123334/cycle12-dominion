@@ -23,7 +23,7 @@ export class UniverseEngine3D {
     this.onProjectLabels = options.onProjectLabels || (() => {});
     this.onFloatingDamage = options.onFloatingDamage || (() => {});
 
-    this.currentMode = "vn"; // 'vn' | 'galaxy' | 'arena' | 'inspector' | 'codex'
+    this.currentMode = "vn"; // 'vn' | 'duel' | 'galaxy' | 'breeding' | 'codex' | 'cutscene'
     this.selectedSectorId = null;
     this.selectedBodyId = null;
     this.inspectedCharId = null;
@@ -39,6 +39,7 @@ export class UniverseEngine3D {
     this.initThree();
     this.createStarfieldAndNebula();
     this.buildGalaxySectors();
+    this.buildBreedingHelix();
     this.setupInteraction();
 
     this.switchMode("vn");
@@ -81,12 +82,17 @@ export class UniverseEngine3D {
     this.vfxGroup = new THREE.Group();
     this.inspectorGroup = new THREE.Group();
     this.arenaGroup = new THREE.Group();
+    this.breedingGroup = new THREE.Group();
 
     this.scene.add(this.galaxyGroup);
     this.scene.add(this.systemGroup);
     this.scene.add(this.vfxGroup);
     this.scene.add(this.inspectorGroup);
     this.scene.add(this.arenaGroup);
+    this.scene.add(this.breedingGroup);
+    this.inspectorGroup.visible = false;
+    this.arenaGroup.visible = false;
+    this.breedingGroup.visible = false;
 
     this.camTarget = new THREE.Vector3(0, 0, 0);
     this.camPosTarget = new THREE.Vector3(0, 220, 350);
@@ -1122,17 +1128,24 @@ export class UniverseEngine3D {
 
   switchMode(mode) {
     this.currentMode = mode;
-    const showSpace = (mode === "galaxy" || mode === "vn" || mode === "codex");
+    const showSpace = (mode === "galaxy" || mode === "vn" || mode === "codex" || mode === "duel" || mode === "cutscene");
     this.galaxyGroup.visible = showSpace;
     this.systemGroup.visible = showSpace;
-    this.vfxGroup.visible = showSpace;
-    this.inspectorGroup.visible = (mode === "inspector");
-    this.arenaGroup.visible = (mode === "arena");
+    this.vfxGroup.visible = showSpace || mode === "breeding";
+    this.inspectorGroup.visible = false;
+    this.arenaGroup.visible = false;
+    if (this.breedingGroup) this.breedingGroup.visible = (mode === "breeding");
 
     if (mode === "galaxy" && !this.selectedSectorId) {
       this.resetGalaxyCamera();
     } else if (mode === "vn") {
       this.setVNBackdrop(this.vnSectorId);
+    } else if (mode === "duel") {
+      this.setVNBackdrop(this.vnSectorId || "sylvalon", "#a855f7");
+    } else if (mode === "breeding") {
+      this.camTarget.set(0, 0, 0);
+      this.orbitRadius = 26;
+      this.orbitAngles = { theta: 0.4, phi: 1.25 };
     }
   }
 
@@ -1159,9 +1172,11 @@ export class UniverseEngine3D {
     // 1. Xoay thiên hà & quỹ đạo hành tinh
     if (this.galaxyStars) this.galaxyStars.rotation.y += 0.00025;
 
-    if ((this.currentMode === "galaxy" || this.currentMode === "vn") && !this.isDragging) {
-      if (this.currentMode === "vn") {
-        this.orbitAngles.theta += 0.0022;
+    if ((this.currentMode === "galaxy" || this.currentMode === "vn" || this.currentMode === "duel" || this.currentMode === "cutscene") && !this.isDragging) {
+      if (this.currentMode === "vn" || this.currentMode === "cutscene") {
+        this.orbitAngles.theta += 0.0024;
+      } else if (this.currentMode === "duel") {
+        this.orbitAngles.theta += 0.0011;
       } else if (!this.selectedSectorId) {
         this.orbitAngles.theta += 0.0006;
       }
@@ -1211,20 +1226,18 @@ export class UniverseEngine3D {
     }
     this.camera.lookAt(this.camTarget);
 
-    // 4. Inspector Idle Animation
-    if (this.currentMode === "inspector" && this.charModel) {
-      if (!this.isDragging) this.charModel.rotation.y += 0.007;
-      if (this.charModel.userData.accentRing) {
-        this.charModel.userData.accentRing.rotation.z += 0.025;
+    // 4. Breeding DNA Helix Animation
+    if (this.currentMode === "breeding" && this.dnaHelix) {
+      this.dnaHelix.rotation.y += 0.014;
+      if (this.dnaHalo) this.dnaHalo.rotation.z -= 0.01;
+      if (this._helixPulse > 0) {
+        this._helixPulse = Math.max(0, this._helixPulse - dt * 1.4);
+        const s = 1 + Math.sin(this._helixPulse * Math.PI) * 0.25;
+        this.dnaHelix.scale.setScalar(s);
       }
     }
 
-    // 5. Arena Real-time Movement & Combat
-    if (this.currentMode === "arena" && this.arenaState) {
-      this.updateArena(dt);
-    }
-
-    // 6. Chiếu nhãn nổi 3D->2D trong Galaxy Mode
+    // 5. Chiếu nhãn nổi 3D->2D trong Galaxy Mode
     if (this.currentMode === "galaxy") {
       this.projectGalaxyLabels();
     } else {
@@ -1275,147 +1288,74 @@ export class UniverseEngine3D {
     this.onProjectLabels(labels);
   }
 
-  updateArena(dt) {
-    const st = this.arenaState;
-    const p = st.player;
-    const e = st.enemy;
+  // --- 3D DNA DOUBLE HELIX (FOR GENETIC BREEDING LAB) ---
+  buildBreedingHelix() {
+    if (!this.breedingGroup) return;
+    this.clearGroup(this.breedingGroup);
+    this._helixPulse = 0;
 
-    // Cập nhật animation nhân vật & quay mặt về phía nhau
-    if (p.mesh && e.mesh) {
-      p.mesh.lookAt(e.pos.x, p.pos.y, e.pos.z);
-      e.mesh.lookAt(p.pos.x, e.pos.y, p.pos.z);
-      if (p.mesh.userData.accentRing) p.mesh.userData.accentRing.rotation.z += 0.04;
-      if (e.mesh.userData.accentRing) e.mesh.userData.accentRing.rotation.z -= 0.04;
+    const helix = new THREE.Group();
+    const pairs = 18;
+    const matA = new THREE.MeshStandardMaterial({ color: 0x38bdf8, emissive: 0x0284c7, emissiveIntensity: 0.9, roughness: 0.25 });
+    const matB = new THREE.MeshStandardMaterial({ color: 0xf472b6, emissive: 0xdb2777, emissiveIntensity: 0.9, roughness: 0.25 });
+    const rungMat = new THREE.MeshBasicMaterial({ color: 0xfde047, transparent: true, opacity: 0.55 });
+    const nodeGeo = new THREE.SphereGeometry(0.45, 16, 16);
+
+    for (let i = 0; i < pairs; i++) {
+      const t = (i / pairs) * Math.PI * 3.5;
+      const y = (i - pairs / 2) * 0.95;
+      const r = 4.2;
+
+      const s1 = new THREE.Mesh(nodeGeo, matA);
+      s1.position.set(Math.cos(t) * r, y, Math.sin(t) * r);
+      const s2 = new THREE.Mesh(nodeGeo, matB);
+      s2.position.set(Math.cos(t + Math.PI) * r, y, Math.sin(t + Math.PI) * r);
+      helix.add(s1, s2);
+
+      const rung = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, r * 2, 8), rungMat);
+      rung.position.set(0, y, 0);
+      rung.rotation.z = Math.PI / 2;
+      rung.rotation.y = -t;
+      helix.add(rung);
     }
 
-    if (!st.active) return;
+    const halo = new THREE.Mesh(
+      new THREE.TorusGeometry(8.8, 0.18, 12, 64),
+      new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.45 })
+    );
+    halo.rotation.x = Math.PI / 2.2;
+    this.dnaHalo = halo;
+    this.dnaHelix = helix;
+    this.breedingGroup.add(helix, halo);
+  }
 
-    // Cooldowns
-    for (let i = 0; i < 3; i++) {
-      if (p.cooldowns[i] > 0) p.cooldowns[i] = Math.max(0, p.cooldowns[i] - dt);
-    }
-    if (p.dodgeCd > 0) p.dodgeCd = Math.max(0, p.dodgeCd - dt);
-    if (p.shieldTime > 0) p.shieldTime = Math.max(0, p.shieldTime - dt);
-    if (p.comboTimer > 0) {
-      p.comboTimer = Math.max(0, p.comboTimer - dt);
-      if (p.comboTimer <= 0) p.combo = 0;
-    }
+  pulseBreedingHelix() {
+    this._helixPulse = 1.0;
+  }
 
-    if (p.mesh?.userData?.shieldDome) {
-      p.mesh.userData.shieldDome.visible = p.shieldTime > 0;
-      p.mesh.userData.shieldDome.rotation.y += 0.08;
-    }
-
-    // Di chuyển Player (WASD / Arrow / Mobile Virtual Joystick)
-    let mx = this.joystickVec.x;
-    let mz = this.joystickVec.z;
-    if (this.keysDown.has("w") || this.keysDown.has("arrowup")) mz -= 1;
-    if (this.keysDown.has("s") || this.keysDown.has("arrowdown")) mz += 1;
-    if (this.keysDown.has("a") || this.keysDown.has("arrowleft")) mx -= 1;
-    if (this.keysDown.has("d") || this.keysDown.has("arrowright")) mx += 1;
-
-    const pMoving = mx !== 0 || mz !== 0 || st.autoPilot;
-    if (mx !== 0 || mz !== 0) {
-      const move = new THREE.Vector3(mx, 0, mz).normalize().multiplyScalar(18 * dt);
-      p.pos.add(move);
-      if (p.pos.length() > 30) p.pos.setLength(30);
-    } else if (st.autoPilot) {
-      // Tự di chuyển vòng quanh giữ tầm tối ưu
-      const toE = new THREE.Vector3().subVectors(e.pos, p.pos);
-      const dist = toE.length();
-      const tangent = new THREE.Vector3(-toE.z, 0, toE.x).normalize().multiplyScalar(10 * dt);
-      if (dist > 15) p.pos.add(toE.normalize().multiplyScalar(10 * dt));
-      p.pos.add(tangent);
-      if (p.pos.length() > 29) p.pos.setLength(29);
-    }
-    if (p.mesh) {
-      p.mesh.position.copy(p.pos);
-      if (p.mesh.userData?.legL) {
-        const swing = pMoving ? Math.sin(this.clock * 14) * 0.45 : 0;
-        p.mesh.userData.legL.rotation.x = swing;
-        p.mesh.userData.legR.rotation.x = -swing;
-        p.mesh.userData.armL.rotation.x = -swing * 0.7;
-        p.mesh.userData.armR.rotation.x = swing * 0.7;
-      }
-    }
-
-    // Di chuyển AI địch
-    const eToP = new THREE.Vector3().subVectors(p.pos, e.pos);
-    const eDist = eToP.length();
-    const eStrafe = new THREE.Vector3(-eToP.z, 0, eToP.x).normalize().multiplyScalar(6.5 * e.strafeDir * dt);
-    if (eDist > 16) e.pos.add(eToP.normalize().multiplyScalar(8 * dt));
-    e.pos.add(eStrafe);
-    if (e.pos.length() > 29) {
-      e.pos.setLength(29);
-      e.strafeDir *= -1;
-    }
-    if (e.mesh) e.mesh.position.copy(e.pos);
-
-    // Đòn đánh của Enemy
-    e.aiTimer -= dt;
-    if (e.aiTimer <= 0) {
-      e.aiTimer = 1.9 + Math.random() * 0.7;
-      if (p.shieldTime > 0) {
-        this.emitDamagePopup(p.pos.clone().add(new THREE.Vector3(0, 2, 0)), "NÉ ĐÒN!", "#facc15");
-        this.onCombatTick({ type: "player_attack", msg: `🛡️ ${p.name} né hoàn toàn đòn công kích của ${e.name}!`, p, e });
-      } else {
-        const { damage, note } = this.calcSkillDamage(e.char, p.char, 0.21);
-        p.hp = Math.max(0, p.hp - damage);
-        const from = e.pos.clone().add(new THREE.Vector3(0, 1.2, 0));
-        const to = p.pos.clone().add(new THREE.Vector3(0, 1.2, 0));
-        this.spawnProjectile(from, to, "#fb7185", 0.7);
-        this.emitDamagePopup(to, `-${damage}`, "#fb7185");
-
-        this.onCombatTick({
-          type: "enemy_attack",
-          msg: `💥 ${e.name} tấn công gây ${damage} sát thương lên ${p.name}${note}!`,
-          p, e
-        });
-
-        if (p.hp <= 0) {
-          st.active = false;
-          this.onCombatEnd({ winner: "enemy", p, e, msg: `💀 ${p.name} đã thất trận trước ${e.name}!` });
-        }
-      }
-    }
-
-    // Autopilot auto-cast skills
-    if (st.autoPilot && st.active) {
-      for (let i = 2; i >= 0; i--) {
-        if (p.cooldowns[i] <= 0) {
-          const res = this.triggerArenaSkill(i);
-          if (res && res.ok) this.onCombatTick({ type: "player_attack", msg: res.msg, p, e });
-          break;
-        }
-      }
-    }
-
-    // Projectiles
-    for (let i = st.projectiles.length - 1; i >= 0; i--) {
-      const pr = st.projectiles[i];
-      pr.progress += pr.speed;
-      pr.mesh.position.lerpVectors(pr.start, pr.target, pr.progress);
-      if (pr.progress >= 1) {
-        this.arenaGroup.remove(pr.mesh);
-        st.projectiles.splice(i, 1);
-      }
-    }
-
-    // Shockwaves & Pillars
-    for (let i = (st.shockwaves || []).length - 1; i >= 0; i--) {
-      const sw = st.shockwaves[i];
-      sw.age += dt;
-      const t = Math.min(1, sw.age / sw.maxAge);
-      if (sw.isPillar) {
-        sw.mesh.scale.set(1 + t * 0.6, 1, 1 + t * 0.6);
-      } else {
-        sw.mesh.scale.setScalar(1 + t * sw.maxScale);
-      }
-      sw.mesh.material.opacity = Math.max(0, 1 - t);
-      if (t >= 1) {
-        this.arenaGroup.remove(sw.mesh);
-        st.shockwaves.splice(i, 1);
-      }
+  // --- 3D COSMIC CUTSCENE CAMERA & VFX DIRECTOR ---
+  setCutsceneStage(stageId, sectorId = "sylvalon", accentColor = "#facc15") {
+    this.rimLight.color.set(accentColor || "#facc15");
+    if (stageId === "genesis") {
+      this.zoomToSector("eris_core");
+      this.orbitRadius = 34;
+      this.orbitAngles = { theta: 0.5, phi: 0.85 };
+    } else if (stageId === "eris_cycles") {
+      this.zoomToSector("outer_layer");
+      this.orbitRadius = 46;
+      this.orbitAngles = { theta: 1.6, phi: 1.0 };
+    } else if (stageId === "great_empires") {
+      this.resetGalaxyCamera();
+      this.orbitRadius = 310;
+      this.orbitAngles = { theta: 2.1, phi: 0.65 };
+    } else if (stageId === "uniwar_weapons") {
+      this.zoomToSector("western_march");
+      this.orbitRadius = 62;
+      this.playSuperweaponVFX("gotterfall", "western_march");
+    } else {
+      this.zoomToSector(sectorId || "sylvalon");
+      this.orbitRadius = 36;
+      this.orbitAngles = { theta: 0.7, phi: 1.05 };
     }
   }
 }
