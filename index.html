@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#090d1f" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Cycle 12" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <title>CYCLE 12: Age of Dominion — Interactive 3D Novel App</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" type="image/svg+xml" href="assets/icons/icon.svg" />
+  <link rel="apple-touch-icon" href="assets/icons/icon-192.png" />
+  <link rel="stylesheet" href="css/style.css" />
+  <!-- Local bundled Three.js r128 for full offline PWA support -->
+  <script src="js/vendor/three.min.js"></script>
+</head>
+<body>
+  <!-- FULLSCREEN 3D WEBGL UNIVERSE -->
+  <div id="canvas3d-container"></div>
+
+  <!-- FLOATING 3D LABELS & ARENA DAMAGE LAYER -->
+  <div id="galaxy-labels-layer" class="floating-layer"></div>
+  <div id="arena-damage-layer" class="floating-layer"></div>
+
+  <!-- TOP NAVIGATION & RESOURCE HUD -->
+  <header class="top-hud">
+    <div class="brand-box">
+      <div class="brand-orb"></div>
+      <div class="brand-text">
+        <div class="brand-title">CYCLE 12: DOMINION</div>
+        <div class="brand-sub">Interactive 3D Novel • 72 Nhân vật</div>
+      </div>
+    </div>
+
+    <!-- Desktop Primary Navigation -->
+    <nav class="mode-tabs desktop-only" id="desktop-nav">
+      <button class="mode-tab-btn active" data-mode="vn">📖 Cốt Truyện</button>
+      <button class="mode-tab-btn" data-mode="galaxy">🌌 Ngân Hà 3D</button>
+      <button class="mode-tab-btn" data-mode="arena">⚔️ Đấu Trường</button>
+      <button class="mode-tab-btn" data-mode="inspector">👑 Nhân Vật (72)</button>
+      <button class="mode-tab-btn" data-mode="codex">🏛️ Ngoại Giao & Lore</button>
+    </nav>
+
+    <div class="top-right-resources">
+      <div class="res-pill" title="Chu kỳ hiện tại"><span class="hide-xs">Chu kỳ:</span><strong id="stat-turn">12.1</strong></div>
+      <div class="res-pill" title="Tín dụng phe đang chọn"><span class="hide-xs">Credits:</span><strong id="stat-credits">125,000</strong></div>
+      <div class="res-pill" title="Căng thẳng ngân hà"><span class="hide-xs">Căng thẳng:</span><strong id="stat-tension">45%</strong></div>
+      <button class="btn-primary btn-compact" id="btn-next-turn" title="Qua chu kỳ mới">⏩ <span class="hide-sm">Qua Chu Kỳ</span></button>
+      <button class="btn-icon" id="btn-toggle-bgm" title="Bật/Tắt Nhạc Nền Synth">🎵</button>
+      <button class="btn-icon" id="btn-toggle-sfx" title="Bật/Tắt Âm thanh">🔊</button>
+      <button class="btn-gold btn-compact hidden" id="btn-install-app" title="Cài thành App">📲 <span class="hide-sm">Cài App</span></button>
+    </div>
+  </header>
+
+  <!-- ========================================================================
+       MODE 1: INTERACTIVE VISUAL NOVEL (CỐT TRUYỆN TƯƠNG TÁC)
+       ======================================================================== -->
+  <section id="panel-vn" class="mode-panel vn-panel">
+    <!-- Top Chapter Bar -->
+    <div class="vn-topbar">
+      <div class="vn-chapter-select-wrap">
+        <select id="vn-chapter-select" aria-label="Chọn chương cốt truyện"></select>
+      </div>
+      <div class="vn-controls">
+        <button class="btn-ghost" id="btn-vn-auto" title="Tự động chuyển thoại">▶ Tự đọc</button>
+        <button class="btn-ghost" id="btn-vn-history" title="Xem lại hội thoại">📜 Nhật ký</button>
+        <button class="btn-ghost" id="btn-vn-restart" title="Đọc lại chương này">↺ Chơi lại</button>
+      </div>
+    </div>
+
+    <!-- Center 3D Backdrop Info Pill & Cinematic Chapter Banner -->
+    <div class="vn-location-pill" id="vn-location-pill">📍 Hệ Sylvalon</div>
+    <div class="vn-chapter-banner hidden" id="vn-chapter-banner"></div>
+
+    <!-- Stage Portraits + Dialogue Box -->
+    <div class="vn-stage-bottom">
+      <div class="vn-sprites-row">
+        <div class="vn-sprite-slot left hidden" id="vn-left-slot">
+          <img id="vn-left-img" alt="" />
+          <div class="vn-sprite-meta">
+            <span id="vn-left-name"></span>
+            <span id="vn-left-mood" class="vn-mood-tag"></span>
+          </div>
+        </div>
+        <div class="vn-sprite-slot right hidden" id="vn-right-slot">
+          <img id="vn-right-img" alt="" />
+          <div class="vn-sprite-meta">
+            <span id="vn-right-name"></span>
+            <span id="vn-right-mood" class="vn-mood-tag"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="vn-dialogue-box" id="vn-dialogue-box">
+        <div class="vn-speaker-row">
+          <div class="vn-speaker-badge" id="vn-speaker-badge">NGƯỜI DẪN CHUYỆN</div>
+          <div class="vn-speaker-title" id="vn-speaker-title"></div>
+        </div>
+        <div class="vn-text" id="vn-text">Đang tải cốt truyện...</div>
+        <div class="vn-choices" id="vn-choices"></div>
+        <div class="vn-tap-hint" id="vn-tap-hint">Chạm / Click để tiếp tục ▸</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================================================================
+       MODE 2: 3D GALAXY CONQUEST & SECTOR STRATEGY
+       ======================================================================== -->
+  <section id="panel-galaxy" class="mode-panel hidden">
+    <!-- Floating Canvas Zoom-Out & Mobile Drawer Controls -->
+    <div class="galaxy-floating-actions">
+      <button class="btn-glass" id="btn-galaxy-overview">🔭 Toàn Cảnh Ngân Hà</button>
+      <div class="mobile-sheet-toggles mobile-only">
+        <button class="btn-glass active" data-gsheet="left">🚩 Hệ & Phe</button>
+        <button class="btn-glass" data-gsheet="right">🔍 Chi Tiết</button>
+        <button class="btn-glass" data-gsheet="hide">👁️ Xem 3D</button>
+      </div>
+    </div>
+
+    <!-- Left Sidebar: Faction & Sector Hierarchy List -->
+    <aside class="hud-sidebar mobile-sheet-active" id="galaxy-left-sidebar">
+      <div class="panel-section-title">🚩 Phe Phái Đang Lãnh Đạo</div>
+      <select id="active-faction-select"></select>
+      <div id="faction-info-box"></div>
+
+      <div class="panel-section-title">🪐 20 Hệ Sao & Phân Khu Vũ Trụ</div>
+      <div id="galaxy-sector-list" class="sector-list"></div>
+    </aside>
+
+    <!-- Right Sidebar: Selected Sector Details, Garrison & Superweapons -->
+    <aside class="hud-sidebar wide" id="galaxy-right-sidebar">
+      <div class="panel-section-title">🔍 Hồ Sơ Phân Khu & Thiên Thể</div>
+      <div id="planet-detail-box"></div>
+
+      <div class="panel-section-title">☄️ Hành Động Chiến Lược & Siêu Vũ Khí</div>
+      <div class="action-grid-2">
+        <button class="btn-primary" id="btn-invade-sector">⚔️ Đánh Chiếm (3D)</button>
+        <button class="btn-gold" id="btn-fortify-sector">🛡️ Gia Cố (+20 Thủ)</button>
+        <button class="btn-accent" id="btn-stabilize-sector">🕊️ Bình Ổn (+18%)</button>
+        <button class="btn-glass" id="btn-recon-sector">🕵️ Tình Báo (-16 Thủ)</button>
+        <button class="btn-glass" style="grid-column:span 2;" id="btn-goto-vn-sector">📖 Đọc Cốt Truyện Vùng Này</button>
+      </div>
+      <div id="superweapon-buttons" class="action-grid-2"></div>
+      <div class="muted">
+        💡 Kéo 1 ngón để xoay 3D, chụm 2 ngón / cuộn chuột để zoom. Bấm vào quả cầu hoặc nhãn nổi để phóng vào từng hệ sao và hành tinh con. Đường kẻ đỏ là <strong>Ranh giới Hiệp ước Cursew</strong>.
+      </div>
+    </aside>
+  </section>
+
+  <!-- ========================================================================
+       MODE 3: 3D REAL-TIME ACTION ARENA
+       ======================================================================== -->
+  <section id="panel-arena" class="mode-panel hidden">
+    <div class="arena-mobile-setup-bar mobile-only">
+      <button class="btn-glass" id="btn-arena-toggle-setup">⚙ Thiết Lập Tướng & Sàn Đấu</button>
+    </div>
+
+    <!-- Left Sidebar: Match Setup -->
+    <aside class="hud-sidebar arena-setup-drawer" id="arena-setup-drawer">
+      <div class="panel-section-title">⚔️ Thiết Lập Trận Đấu 3D</div>
+      <label class="muted">Tướng của bạn (Player):</label>
+      <select id="arena-player-select"></select>
+
+      <label class="muted">Đối thủ (Enemy):</label>
+      <select id="arena-enemy-select"></select>
+
+      <label class="muted">Chiến trường Phân khu 3D:</label>
+      <select id="arena-stage-select"></select>
+
+      <button class="btn-primary" id="btn-start-match">🔥 Khởi Tranh Trận Mới</button>
+      <button class="btn-gold" id="btn-toggle-autopilot">🤖 Bật Tự Động Đánh [F]</button>
+
+      <div class="panel-section-title">🕹️ Điều Khiển</div>
+      <div class="planet-meta-grid" style="grid-template-columns: 1fr;">
+        <div><strong>WASD / Joystick:</strong> Di chuyển trên sàn đấu 3D</div>
+        <div><strong>[1/Q], [2/E], [3/R]:</strong> Tung 3 Tuyệt kỹ</div>
+        <div><strong>[SPACE] / Nút Né:</strong> Lướt né đòn + Khiên 1.2s</div>
+        <div><strong>[F] / Auto:</strong> Bật / Tắt Tự động Chiến đấu</div>
+      </div>
+    </aside>
+
+    <!-- Center & Bottom Arena HUD -->
+    <div class="arena-center-hud">
+      <div class="versus-bars">
+        <div class="vs-side">
+          <div class="vs-header">
+            <img id="hud-p-img" class="vs-avatar" alt="" />
+            <div>
+              <div id="hud-p-name" class="vs-name" style="color:#38bdf8;">Arisia Grok</div>
+              <div id="hud-p-meta" class="muted">CR 851 • Sylvarian</div>
+            </div>
+          </div>
+          <div class="hp-track"><div id="hud-p-bar" class="hp-fill" style="width:100%"></div></div>
+          <div id="hud-p-hp-text" class="muted">8,684 / 8,684 HP</div>
+        </div>
+
+        <div class="vs-badge">VS</div>
+
+        <div class="vs-side right">
+          <div class="vs-header right">
+            <div>
+              <div id="hud-e-name" class="vs-name" style="color:#fb7185;">Overlord</div>
+              <div id="hud-e-meta" class="muted">CR 1001 • Thần Nadir</div>
+            </div>
+            <img id="hud-e-img" class="vs-avatar" alt="" />
+          </div>
+          <div class="hp-track"><div id="hud-e-bar" class="hp-fill enemy" style="width:100%"></div></div>
+          <div id="hud-e-hp-text" class="muted">10,109 / 10,109 HP</div>
+        </div>
+      </div>
+
+      <div class="arena-overdrive-strip">
+        <span id="arena-combo-badge" class="badge">COMBO x0</span>
+        <div class="overdrive-track"><div id="arena-od-bar" class="overdrive-fill" style="width:0%"></div></div>
+        <span id="arena-od-text" class="muted" style="font-weight:800;color:var(--gold);">OVERDRIVE 0%</span>
+      </div>
+
+      <div class="arena-bottom-controls">
+        <!-- Virtual Touch Joystick (Mobile & Mouse friendly) -->
+        <div class="joystick-zone" id="arena-joystick" title="Kéo để di chuyển nhân vật">
+          <div class="joystick-knob" id="arena-joystick-knob"></div>
+        </div>
+
+        <div class="arena-bottom-dock">
+          <div class="skill-bar">
+            <button class="skill-btn" id="btn-skill-0"><span class="skill-label">[1] Kỹ năng 1</span><span class="skill-cd"></span></button>
+            <button class="skill-btn" id="btn-skill-1"><span class="skill-label">[2] Kỹ năng 2</span><span class="skill-cd"></span></button>
+            <button class="skill-btn ult" id="btn-skill-2"><span class="skill-label">[3] Tuyệt kỹ</span><span class="skill-cd"></span></button>
+            <button class="skill-btn dodge" id="btn-dodge"><span class="skill-label">💨 Né [Space]</span><span class="skill-cd"></span></button>
+            <button class="skill-btn auto mobile-only" id="btn-arena-auto-mob">🤖 Auto</button>
+          </div>
+          <div id="arena-combat-log" class="combat-log-box">
+            <div class="combat-log-line player">⚡ Đấu trường 3D sẵn sàng! Dùng Joystick/WASD để di chuyển và tung kỹ năng!</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================================================================
+       MODE 4: 3D CHARACTER INSPECTOR & INTERACTION (72 CHARACTERS)
+       ======================================================================== -->
+  <section id="panel-inspector" class="mode-panel hidden">
+    <div class="mobile-sheet-toggles mobile-only floating-insp-toggle">
+      <button class="btn-glass active" data-isheet="left">👑 Danh Sách (72)</button>
+      <button class="btn-glass" data-isheet="right">📋 Hồ Sơ & Tương Tác</button>
+      <button class="btn-glass" data-isheet="hide">👁️ Xem 3D</button>
+    </div>
+
+    <aside class="hud-sidebar mobile-sheet-active" id="inspector-left-sidebar">
+      <div class="panel-section-title">👑 Danh Sách 72 Nhân Vật (Xếp theo CR)</div>
+      <input type="text" id="char-search-input" placeholder="Tìm tên, chủng tộc, phe, chiêu thức..." />
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 6px;">
+        <select id="char-gender-filter">
+          <option value="ALL">Tất cả (72)</option>
+          <option value="Female">Nữ (43)</option>
+          <option value="Male">Nam (29)</option>
+        </select>
+        <select id="char-faction-filter">
+          <option value="ALL">Tất cả Phe phái</option>
+        </select>
+      </div>
+      <div id="char-roster-list" class="roster-list"></div>
+    </aside>
+
+    <aside class="hud-sidebar wide" id="inspector-right-sidebar">
+      <div class="panel-section-title">📋 Hồ Sơ & So Sánh Tỷ Lệ 3D</div>
+      <div id="inspector-detail-card"></div>
+      <div class="muted">
+        💡 Khung dây màu xanh bên trái bục 3D là <strong>Chuẩn Con Người 1.70m</strong> để đối chiếu chiều cao thật của Ceasaria (3.50m), Avalanche (3.40m), Veidos (3.36m), Arisia (2.18m)...
+      </div>
+    </aside>
+  </section>
+
+  <!-- ========================================================================
+       MODE 5: DIPLOMACY, CHRONICLE LOG, LORE CODEX & APP SAVE SLOTS
+       ======================================================================== -->
+  <section id="panel-codex" class="mode-panel hidden">
+    <div class="codex-workspace">
+      <div class="codex-tabs-bar" id="codex-tabs-bar">
+        <button class="btn-glass active" data-ctab="diplomacy">🤝 Ngoại Giao & Hiệp Ước</button>
+        <button class="btn-glass" data-ctab="events">📰 Nhật Ký Chiến Sự</button>
+        <button class="btn-glass" data-ctab="achievements">🏅 Thành Tựu</button>
+        <button class="btn-glass" data-ctab="species">🌌 Chủng Tộc (15)</button>
+        <button class="btn-glass" data-ctab="timeline">⏳ Dòng Thời Gian</button>
+        <button class="btn-glass" data-ctab="relations">🔗 Ma Trận Quan Hệ</button>
+        <button class="btn-glass" data-ctab="system">💾 Lưu/Tải & Cài App</button>
+      </div>
+      <div id="codex-main-content" class="codex-scroll-body"></div>
+    </div>
+  </section>
+
+  <!-- MOBILE BOTTOM APP TAB BAR -->
+  <nav class="bottom-nav mobile-only" id="mobile-nav">
+    <button class="bottom-nav-btn active" data-mode="vn"><span>📖</span><small>Truyện</small></button>
+    <button class="bottom-nav-btn" data-mode="galaxy"><span>🌌</span><small>Ngân Hà</small></button>
+    <button class="bottom-nav-btn" data-mode="arena"><span>⚔️</span><small>Đấu Trường</small></button>
+    <button class="bottom-nav-btn" data-mode="inspector"><span>👑</span><small>Nhân Vật</small></button>
+    <button class="bottom-nav-btn" data-mode="codex"><span>🏛️</span><small>Lore/App</small></button>
+  </nav>
+
+  <!-- ARENA POST-BATTLE OUTCOME MODAL -->
+  <div id="arena-victory-modal" class="modal-overlay hidden">
+    <div class="modal-card small">
+      <h2 id="victory-title" style="color:var(--gold); margin-bottom:10px;">CHIẾN THẮNG!</h2>
+      <p id="victory-desc" style="font-size:14px; line-height:1.6; margin-bottom:18px;"></p>
+      <div style="display:flex; flex-wrap:wrap; justify-content:center; gap:10px;">
+        <button class="btn-accent hidden" id="btn-victory-story">📖 Tiếp Tục Cốt Truyện</button>
+        <button class="btn-gold" id="btn-victory-conquer">🚩 Tiếp Quản Khu Vực</button>
+        <button class="btn-primary" id="btn-victory-close">⚔️ Ở Lại Đấu Trường</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- VN BACKLOG HISTORY MODAL -->
+  <div id="vn-history-modal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--panel-border); padding-bottom:10px;">
+        <h3 style="color:var(--primary); margin:0;">📜 Nhật Ký Hội Thoại</h3>
+        <button class="btn-danger btn-compact" id="btn-close-vn-history">✕ Đóng</button>
+      </div>
+      <div id="vn-history-list" class="vn-history-list"></div>
+    </div>
+  </div>
+
+  <!-- DYNAMIC EVENT TOAST -->
+  <div id="lore-toast" class="lore-toast hidden">
+    <h4 id="lore-toast-title"></h4>
+    <p id="lore-toast-desc"></p>
+  </div>
+
+  <!-- Game Scripts (Modular ES6) -->
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

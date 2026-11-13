@@ -1,0 +1,33 @@
+{
+  "name": "CYCLE 12: Age of Dominion",
+  "short_name": "Cycle 12",
+  "description": "Interactive Sci-Fi Visual Novel, 3D Galaxy Strategy & Real-Time Arena — Kỷ nguyên Hậu Reset.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#050714",
+  "theme_color": "#090d1f",
+  "lang": "vi",
+  "categories": ["games", "entertainment"],
+  "icons": [
+    {
+      "src": "assets/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "assets/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "assets/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+rawdoc/
+_backup_v1/
+*.lnk
+~$*
+*.tmp
+.DS_Store
+Thumbs.db
