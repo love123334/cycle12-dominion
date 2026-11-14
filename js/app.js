@@ -615,6 +615,12 @@ class Cycle12App {
     if (aiDock) {
       const showDock = Boolean(isEncounter || node.allowAIInput || nodeId.startsWith("ai_"));
       aiDock.classList.toggle("hidden", !showDock);
+      const aiInput = document.getElementById("vn-ai-input");
+      if (aiInput) {
+        aiInput.placeholder = isEncounter
+          ? "Nói chuyện trực tiếp với nhân vật (AI nhớ lore & lịch sử)..."
+          : "Gợi ý/lái tiếp diễn biến AI (VD: 'Chất vấn Arisia về Gotterfall' hoặc 'Tăng viện Prussireich')...";
+      }
     }
 
     this.populateChapterSelect();
@@ -683,12 +689,13 @@ class Cycle12App {
     const rawText = typeof node.text === "function" ? node.text(this.game) : String(node.text || "");
     this.fullVnText = rawText;
 
-    const hist = this.game.vn.history;
-    const last = hist[hist.length - 1];
-    if (!last || last.text !== rawText || last.speaker !== speakerLabel) {
-      hist.push({ speaker: speakerLabel, text: rawText, chapter: script.num || script.title });
-      if (hist.length > 60) hist.shift();
-    }
+    this.game.recordStoryBeat({
+      kind: nodeId.startsWith("ai_") ? "ai_story" : "node",
+      chapterId: script.id,
+      chapter: script.num || script.title,
+      speaker: speakerLabel,
+      text: rawText
+    });
 
     const textEl = document.getElementById("vn-text");
     const choicesEl = document.getElementById("vn-choices");
@@ -831,11 +838,12 @@ class Cycle12App {
     if (this.vnAutoPlay) this.scheduleVNAutoAdvance();
   }
 
-  async triggerAIStoryExpand() {
+  async triggerAIStoryExpand(direction = "") {
     if (this.aiBusy) return;
     const { script, isEncounter, nodeId, node } = this.getActiveVNContext();
     if (!script || !node) return;
 
+    const cleanDirection = typeof direction === "string" ? direction.trim() : "";
     const btn = document.getElementById("btn-vn-ai-expand");
     const badge = document.getElementById("vn-ai-status-badge");
     const prevBtnText = btn ? btn.textContent : "✨ Mở Rộng AI";
@@ -845,7 +853,7 @@ class Cycle12App {
       btn.textContent = "⏳ AI Đang Viết...";
     }
     if (badge) {
-      badge.textContent = "⏳ AI Đang Sáng Tác...";
+      badge.textContent = "⏳ AI Đang Đọc Lore...";
       badge.style.color = "#facc15";
     }
 
@@ -858,25 +866,31 @@ class Cycle12App {
         const res = await askAICharacterReply({
           gameState: this.game,
           npcId,
-          userMessage: "",
-          history: this.aiChatHistory || []
+          userMessage: cleanDirection,
+          history: this.aiChatHistory || [],
+          chapter: script
         });
+        if (res.memoryNote) this.game.recordAIMemory(res.memoryNote, this.resolveActorName(npcId));
         this.presentAICharacterNode(script, npcId, node, baseReturnId, res);
       } else {
+        const currentText = this.fullVnText || (typeof node.text === "function" ? node.text(this.game) : String(node.text || ""));
         const res = await askAIStoryExpand({
           gameState: this.game,
           chapter: script,
-          currentNodeText: this.fullVnText || (typeof node.text === "function" ? node.text(this.game) : String(node.text || ""))
+          currentNodeText: currentText,
+          currentNode: node,
+          direction: cleanDirection
         });
+        if (res.memoryNote) this.game.recordAIMemory(res.memoryNote, script.num || script.title);
 
         const resumeNodeId = node.next && script.nodes[node.next] ? node.next : baseReturnId;
-        const playerId = resolveStoryChar("PLAYER", this.game);
+        const playerId = resolveStoryChar("__PROTAGONIST__", this.game);
         const resolvedSpeaker = res.speakerId === "narrator"
           ? "narrator"
           : (CHAR_BY_ID[res.speakerId] || (this.game.hybrids || []).find((h) => h.id === res.speakerId)
             ? res.speakerId
             : (node.speaker || "narrator"));
-        const leftChar = node.leftChar || "PLAYER";
+        const leftChar = node.leftChar || "__PROTAGONIST__";
         const rightChar = resolvedSpeaker !== "narrator" && resolvedSpeaker !== playerId
           ? resolvedSpeaker
           : node.rightChar;
@@ -897,15 +911,29 @@ class Cycle12App {
               if (ch.creditsDelta) g.addRes(g.playerFaction, "credits", Number(ch.creditsDelta));
               if (ch.tensionDelta) g.tension = Math.max(5, Math.min(100, (g.tension || 45) + Number(ch.tensionDelta)));
               if (ch.affinityDelta && rightChar) g.addAffinity(resolveStoryChar(rightChar, g), Number(ch.affinityDelta));
+              if (ch.memoryNote || ch.outcome) {
+                g.recordAIMemory(ch.memoryNote || `${ch.label}: ${ch.outcome}`, script.num || "AI Choice");
+              }
             },
-            next: resumeNodeId
+            choices: [
+              {
+                label: "✨ Tiếp tục viết tiếp nhánh AI này",
+                hint: "Dùng AI nối tiếp ngay sau hệ quả vừa rồi",
+                onSelect: () => this.triggerAIStoryExpand("")
+              },
+              {
+                label: "↩️ Quay lại mạch truyện chính",
+                hint: "Trở về diễn biến gốc của chương",
+                next: resumeNodeId
+              }
+            ]
           };
           const bonusBits = [];
           if (ch.creditsDelta) bonusBits.push(`+${ch.creditsDelta} CR$`);
           if (ch.affinityDelta) bonusBits.push(`+${ch.affinityDelta} Tin cậy`);
           return {
             label: `✨ ${ch.label || `Phương án ${idx + 1}`}`,
-            hint: bonusBits.length ? `${bonusBits.join(" • ")} • Nhánh AI Mở Rộng` : "Nhánh cốt truyện AI Mở Rộng",
+            hint: bonusBits.length ? `${bonusBits.join(" • ")} • Nhánh AI Bám Lore` : "Nhánh cốt truyện AI Bám Lore",
             next: outId
           };
         });
@@ -924,11 +952,12 @@ class Cycle12App {
           rightMood: res.speakerMood || "tense",
           speaker: resolvedSpeaker,
           allowAIInput: true,
-          text: `${res.sceneText}\n\n[✨ AI Story Director • ${res.provider?.toUpperCase() || "AI"}${res.model ? ` / ${res.model}` : ""}]`,
+          text: `${res.sceneText}\n\n[✨ AI Story Director (Lore + Trí nhớ) • ${res.provider?.toUpperCase() || "AI"}${res.model ? ` / ${res.model}` : ""}]`,
           choices: expChoices
         };
 
         this.game.vn.currentNodeId = aiExpId;
+        this.game.saveToSlot("auto");
         this.renderVNNode();
         this.finishTypingAndShowControls(script.nodes[aiExpId], isEncounter, script);
       }
@@ -951,9 +980,10 @@ class Cycle12App {
     if (res.creditsDelta) this.game.addRes(this.game.playerFaction, "credits", res.creditsDelta);
     if (res.tensionDelta) this.game.tension = Math.max(5, Math.min(100, (this.game.tension || 45) + res.tensionDelta));
     if (res.affinityDelta) this.game.addAffinity(npcId, res.affinityDelta);
+    if (res.memoryNote) this.game.recordAIMemory(res.memoryNote, this.resolveActorName(npcId));
     this.refreshTopResources();
 
-    const playerId = resolveStoryChar("PLAYER", this.game);
+    const playerId = resolveStoryChar("__PROTAGONIST__", this.game);
     const rightChar = npcId !== playerId ? npcId : sourceNode?.rightChar;
     const replyId = `ai_chat_${Date.now().toString(36)}`;
 
@@ -974,7 +1004,7 @@ class Cycle12App {
 
     script.nodes[replyId] = {
       sector: sourceNode?.sector || script.sector || "sylvalon",
-      leftChar: sourceNode?.leftChar || "PLAYER",
+      leftChar: sourceNode?.leftChar || "__PROTAGONIST__",
       rightChar,
       leftMood: "neutral",
       rightMood: res.mood || "tense",
@@ -985,6 +1015,7 @@ class Cycle12App {
     };
 
     this.game.vn.currentNodeId = replyId;
+    this.game.saveToSlot("auto");
     this.renderVNNode();
     this.finishTypingAndShowControls(script.nodes[replyId], Boolean(this.activeEncounterScript), script);
   }
@@ -999,8 +1030,23 @@ class Cycle12App {
     const { script, isEncounter, nodeId, node } = this.getActiveVNContext();
     if (!script || !node) return;
 
-    const playerId = resolveStoryChar("PLAYER", this.game);
-    let npcId = isEncounter && script.id.startsWith("enc_") ? script.id.slice(4) : null;
+    // Inside main story chapters (non-encounter), user free-form input steers AI story continuation directly!
+    if (!isEncounter) {
+      if (input && typeof presetMsg !== "string") input.value = "";
+      this.game.recordStoryBeat({
+        kind: "choice",
+        chapterId: script.id,
+        chapter: script.num || script.title,
+        speaker: this.game.getProtagonist()?.name || "Bạn",
+        choiceLabel: `Chỉ đạo AI: ${msg}`,
+        text: msg
+      });
+      await this.triggerAIStoryExpand(msg);
+      return;
+    }
+
+    const playerId = resolveStoryChar("__PROTAGONIST__", this.game);
+    let npcId = script.id.startsWith("enc_") ? script.id.slice(4) : null;
     if (!npcId) {
       const rightResolved = node.rightChar ? resolveStoryChar(node.rightChar, this.game) : null;
       const leftResolved = node.leftChar ? resolveStoryChar(node.leftChar, this.game) : null;
@@ -1026,11 +1072,20 @@ class Cycle12App {
         gameState: this.game,
         npcId,
         userMessage: msg,
-        history: this.aiChatHistory
+        history: this.aiChatHistory,
+        chapter: script
+      });
+      this.game.recordStoryBeat({
+        kind: "choice",
+        chapterId: script.id,
+        chapter: script.title,
+        speaker: this.game.getProtagonist()?.name || "Bạn",
+        choiceLabel: msg,
+        text: msg
       });
       this.aiChatHistory.push({ role: "user", content: msg });
       this.aiChatHistory.push({ role: "assistant", content: res.reply });
-      if (this.aiChatHistory.length > 12) this.aiChatHistory = this.aiChatHistory.slice(-12);
+      if (this.aiChatHistory.length > 14) this.aiChatHistory = this.aiChatHistory.slice(-14);
 
       if (input && typeof presetMsg !== "string") input.value = "";
       const baseReturnId = nodeId.startsWith("ai_") ? (this.aiReturnNodeId || "start") : nodeId;
@@ -1080,6 +1135,16 @@ class Cycle12App {
     if (typeof choice.onSelect === "function") {
       choice.onSelect();
       return;
+    }
+    if (choice.label) {
+      this.game.recordStoryBeat({
+        kind: "choice",
+        chapterId: script?.id || "",
+        chapter: script?.num || script?.title || "",
+        speaker: this.game.getProtagonist()?.name || "Bạn",
+        choiceLabel: choice.label,
+        text: choice.label
+      });
     }
     if (typeof choice.effects === "function") {
       choice.effects(this.game);
@@ -1292,6 +1357,54 @@ class Cycle12App {
     });
   }
 
+  getCardRarityClass(c) {
+    if (!c) return "rarity-core";
+    if (c.isToken || c.isHybrid) return "rarity-hybrid";
+    if ((c.cr || 0) >= 220) return "rarity-mythic";
+    if ((c.cr || 0) >= 140 || c.unique) return "rarity-legend";
+    return "rarity-core";
+  }
+
+  renderTCGCardHTML(c, opts = {}) {
+    const accent = FACTIONS[c.fac]?.color || "#38bdf8";
+    const facShort = FACTIONS[c.fac]?.short || FACTIONS[c.fac]?.name || c.fac;
+    const isM = c.gender === "Male";
+    const r2 = c.row2Effect || {};
+    const rarity = this.getCardRarityClass(c);
+    const h2Mod = r2.crPenaltyPct ? "debuff" : (r2.tier === "tamarite" ? "tamarite" : "");
+    const extraCls = [opts.className || "hand-card", rarity, opts.selected ? "selected" : "", opts.playable === false ? "unaffordable" : "playable"]
+      .filter(Boolean).join(" ");
+    const attrs = opts.attrs || "";
+    const customStyle = `--card-accent:${accent};${opts.style || ""}`;
+    const titleStr = opts.title || `H1: ${c.row1Effect?.desc || ""} | H2: ${r2.desc || ""}`;
+    const badgeTop = c.isToken
+      ? `<span class="token-pill">🪙 TOKEN</span>`
+      : (c.isHybrid ? `<span class="token-pill hybrid">✦ LAI</span>` : "");
+
+    return `
+      <button class="${extraCls}" style="${customStyle}" ${attrs} title="${ESC(titleStr)}">
+        <span class="card-foil-sweep"></span>
+        <span class="card-cr-gem">${c.cr}</span>
+        <div class="card-top-badges">
+          <span class="gender-pill ${isM ? "male" : "female"}">${isM ? "♂" : "♀"}</span>
+          ${badgeTop}
+        </div>
+        <div class="card-art-stage">
+          <img class="hand-card-thumb" src="${getCardPortrait(c)}" alt="${ESC(c.name)}" ${opts.lazy ? 'loading="lazy"' : ""} />
+          <div class="card-art-vignette"></div>
+          <div class="card-nameplate">
+            <div class="card-name-title">${ESC(c.name)}</div>
+            <div class="card-subline">${ESC(c.species)} • ${ESC(facShort)}</div>
+          </div>
+        </div>
+        <div class="card-effects-mini">
+          <div class="eff-line h1"><span>⚔️</span><span>${ESC(c.row1Effect?.tag || "Trực chiến")}</span></div>
+          <div class="eff-line h2 ${h2Mod}"><span>🧬</span><span>${ESC(r2.tag || `+${r2.crAura || 60} CR`)}</span></div>
+        </div>
+      </button>
+    `;
+  }
+
   inspectDuelCard(card, evalCR = null) {
     const bar = document.getElementById("duel-card-inspector");
     if (!bar) return;
@@ -1301,6 +1414,7 @@ class Cycle12App {
     }
     this.inspectedDuelCard = card;
     const isM = card.gender === "Male";
+    const accent = FACTIONS[card.fac]?.color || "#38bdf8";
     const facLabel = FACTIONS[card.fac]?.name || card.fac;
     const crStr = evalCR ? `Tổng CR ${evalCR.total} (Gốc ${card.cr})` : `CR ${card.cr}`;
     const r2 = card.row2Effect || {};
@@ -1309,17 +1423,20 @@ class Cycle12App {
       ? ` • <span style="color:#f472b6;">Đang lai cùng ♂ ${ESC(card.sireCard.name)} (${this.duelEngine?.getEffectiveBreedChance(card) || r2.breedChance || 50}%/lượt, đã sinh ${card.spawnCount || 0})</span>`
       : "";
     bar.innerHTML = `
-      <img src="${getCardPortrait(card)}" style="width:36px;height:40px;border-radius:7px;object-fit:cover;object-position:top center;flex-shrink:0;" alt="" />
-      <div style="flex:1;min-width:0;line-height:1.35;">
-        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+      <div class="inspector-card-thumb ${this.getCardRarityClass(card)}" style="--card-accent:${accent};">
+        <img src="${getCardPortrait(card)}" alt="${ESC(card.name)}" />
+        <span class="inspector-cr-chip">${evalCR ? evalCR.total : card.cr}</span>
+      </div>
+      <div class="inspector-body">
+        <div class="inspector-head">
           <strong style="color:#fff;">${ESC(card.name)}</strong>
           <span class="gender-pill ${isM ? "male" : "female"}">${isM ? "♂ Nam" : "♀ Nữ"}</span>
-          <span style="color:#fbbf24;font-weight:800;">⚔️ ${crStr}</span>
+          <span class="inspector-cr-text">⚔️ ${crStr}</span>
           <span class="muted">${ESC(card.species)} • ${ESC(facLabel)}</span>
           ${card.isToken ? `<span class="badge" style="color:#f472b6;border-color:rgba(244,114,182,0.5);">🪙 TOKEN LAI</span>` : ""}
         </div>
-        <div style="font-size:10.5px;color:#7dd3fc;">⚔️ Hàng 1: ${ESC(card.row1Effect?.desc || "Đánh trực tiếp theo tổng CR")}</div>
-        <div style="font-size:10.5px;color:#fbcfe8;">🧬 Hàng 2: ${ESC(r2.desc || "Hỗ trợ +60 CR")}${penWarn}${sireLine}</div>
+        <div class="inspector-eff h1">⚔️ <strong>H1:</strong> ${ESC(card.row1Effect?.desc || "Đánh trực tiếp theo tổng CR")}</div>
+        <div class="inspector-eff h2">🧬 <strong>H2:</strong> ${ESC(r2.desc || "Hỗ trợ +60 CR")}${penWarn}${sireLine}</div>
       </div>
     `;
   }
@@ -1345,6 +1462,8 @@ class Cycle12App {
     const pWingBar = document.querySelector(".commander-bar.player.row3-slot");
     eWingBar?.classList.toggle("exposed", eFrontCount === 0);
     pWingBar?.classList.toggle("exposed", pFrontCount === 0);
+    if (eWingBar) eWingBar.style.setProperty("--card-accent", FACTIONS[eLeader.fac]?.color || "#ef4444");
+    if (pWingBar) pWingBar.style.setProperty("--card-accent", FACTIONS[pLeader.fac]?.color || "#38bdf8");
 
     document.getElementById("duel-e-img").src = getCardPortrait(eLeader);
     document.getElementById("duel-e-name").innerHTML = `${ESC(eLeader.name)} <span class="gender-pill ${eLeader.gender === "Male" ? "male" : "female"}">${eLeader.gender === "Male" ? "♂" : "♀"}</span>`;
@@ -1432,22 +1551,31 @@ class Cycle12App {
       const pOpp = eng.player.row1[i];
       const evalCR = eng.evalCardCombatCR(u, pOpp, "enemy", { laneIdx: i });
       const isM = u.gender === "Male";
+      const accent = FACTIONS[u.fac]?.color || "#ef4444";
+      const facShort = FACTIONS[u.fac]?.short || u.fac;
+      const breedRisk = (pOpp && pOpp.gender === "Male" && !isM && evalCR.total < (pOpp ? eng.evalCardCombatCR(pOpp, u, "player", { laneIdx: i }).total : 0))
+        ? `<span class="matchup-tag breed-target">💘 Bắt &amp; Lai</span>`
+        : "";
       return `
         <div class="board-slot">
-          <div class="tcg-unit-card enemy-unit ${u.isToken ? "is-token" : ""}"
+          <div class="tcg-unit-card enemy-unit ${this.getCardRarityClass(u)} ${u.isToken ? "is-token" : ""}"
+               style="--card-accent:${accent};"
                data-inspect-side="enemy" data-inspect-zone="row1" data-inspect-idx="${i}"
                title="${ESC(u.row1Effect?.desc || "")}">
-            <span class="card-cr-pill">CR ${evalCR.total}</span>
+            <span class="card-foil-sweep"></span>
+            <span class="card-cr-gem">${evalCR.total}</span>
             ${u.isToken ? `<span class="token-pill">🪙 TOKEN</span>` : ""}
-            <img src="${getCardPortrait(u)}" alt="${ESC(u.name)}" />
-            <div style="min-width:0; flex:1;">
-              <div style="display:flex;align-items:center;gap:4px;min-width:0;">
+            <div class="unit-thumb-frame">
+              <img src="${getCardPortrait(u)}" alt="${ESC(u.name)}" />
+            </div>
+            <div class="unit-info-col">
+              <div class="unit-name-row">
                 <span class="gender-pill ${isM ? "male" : "female"}">${isM ? "♂" : "♀"}</span>
-                <span style="font-weight:800;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ESC(u.name)}</span>
+                <span class="unit-name-text">${ESC(u.name)}</span>
               </div>
-              <div style="font-size:9.5px;color:#cbd5e1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ESC(u.species)} • ${ESC(FACTIONS[u.fac]?.name || u.fac)}</div>
-              <div style="font-size:10px;color:#fda4af;font-weight:800;">Gốc ${u.cr} → ${evalCR.total}</div>
-              <div class="muted" style="font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">⚔️ ${ESC(u.row1Effect?.tag || "")}</div>
+              <div class="unit-meta-line">${ESC(u.species)} • ${ESC(facShort)}</div>
+              <div class="unit-cr-delta enemy">Gốc ${u.cr} → ${evalCR.total} ${breedRisk}</div>
+              <div class="unit-eff-tag">⚔️ ${ESC(u.row1Effect?.tag || "Trực chiến")}</div>
             </div>
           </div>
         </div>
@@ -1469,23 +1597,32 @@ class Cycle12App {
       const evalCR = eng.evalCardCombatCR(u, eOpp, "player", { laneIdx: i });
       const canRecall = u.deployedTurn === eng.turn && !eng.over;
       const isM = u.gender === "Male";
+      const accent = FACTIONS[u.fac]?.color || "#38bdf8";
+      const facShort = FACTIONS[u.fac]?.short || u.fac;
+      const dangerTag = (eOpp && eOpp.gender === "Male" && !isM && evalCR.total < eng.evalCardCombatCR(eOpp, u, "enemy", { laneIdx: i }).total)
+        ? `<span class="matchup-tag danger">⚠️ Nguy cơ</span>`
+        : "";
       return `
         <div class="board-slot">
-          <button class="tcg-unit-card ${canRecall ? "ready" : ""} ${u.isToken ? "is-token" : ""}"
+          <button class="tcg-unit-card ${this.getCardRarityClass(u)} ${canRecall ? "ready" : ""} ${u.isToken ? "is-token" : ""}"
+                  style="--card-accent:${accent};"
                   data-recall-lane="${i}"
                   data-inspect-side="player" data-inspect-zone="row1" data-inspect-idx="${i}"
                   title="${canRecall ? "Bấm để thu hồi về tay trước khi Giao Chiến" : ESC(u.row1Effect?.desc || "")}">
-            <span class="card-cr-pill">CR ${evalCR.total}</span>
+            <span class="card-foil-sweep"></span>
+            <span class="card-cr-gem">${evalCR.total}</span>
             ${u.isToken ? `<span class="token-pill">🪙 TOKEN</span>` : ""}
-            <img src="${getCardPortrait(u)}" alt="${ESC(u.name)}" />
-            <div style="min-width:0; flex:1;">
-              <div style="display:flex;align-items:center;gap:4px;min-width:0;">
+            <div class="unit-thumb-frame">
+              <img src="${getCardPortrait(u)}" alt="${ESC(u.name)}" />
+            </div>
+            <div class="unit-info-col">
+              <div class="unit-name-row">
                 <span class="gender-pill ${isM ? "male" : "female"}">${isM ? "♂" : "♀"}</span>
-                <span style="font-weight:800;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ESC(u.name)}</span>
+                <span class="unit-name-text">${ESC(u.name)}</span>
               </div>
-              <div style="font-size:9.5px;color:#cbd5e1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ESC(u.species)} • ${ESC(FACTIONS[u.fac]?.name || u.fac)}</div>
-              <div style="font-size:10px;color:#86efac;font-weight:800;">Gốc ${u.cr} → ${evalCR.total}</div>
-              <div class="muted" style="font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${canRecall ? "↩️ Thu hồi • " : ""}⚔️ ${ESC(u.row1Effect?.tag || "")}</div>
+              <div class="unit-meta-line">${ESC(u.species)} • ${ESC(facShort)}</div>
+              <div class="unit-cr-delta player">Gốc ${u.cr} → ${evalCR.total} ${dangerTag}</div>
+              <div class="unit-eff-tag">${canRecall ? "↩️ Thu hồi • " : ""}⚔️ ${ESC(u.row1Effect?.tag || "Trực chiến")}</div>
             </div>
           </button>
         </div>
@@ -1525,31 +1662,12 @@ class Cycle12App {
     // Player Hand (TCG Upright Cards with Gender, Species, Faction, H1 & H2 Passives)
     const handEl = document.getElementById("duel-p-hand");
     const openLane = eng.player.row1.findIndex((s) => s === null);
-    handEl.innerHTML = eng.player.hand.map((c, idx) => {
-      const isSelected = eng.selectedHandIdx === idx;
-      const canDeploy = !eng.over && openLane >= 0;
-      const facLabel = FACTIONS[c.fac]?.name || c.fac;
-      const isM = c.gender === "Male";
-      const r2 = c.row2Effect || {};
-      const r2Color = r2.crPenaltyPct ? "#fda4af" : (r2.tier === "tamarite" ? "#fde68a" : "#fbcfe8");
-      return `
-        <button class="hand-card ${canDeploy ? "playable" : "unaffordable"} ${isSelected ? "selected" : ""} ${c.isHybrid || c.isToken ? "rarity-hybrid" : ""}"
-                data-hand-idx="${idx}"
-                data-inspect-side="player" data-inspect-zone="hand" data-inspect-idx="${idx}"
-                title="H1: ${ESC(c.row1Effect?.desc || "")} | H2: ${ESC(r2.desc || "")}">
-          <span class="card-cr-pill">CR ${c.cr}</span>
-          ${c.isToken ? `<span class="token-pill">🪙 TOKEN</span>` : ""}
-          <img class="hand-card-thumb" src="${getCardPortrait(c)}" alt="${ESC(c.name)}" />
-          <div style="display:flex;align-items:center;gap:4px;margin-top:3px;min-width:0;">
-            <span class="gender-pill ${isM ? "male" : "female"}">${isM ? "♂" : "♀"}</span>
-            <span style="font-weight:800;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ESC(c.name)}</span>
-          </div>
-          <div style="font-size:9.5px;color:#cbd5e1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ESC(c.species)} • ${ESC(facLabel)}</div>
-          <div style="font-size:9px;color:#7dd3fc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">⚔️ H1: ${ESC(c.row1Effect?.tag || "")}</div>
-          <div style="font-size:9px;color:${r2Color};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">🧬 H2: ${ESC(r2.tag || `+${r2.crAura || 60} CR`)}</div>
-        </button>
-      `;
-    }).join("");
+    const canDeploy = !eng.over && openLane >= 0;
+    handEl.innerHTML = eng.player.hand.map((c, idx) => this.renderTCGCardHTML(c, {
+      playable: canDeploy,
+      selected: eng.selectedHandIdx === idx,
+      attrs: `data-hand-idx="${idx}" data-inspect-side="player" data-inspect-zone="hand" data-inspect-idx="${idx}"`
+    })).join("");
 
     handEl.querySelectorAll("[data-hand-idx]").forEach((btn) => {
       btn.addEventListener("click", () => {
@@ -1705,24 +1823,12 @@ class Cycle12App {
     });
 
     const poolEl = document.getElementById("deck-pool-grid");
-    poolEl.innerHTML = factionPool.map((c) => {
-      const isM = c.gender === "Male";
-      const r2 = c.row2Effect || {};
-      return `
-        <button class="hand-card playable ${c.isHybrid ? "rarity-hybrid" : ""}" style="width:auto;min-width:0;" data-add-card="${ESC(c.id)}"
-                title="H1: ${ESC(c.row1Effect?.desc || "")} | H2: ${ESC(r2.desc || "")}">
-          <span class="card-cr-pill">CR ${c.cr}</span>
-          <img class="hand-card-thumb" src="${getCardPortrait(c)}" alt="${ESC(c.name)}" loading="lazy" />
-          <div style="display:flex;align-items:center;gap:4px;margin-top:4px;min-width:0;">
-            <span class="gender-pill ${isM ? "male" : "female"}">${isM ? "♂" : "♀"}</span>
-            <span style="font-weight:800;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ESC(c.name)}</span>
-          </div>
-          <div class="muted" style="font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ESC(c.species)} • ${ESC(facName)}</div>
-          <div style="font-size:9.5px;color:#7dd3fc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">⚔️ H1: ${ESC(c.row1Effect?.tag || "")}</div>
-          <div style="font-size:9.5px;color:${r2.crPenaltyPct ? "#fda4af" : "#fbcfe8"};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">🧬 H2: ${ESC(r2.tag || `+${r2.crAura || 60} CR`)}</div>
-        </button>
-      `;
-    }).join("");
+    poolEl.innerHTML = factionPool.map((c) => this.renderTCGCardHTML(c, {
+      playable: true,
+      lazy: true,
+      style: "width:auto;min-width:0;",
+      attrs: `data-add-card="${ESC(c.id)}"`
+    })).join("");
 
     poolEl.querySelectorAll("[data-add-card]").forEach((b) => {
       b.addEventListener("click", () => {

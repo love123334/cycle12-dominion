@@ -114,7 +114,8 @@ export class GameState {
         meralina: 15,
         ovalina: 10
       },
-      history: [] // { speaker, text, chapter }
+      history: [], // { kind, speaker, text, chapter, cycle }
+      aiMemory: [] // Long-term plot & AI story continuity beats
     };
 
     this.stats = {
@@ -622,6 +623,42 @@ export class GameState {
     return true;
   }
 
+  recordStoryBeat({ kind = "node", chapterId = "", chapter = "", speaker = "", text = "", choiceLabel = "" } = {}) {
+    if (!this.vn) return;
+    if (!Array.isArray(this.vn.history)) this.vn.history = [];
+    const cleanText = String(text || "").trim();
+    const last = this.vn.history[this.vn.history.length - 1];
+    if (last && last.kind === kind && last.speaker === speaker && last.text === cleanText && last.choiceLabel === choiceLabel) {
+      return;
+    }
+    this.vn.history.push({
+      kind,
+      chapterId,
+      chapter,
+      speaker,
+      choiceLabel,
+      text: cleanText,
+      cycle: `${this.cycleMajor}.${this.cycleMinor}`
+    });
+    if (this.vn.history.length > 90) {
+      this.vn.history = this.vn.history.slice(-90);
+    }
+  }
+
+  recordAIMemory(note, tag = "") {
+    if (!this.vn || !note) return;
+    if (!Array.isArray(this.vn.aiMemory)) this.vn.aiMemory = [];
+    const clean = String(note).replace(/\s+/g, " ").trim();
+    if (!clean) return;
+    const prefix = tag ? `[${tag}] ` : `[C${this.cycleMajor}.${this.cycleMinor}] `;
+    const line = `${prefix}${clean}`;
+    if (this.vn.aiMemory[this.vn.aiMemory.length - 1] === line) return;
+    this.vn.aiMemory.push(line);
+    if (this.vn.aiMemory.length > 28) {
+      this.vn.aiMemory = this.vn.aiMemory.slice(-28);
+    }
+  }
+
   // --- SAVE / LOAD MULTI-SLOT ---
   serialize() {
     return JSON.stringify({
@@ -686,7 +723,20 @@ export class GameState {
       this.customDeck = validated.length >= 6
         ? validated
         : buildFactionDeck(this.protagonistId, this.hybrids);
-      if (data.vn) this.vn = data.vn;
+      if (data.vn) {
+        this.vn = {
+          currentChapterId: "ch0_origin",
+          currentNodeId: "start",
+          completedChapters: [],
+          flags: {},
+          affinity: {},
+          history: [],
+          aiMemory: [],
+          ...data.vn
+        };
+        if (!Array.isArray(this.vn.history)) this.vn.history = [];
+        if (!Array.isArray(this.vn.aiMemory)) this.vn.aiMemory = [];
+      }
       this.stats = { battlesWon: 0, superweaponsFired: 0, reconOps: 0, hybridsCreated: 0, gauntletMax: 0, cutscenesWatched: 0, ...(data.stats || {}) };
       if (Array.isArray(data.unlockedAchievements)) this.unlockedAchievements = data.unlockedAchievements;
       if (data.eventLog) this.eventLog = data.eventLog;

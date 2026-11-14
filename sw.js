@@ -1,4 +1,4 @@
-const CACHE_NAME = "cycle12-dominion-v8.0";
+const CACHE_NAME = "cycle12-dominion-v8.5";
 
 const PRECACHE_ASSETS = [
   "./",
