@@ -1,7 +1,7 @@
 // ============================================================================
-// CYCLE 12: AGE OF DOMINION — MAIN APPLICATION CONTROLLER (v5.0)
-// Tactical Card Game + Free Protagonist POV (72+Hybrids) + Cosmic Cutscenes +
-// 11-Chapter Branching VN + 3D Galaxy Conquest + Sci-Fi Genetics Breeding Lab
+// CYCLE 12: AGE OF DOMINION — MAIN APPLICATION CONTROLLER (v9.0)
+// Tactical 3-Row Card Game (In-Battle Row 2→Row 1 Breeding & Conditionals) +
+// Free Protagonist POV (72+Characters) + 11-Chapter VN + 3D Galaxy Conquest
 // ============================================================================
 
 import { META, FACTIONS, PLAYABLE, SUPERWEAPONS, SPECIES, TIMELINE } from "./data/lore.js";
@@ -19,7 +19,6 @@ import {
 import { buildHistoryCutscenes } from "./data/cutscenes.js";
 import { GameState, ACHIEVEMENTS } from "./game/state.js";
 import { CardBattleEngine } from "./game/card_engine.js";
-import { CATALYSTS, previewBreeding, executeBreeding, resolveGeneticSubject } from "./game/breeding.js";
 import {
   detectAIStatus,
   getStoredAIKeys,
@@ -44,6 +43,7 @@ class Cycle12App {
 
     this.currentMode = "vn";
     this.duelTab = "skirmish"; // 'skirmish' | 'gauntlet' | 'deck'
+    this.deckFilter = "all"; // 'all' | 'male' | 'female' | 'cond'
     this.codexTab = "roster";  // 'roster' | 'cutscenes' | 'diplomacy' | 'events' | 'achievements' | 'species' | 'relations' | 'system'
 
     this.selectedSectorId = "sylvalon";
@@ -92,7 +92,6 @@ class Cycle12App {
     this.initVNUI();
     this.initDuelUI();
     this.initGalaxyUI();
-    this.initBreedingUI();
     this.initCodexUI();
 
     this.engine.updateSectorColors(this.game);
@@ -161,6 +160,10 @@ class Cycle12App {
     });
   }
 
+  resolveCharacterSubject(id) {
+    return (this.game.hybrids || []).find((h) => h.id === id) || CHAR_BY_ID[id] || CHAR_BY_ID.arisia;
+  }
+
   switchMode(mode) {
     this.currentMode = mode;
 
@@ -168,7 +171,7 @@ class Cycle12App {
       b.classList.toggle("active", b.dataset.mode === mode);
     });
 
-    ["vn", "duel", "galaxy", "breeding", "codex"].forEach((m) => {
+    ["vn", "duel", "galaxy", "codex"].forEach((m) => {
       const panel = document.getElementById(`panel-${m}`);
       if (panel) panel.classList.toggle("hidden", m !== mode);
     });
@@ -202,10 +205,6 @@ class Cycle12App {
       this.renderGalaxyFactionBox();
       this.renderSectorList();
       this.renderSectorDetails();
-    } else if (mode === "breeding") {
-      this.refreshBreedingDropdowns();
-      this.renderBreedingPreview();
-      this.renderBreedingHybrids();
     } else if (mode === "codex") {
       this.renderCodexTab();
     }
@@ -784,15 +783,19 @@ class Cycle12App {
       if (isEncounter) {
         if (script.id.startsWith("enc_")) {
           const cid = script.id.slice(4);
-          const breedBtn = document.createElement("button");
-          breedBtn.className = "vn-choice-btn";
-          breedBtn.innerHTML = `<div>🧬 Đưa ${ESC(this.resolveActorName(cid))} vào Phòng Lab Lai Tạo Gen</div><span class="choice-hint">Tạo Hậu Duệ Hybrid mới cho Bộ Bài của bạn</span>`;
-          breedBtn.addEventListener("click", (e) => {
+          const duelBtn = document.createElement("button");
+          duelBtn.className = "vn-choice-btn";
+          duelBtn.innerHTML = `<div>🃏 Thách Đấu &amp; Lai Hàng 2 với ${ESC(this.resolveActorName(cid))}</div><span class="choice-hint">Đấu Thẻ Bài 3 Hàng (Nam thắng Nữ → vào Hàng 2 sinh Token lên Hàng 1)</span>`;
+          duelBtn.addEventListener("click", (e) => {
             e.stopPropagation();
             SFX.choice();
-            this.openBreedingWith(cid);
+            this.pendingStoryBattle = null;
+            this.pendingInvasionSectorId = null;
+            this.switchMode("duel");
+            this.setDuelTab("skirmish");
+            this.startCardMatch({ kind: "skirmish", enemyId: cid, modeLabel: `🃏 Giao Đấu vs ${this.resolveActorName(cid)}` });
           });
-          choicesEl.appendChild(breedBtn);
+          choicesEl.appendChild(duelBtn);
         }
 
         const backBtn = document.createElement("button");
@@ -1178,11 +1181,6 @@ class Cycle12App {
       return;
     }
 
-    if (choice.breedTargetId) {
-      this.openBreedingWith(choice.breedTargetId);
-      return;
-    }
-
     if (choice.next && script.nodes[choice.next]) {
       this.game.vn.currentNodeId = choice.next;
       this.game.saveToSlot("auto");
@@ -1234,9 +1232,17 @@ class Cycle12App {
       }
       if (res.newTokens && res.newTokens.length) {
         SFX.breed();
+        res.newTokens.forEach((tok) => this.game.recordTokenBred(tok));
+        this.game.saveToSlot("auto");
+        this.checkAndToastAchievements();
+        const tokenNotes = res.newTokens.map((t) =>
+          t.spawnedZone === "row1_boost"
+            ? `${t.boostedAllyName} +${t.boostAmount} CR (H1 đầy)`
+            : `${t.name} (CR ${t.cr}) → Hàng 1 Làn ${(t.spawnedLane ?? 0) + 1}`
+        );
         this.showToast(
-          "🧬 Lai Tạo Cuối Lượt!",
-          `${res.newTokens.map((t) => `${t.name} (CR ${t.cr})`).join(", ")} vừa xuất hiện ngay sau lượt!`
+          "🧬 Hàng 2 Sinh Token Lên Hàng 1!",
+          `${tokenNotes.join(" • ")} • Đã thỏa ĐK hiệu ứng H1/H2!`
         );
       } else {
         SFX.cardHit();
@@ -1252,6 +1258,15 @@ class Cycle12App {
       this.renderDeckBuilder();
       const protag = this.game.getProtagonist();
       this.showToast("✨ Đã xếp Bộ Bài Phe", `16 lá thuộc phe ${this.game.facName(protag.fac)} theo Thủ lĩnh ${protag.name}.`);
+    });
+
+    document.querySelectorAll("#deck-filter-pills [data-dfilter]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        SFX.click();
+        this.deckFilter = btn.dataset.dfilter || "all";
+        document.querySelectorAll("#deck-filter-pills [data-dfilter]").forEach((b) => b.classList.toggle("active", b === btn));
+        this.renderDeckBuilder();
+      });
     });
 
     document.getElementById("deck-search-input").addEventListener("input", () => this.renderDeckBuilder());
@@ -1369,17 +1384,28 @@ class Cycle12App {
     const accent = FACTIONS[c.fac]?.color || "#38bdf8";
     const facShort = FACTIONS[c.fac]?.short || FACTIONS[c.fac]?.name || c.fac;
     const isM = c.gender === "Male";
+    const r1 = c.row1Effect || {};
     const r2 = c.row2Effect || {};
     const rarity = this.getCardRarityClass(c);
+    const condLit = Boolean(opts.condMet);
     const h2Mod = r2.crPenaltyPct ? "debuff" : (r2.tier === "tamarite" ? "tamarite" : "");
-    const extraCls = [opts.className || "hand-card", rarity, opts.selected ? "selected" : "", opts.playable === false ? "unaffordable" : "playable"]
-      .filter(Boolean).join(" ");
+    const extraCls = [
+      opts.className || "hand-card",
+      rarity,
+      opts.selected ? "selected" : "",
+      opts.playable === false ? "unaffordable" : "playable",
+      condLit ? "cond-lit" : ""
+    ].filter(Boolean).join(" ");
     const attrs = opts.attrs || "";
     const customStyle = `--card-accent:${accent};${opts.style || ""}`;
-    const titleStr = opts.title || `H1: ${c.row1Effect?.desc || ""} | H2: ${r2.desc || ""}`;
-    const badgeTop = c.isToken
-      ? `<span class="token-pill">🪙 TOKEN</span>`
-      : (c.isHybrid ? `<span class="token-pill hybrid">✦ LAI</span>` : "");
+    const titleStr = opts.title || `H1: ${r1.desc || ""} | H2: ${r2.desc || ""}`;
+    const badgeTop = c.fromRow2Breeding
+      ? `<span class="token-pill row2-spawn">🧬 H2→H1</span>`
+      : (c.isToken
+        ? `<span class="token-pill">🪙 TOKEN</span>`
+        : (condLit
+          ? `<span class="cond-pill active">✅ ĐK H1</span>`
+          : (c.isHybrid ? `<span class="token-pill hybrid">✦ LAI</span>` : "")));
 
     return `
       <button class="${extraCls}" style="${customStyle}" ${attrs} title="${ESC(titleStr)}">
@@ -1398,7 +1424,7 @@ class Cycle12App {
           </div>
         </div>
         <div class="card-effects-mini">
-          <div class="eff-line h1"><span>⚔️</span><span>${ESC(c.row1Effect?.tag || "Trực chiến")}</span></div>
+          <div class="eff-line h1 ${condLit ? "cond-active" : ""}"><span>${condLit ? "✅" : "⚔️"}</span><span>${ESC(r1.tag || "Trực chiến")}</span></div>
           <div class="eff-line h2 ${h2Mod}"><span>🧬</span><span>${ESC(r2.tag || `+${r2.crAura || 60} CR`)}</span></div>
         </div>
       </button>
@@ -1417,10 +1443,30 @@ class Cycle12App {
     const accent = FACTIONS[card.fac]?.color || "#38bdf8";
     const facLabel = FACTIONS[card.fac]?.name || card.fac;
     const crStr = evalCR ? `Tổng CR ${evalCR.total} (Gốc ${card.cr})` : `CR ${card.cr}`;
+    const r1 = card.row1Effect || {};
     const r2 = card.row2Effect || {};
-    const penWarn = r2.crPenaltyPct ? ` • <span style="color:#fda4af;">Debuff -${r2.crPenaltyPct}% CR Token</span>` : "";
+    const eng = this.duelEngine;
+    const pCtx = eng ? eng.getSideBreedingContext("player") : null;
+    const condActiveList = evalCR?.triggeredConditionals?.length
+      ? evalCR.triggeredConditionals
+      : (eng && r1.condType && eng.isConditionMet(card, null, "player") ? [`✅ ĐK H1 Sẵn Sàng (+${r1.condBonus || 0} CR)`] : []);
+    const condHtml = condActiveList.length
+      ? `<span class="badge" style="color:#6ee7b7;border-color:rgba(52,211,153,0.65);">${condActiveList.map((x) => ESC(x)).join(" • ")}</span>`
+      : (r1.condType ? `<span class="badge" style="color:#94a3b8;">⏳ Cần Hàng 2 Lai / Token Hàng 1</span>` : "");
+
+    const dickCancelsDebuff = card.debuffCanceledByDick || (pCtx?.hasDick && r2.crPenaltyPct);
+    const penWarn = r2.crPenaltyPct
+      ? (dickCancelsDebuff
+        ? ` • <span style="color:#6ee7b7;">✅ Dick đã hóa giải Debuff -${r2.crPenaltyPct}% CR!</span>`
+        : ` • <span style="color:#fda4af;">Debuff -${r2.crPenaltyPct}% CR Token</span>`)
+      : "";
+    const symNote = r2.symbiosisR2Boost ? ` • <span style="color:#c084fc;">✨ +${r2.symbiosisR2Boost}% cho mọi Buồng Lai H2</span>` : "";
+    const dblActive = r2.doubleIfTokenBred && pCtx && (pCtx.hasRow1Token || pCtx.totalTokensBred > 0);
+    const dblNote = r2.doubleIfTokenBred
+      ? (dblActive ? ` • <span style="color:#fde047;">✅ ×2 Aura H2 (+${(r2.crAura || 40) * 2} CR)</span>` : ` • <span class="muted">×2 Aura khi có Token H1</span>`)
+      : "";
     const sireLine = card.breedingActive && card.sireCard
-      ? ` • <span style="color:#f472b6;">Đang lai cùng ♂ ${ESC(card.sireCard.name)} (${this.duelEngine?.getEffectiveBreedChance(card) || r2.breedChance || 50}%/lượt, đã sinh ${card.spawnCount || 0})</span>`
+      ? ` • <span style="color:#f472b6;">Đang lai cùng ♂ ${ESC(card.sireCard.name)} (${eng?.getEffectiveBreedChance(card) || r2.breedChance || 50}%/lượt → Token lên Hàng 1, đã sinh ${card.spawnCount || 0})</span>`
       : "";
     bar.innerHTML = `
       <div class="inspector-card-thumb ${this.getCardRarityClass(card)}" style="--card-accent:${accent};">
@@ -1433,10 +1479,11 @@ class Cycle12App {
           <span class="gender-pill ${isM ? "male" : "female"}">${isM ? "♂ Nam" : "♀ Nữ"}</span>
           <span class="inspector-cr-text">⚔️ ${crStr}</span>
           <span class="muted">${ESC(card.species)} • ${ESC(facLabel)}</span>
-          ${card.isToken ? `<span class="badge" style="color:#f472b6;border-color:rgba(244,114,182,0.5);">🪙 TOKEN LAI</span>` : ""}
+          ${card.fromRow2Breeding ? `<span class="badge" style="color:#a7f3d0;border-color:rgba(52,211,153,0.6);">🧬 TOKEN TỪ HÀNG 2</span>` : (card.isToken ? `<span class="badge" style="color:#f472b6;border-color:rgba(244,114,182,0.5);">🪙 TOKEN LAI</span>` : "")}
+          ${condHtml}
         </div>
-        <div class="inspector-eff h1">⚔️ <strong>H1:</strong> ${ESC(card.row1Effect?.desc || "Đánh trực tiếp theo tổng CR")}</div>
-        <div class="inspector-eff h2">🧬 <strong>H2:</strong> ${ESC(r2.desc || "Hỗ trợ +60 CR")}${penWarn}${sireLine}</div>
+        <div class="inspector-eff h1">⚔️ <strong>H1:</strong> ${ESC(r1.desc || "Đánh trực tiếp theo tổng CR")}</div>
+        <div class="inspector-eff h2">🧬 <strong>H2:</strong> ${ESC(r2.desc || "Hỗ trợ +60 CR")}${penWarn}${symNote}${dblNote}${sireLine}</div>
       </div>
     `;
   }
@@ -1484,19 +1531,45 @@ class Cycle12App {
     const lastLog = eng.log[eng.log.length - 1];
     document.getElementById("duel-log-latest").textContent = lastLog || "";
 
-    // Row 2 Captives & Automatic Male×Female Breeding Zones
+    // Live Breeding & Conditional Synergy Bar
+    const pCtx = eng.getSideBreedingContext("player");
+    const eCtx = eng.getSideBreedingContext("enemy");
+    const synBar = document.getElementById("duel-synergy-bar");
+    if (synBar) {
+      const pLitCount = eng.player.row1.filter((u, idx) => u && eng.evalCardCombatCR(u, eng.enemy.row1[idx], "player", { laneIdx: idx }).triggeredConditionals.length > 0).length
+        + (eng.player.row2.filter((c) => c.row2Effect?.doubleIfTokenBred && (pCtx.hasRow1Token || pCtx.totalTokensBred > 0)).length);
+      synBar.classList.remove("hidden");
+      synBar.innerHTML = `
+        <span class="synergy-pill ${pCtx.activeBreedCount > 0 ? "breed" : ""}">🔥 Buồng Lai H2: ${pCtx.activeBreedCount}/3</span>
+        <span class="synergy-pill ${pCtx.row1TokenCount > 0 || pCtx.totalTokensBred > 0 ? "lit" : ""}">🧬 Token H1: ${pCtx.row1TokenCount} (Tổng sinh: ${pCtx.totalTokensBred})</span>
+        <span class="synergy-pill ${pLitCount > 0 ? "lit" : ""}">⚡ ĐK Đã Kích Hoạt: ${pLitCount}</span>
+        ${pCtx.r2SymbiosisBonus > 0 ? `<span class="synergy-pill breed">✨ Cộng Sinh H2: +${pCtx.r2SymbiosisBonus}%</span>` : ""}
+        ${pCtx.hasDick ? `<span class="synergy-pill lit">💖 Dick: Phá Debuff Human</span>` : ""}
+        ${eCtx.row1TokenCount > 0 ? `<span class="synergy-pill">👁️ Token Địch H1: ${eCtx.row1TokenCount}</span>` : ""}
+      `;
+    }
+
+    // Row 2 Captives & Automatic Male×Female Breeding Zones (spawn Token -> Row 1)
     const renderRow2Chips = (sideKey, list, emptyMsg, isEnemy) => {
       if (!list.length) return `<span class="muted" style="font-size:11px;">${emptyMsg}</span>`;
+      const sCtx = eng.getSideBreedingContext(sideKey);
       return list.map((c, idx) => {
         const isBreeding = Boolean(c.breedingActive);
-        const effPct = isBreeding ? eng.getEffectiveBreedChance(c) : 0;
+        const effPct = isBreeding ? eng.getEffectiveBreedChance(c, sideKey) : 0;
         const r2 = c.row2Effect || {};
-        const penBadge = r2.crPenaltyPct ? ` • <span style="color:#fda4af;">-${r2.crPenaltyPct}% CR</span>` : "";
+        const dblLit = Boolean(r2.doubleIfTokenBred && (sCtx.hasRow1Token || sCtx.totalTokensBred > 0));
+        const symLit = Boolean(r2.symbiosisR2Boost && isBreeding);
+        const effAura = (r2.crAura || 40) * (dblLit ? 2 : 1);
+        const penBadge = r2.crPenaltyPct
+          ? (sCtx.hasDick ? ` • <span style="color:#6ee7b7;">Dick Xóa -${r2.crPenaltyPct}%</span>` : ` • <span style="color:#fda4af;">-${r2.crPenaltyPct}% CR</span>`)
+          : "";
+        const symBadge = r2.symbiosisR2Boost ? ` • <span style="color:#e9d5ff;">+${r2.symbiosisR2Boost}% H2</span>` : "";
+        const dblBadge = dblLit ? ` <span style="color:#fde047;">[✅ ×2: +${effAura} CR]</span>` : "";
         const subText = isBreeding
-          ? `🔥 Lai ${effPct}%/lượt (♂ ${ESC(c.sireCard?.name || "Nam")}) • 🪙x${c.spawnCount || 0}${penBadge}`
-          : `🔒 Tù binh • H2: +${r2.crAura || 60} CR (${ESC(r2.tag || "")})`;
+          ? `🔥 Lai ${effPct}%→H1 (♂ ${ESC(c.sireCard?.name || "Nam")}) • 🪙x${c.spawnCount || 0}${penBadge}${symBadge}${dblBadge}`
+          : `🔒 Tù binh • H2: +${effAura} CR (${ESC(r2.tag || "")})${dblBadge}`;
         return `
-          <div class="row2-captive-chip ${isBreeding ? "breeding-chamber" : ""}"
+          <div class="row2-captive-chip ${isBreeding ? "breeding-chamber" : ""} ${(dblLit || symLit) ? "cond-lit" : ""}"
                data-inspect-side="${sideKey}" data-inspect-zone="row2" data-inspect-idx="${idx}"
                title="${ESC(r2.desc || "")}">
             <img src="${getCardPortrait(c)}" alt="${ESC(c.name)}" />
@@ -1515,9 +1588,9 @@ class Cycle12App {
     const eRow2El = document.getElementById("duel-e-row2");
     eRow2El.innerHTML = renderRow2Chips("enemy", eng.enemy.row2, "Chưa bắt được thẻ nào (Địch bắt 3 lá = Bạn thua!)", true);
 
-    document.getElementById("duel-p-row2-aura").textContent = `Hỗ trợ Hàng 1: +${eng.getRow2SupportAura("player")} CR`;
+    document.getElementById("duel-p-row2-aura").textContent = `Hỗ trợ H1 & Sinh Token→H1: +${eng.getRow2SupportAura("player")} CR`;
     const pRow2El = document.getElementById("duel-p-row2");
-    pRow2El.innerHTML = renderRow2Chips("player", eng.player.row2, "Trống — Thẻ Nam thắng thẻ Nữ sẽ đưa vào đây lai tự động mỗi cuối lượt!", false);
+    pRow2El.innerHTML = renderRow2Chips("player", eng.player.row2, "Trống — Thẻ Nam thắng Nữ sẽ đưa vào đây lai & sinh Token lên HÀNG 1!", false);
 
     // Marvel Snap 3 Cosmic Lane Locations + Live Power Comparison
     const lanesEl = document.getElementById("duel-lanes-bar");
@@ -1553,18 +1626,22 @@ class Cycle12App {
       const isM = u.gender === "Male";
       const accent = FACTIONS[u.fac]?.color || "#ef4444";
       const facShort = FACTIONS[u.fac]?.short || u.fac;
+      const condLit = evalCR.triggeredConditionals && evalCR.triggeredConditionals.length > 0;
       const breedRisk = (pOpp && pOpp.gender === "Male" && !isM && evalCR.total < (pOpp ? eng.evalCardCombatCR(pOpp, u, "player", { laneIdx: i }).total : 0))
         ? `<span class="matchup-tag breed-target">💘 Bắt &amp; Lai</span>`
         : "";
+      const tokBadge = u.fromRow2Breeding
+        ? `<span class="token-pill row2-spawn">🧬 TỪ H2</span>`
+        : (u.isToken ? `<span class="token-pill">🪙 TOKEN</span>` : "");
       return `
         <div class="board-slot">
-          <div class="tcg-unit-card enemy-unit ${this.getCardRarityClass(u)} ${u.isToken ? "is-token" : ""}"
+          <div class="tcg-unit-card enemy-unit ${this.getCardRarityClass(u)} ${u.isToken ? "is-token" : ""} ${condLit ? "cond-lit" : ""}"
                style="--card-accent:${accent};"
                data-inspect-side="enemy" data-inspect-zone="row1" data-inspect-idx="${i}"
                title="${ESC(u.row1Effect?.desc || "")}">
             <span class="card-foil-sweep"></span>
             <span class="card-cr-gem">${evalCR.total}</span>
-            ${u.isToken ? `<span class="token-pill">🪙 TOKEN</span>` : ""}
+            ${tokBadge}
             <div class="unit-thumb-frame">
               <img src="${getCardPortrait(u)}" alt="${ESC(u.name)}" />
             </div>
@@ -1575,7 +1652,7 @@ class Cycle12App {
               </div>
               <div class="unit-meta-line">${ESC(u.species)} • ${ESC(facShort)}</div>
               <div class="unit-cr-delta enemy">Gốc ${u.cr} → ${evalCR.total} ${breedRisk}</div>
-              <div class="unit-eff-tag">⚔️ ${ESC(u.row1Effect?.tag || "Trực chiến")}</div>
+              <div class="unit-eff-tag ${condLit ? "cond-active" : ""}">${condLit ? "✅ " : "⚔️ "}${ESC(u.row1Effect?.tag || "Trực chiến")}</div>
             </div>
           </div>
         </div>
@@ -1587,31 +1664,37 @@ class Cycle12App {
     const hasSelectedHand = eng.selectedHandIdx !== null && eng.player.hand[eng.selectedHandIdx];
     pRow1El.innerHTML = eng.player.row1.map((u, i) => {
       if (!u) {
+        const oppE = eng.enemy.row1[i];
+        const canHunt = hasSelectedHand && hasSelectedHand.gender === "Male" && oppE && oppE.gender === "Female";
         return `
           <button class="board-slot ${hasSelectedHand ? "droppable" : ""}" data-deploy-lane="${i}">
-            ${hasSelectedHand ? `📥 Đặt vào Làn ${i + 1}` : `Hàng 1 — Làn ${i + 1}`}
+            ${hasSelectedHand ? (canHunt ? `💘 Đặt ♂ Bắt Nữ Làn ${i + 1}` : `📥 Đặt vào Làn ${i + 1}`) : `Hàng 1 — Làn ${i + 1}`}
           </button>
         `;
       }
       const eOpp = eng.enemy.row1[i];
       const evalCR = eng.evalCardCombatCR(u, eOpp, "player", { laneIdx: i });
-      const canRecall = u.deployedTurn === eng.turn && !eng.over;
+      const canRecall = u.deployedTurn === eng.turn && !eng.over && !u.fromRow2Breeding;
       const isM = u.gender === "Male";
       const accent = FACTIONS[u.fac]?.color || "#38bdf8";
       const facShort = FACTIONS[u.fac]?.short || u.fac;
+      const condLit = evalCR.triggeredConditionals && evalCR.triggeredConditionals.length > 0;
       const dangerTag = (eOpp && eOpp.gender === "Male" && !isM && evalCR.total < eng.evalCardCombatCR(eOpp, u, "enemy", { laneIdx: i }).total)
         ? `<span class="matchup-tag danger">⚠️ Nguy cơ</span>`
-        : "";
+        : (u.tokenBoostCR ? `<span class="cond-pill active">+${u.tokenBoostCR} Token</span>` : "");
+      const tokBadge = u.fromRow2Breeding
+        ? `<span class="token-pill row2-spawn">🧬 TỪ H2</span>`
+        : (u.isToken ? `<span class="token-pill">🪙 TOKEN</span>` : "");
       return `
         <div class="board-slot">
-          <button class="tcg-unit-card ${this.getCardRarityClass(u)} ${canRecall ? "ready" : ""} ${u.isToken ? "is-token" : ""}"
+          <button class="tcg-unit-card ${this.getCardRarityClass(u)} ${canRecall ? "ready" : ""} ${u.isToken ? "is-token" : ""} ${condLit ? "cond-lit" : ""}"
                   style="--card-accent:${accent};"
                   data-recall-lane="${i}"
                   data-inspect-side="player" data-inspect-zone="row1" data-inspect-idx="${i}"
                   title="${canRecall ? "Bấm để thu hồi về tay trước khi Giao Chiến" : ESC(u.row1Effect?.desc || "")}">
             <span class="card-foil-sweep"></span>
             <span class="card-cr-gem">${evalCR.total}</span>
-            ${u.isToken ? `<span class="token-pill">🪙 TOKEN</span>` : ""}
+            ${tokBadge}
             <div class="unit-thumb-frame">
               <img src="${getCardPortrait(u)}" alt="${ESC(u.name)}" />
             </div>
@@ -1622,7 +1705,7 @@ class Cycle12App {
               </div>
               <div class="unit-meta-line">${ESC(u.species)} • ${ESC(facShort)}</div>
               <div class="unit-cr-delta player">Gốc ${u.cr} → ${evalCR.total} ${dangerTag}</div>
-              <div class="unit-eff-tag">${canRecall ? "↩️ Thu hồi • " : ""}⚔️ ${ESC(u.row1Effect?.tag || "Trực chiến")}</div>
+              <div class="unit-eff-tag ${condLit ? "cond-active" : ""}">${canRecall ? "↩️ Thu • " : ""}${condLit ? "✅ " : "⚔️ "}${ESC(u.row1Effect?.tag || "Trực chiến")}</div>
             </div>
           </button>
         </div>
@@ -1663,9 +1746,11 @@ class Cycle12App {
     const handEl = document.getElementById("duel-p-hand");
     const openLane = eng.player.row1.findIndex((s) => s === null);
     const canDeploy = !eng.over && openLane >= 0;
+    const previewOpp = openLane >= 0 ? eng.enemy.row1[openLane] : eng.enemy.row1[0];
     handEl.innerHTML = eng.player.hand.map((c, idx) => this.renderTCGCardHTML(c, {
       playable: canDeploy,
       selected: eng.selectedHandIdx === idx,
+      condMet: eng.isConditionMet(c, previewOpp, "player"),
       attrs: `data-hand-idx="${idx}" data-inspect-side="player" data-inspect-zone="hand" data-inspect-idx="${idx}"`
     })).join("");
 
@@ -1816,8 +1901,12 @@ class Cycle12App {
     });
 
     const q = (document.getElementById("deck-search-input")?.value || "").trim().toLowerCase();
+    const df = this.deckFilter || "all";
     const factionPool = getFactionCardPool(fac, hybrids).filter((c) => {
       if (c.id === protag.id) return false; // Leader is permanently seated on Row 3!
+      if (df === "male" && c.gender !== "Male") return false;
+      if (df === "female" && c.gender !== "Female") return false;
+      if (df === "cond" && !(c.row1Effect?.condType || c.row2Effect?.symbiosisR2Boost || c.row2Effect?.doubleIfTokenBred || c.row2Effect?.omniWomb || c.row2Effect?.tier === "tamarite")) return false;
       if (!q) return true;
       return `${c.name} ${c.species || ""} ${c.row1Effect?.desc || ""} ${c.row2Effect?.desc || ""}`.toLowerCase().includes(q);
     });
@@ -1826,6 +1915,7 @@ class Cycle12App {
     poolEl.innerHTML = factionPool.map((c) => this.renderTCGCardHTML(c, {
       playable: true,
       lazy: true,
+      condMet: Boolean(c.row1Effect?.condType),
       style: "width:auto;min-width:0;",
       attrs: `data-add-card="${ESC(c.id)}"`
     })).join("");
@@ -2199,172 +2289,7 @@ class Cycle12App {
   }
 
   // ==========================================================================
-  // MODE 4: GENETICS & BREEDING LAB (LAI TẠO GEN + THẺ HYBRID)
-  // ==========================================================================
-  initBreedingUI() {
-    document.querySelectorAll("[data-bsheet]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        SFX.click();
-        const mode = btn.dataset.bsheet;
-        document.querySelectorAll("[data-bsheet]").forEach(b => b.classList.toggle("active", b === btn));
-        document.getElementById("breeding-left-sidebar").classList.toggle("mobile-sheet-active", mode === "left");
-        document.getElementById("breeding-right-sidebar").classList.toggle("mobile-sheet-active", mode === "right");
-      });
-    });
-
-    const catSel = document.getElementById("breed-catalyst-select");
-    catSel.innerHTML = CATALYSTS.map((c) => `<option value="${c.id}">${ESC(c.name)} (${c.cost} Cr)</option>`).join("");
-
-    document.getElementById("breed-a-select").addEventListener("change", () => this.renderBreedingPreview());
-    document.getElementById("breed-b-select").addEventListener("change", () => this.renderBreedingPreview());
-    catSel.addEventListener("change", () => this.renderBreedingPreview());
-
-    document.getElementById("btn-execute-breed").addEventListener("click", () => {
-      const aId = document.getElementById("breed-a-select").value;
-      const bId = document.getElementById("breed-b-select").value;
-      const catId = catSel.value;
-      const res = executeBreeding(this.game, aId, bId, catId);
-      if (res.ok) {
-        SFX.breed();
-        this.engine.pulseBreedingHelix();
-        this.refreshTopResources();
-        this.refreshBreedingDropdowns();
-        this.renderBreedingPreview();
-        this.renderBreedingHybrids();
-        this.showToast("🧬 Hợp Nhất Gen Thành Công!", res.msg);
-        this.checkAndToastAchievements();
-      } else {
-        SFX.alert();
-        this.showToast("⚠️ Từ Chối Hợp Nhất", res.msg);
-      }
-    });
-
-    this.refreshBreedingDropdowns();
-    this.renderBreedingPreview();
-    this.renderBreedingHybrids();
-  }
-
-  openBreedingWith(charId) {
-    this.switchMode("breeding");
-    const subj = resolveGeneticSubject(charId, this.game.hybrids);
-    const aSel = document.getElementById("breed-a-select");
-    const bSel = document.getElementById("breed-b-select");
-    if (subj.gender === "Male" && bSel) bSel.value = charId;
-    else if (aSel) aSel.value = charId;
-    this.renderBreedingPreview();
-  }
-
-  refreshBreedingDropdowns() {
-    const aSel = document.getElementById("breed-a-select");
-    const bSel = document.getElementById("breed-b-select");
-    const prevA = aSel.value || "meralina";
-    const prevB = bSel.value || "ragnaroir";
-
-    const hybOpts = (this.game.hybrids || []).map((h) => ({ id: h.id, label: `🧬 ${h.name} (CR ${h.cr})`, gender: "Hybrid" }));
-    const femOpts = CHARACTERS.filter(c => c.gender === "Female").map(c => ({ id: c.id, label: `♀ ${c.name} (${c.species} • CR ${c.cr})` }));
-    const maleOpts = CHARACTERS.filter(c => c.gender === "Male").map(c => ({ id: c.id, label: `♂ ${c.name} (${c.species} • CR ${c.cr})` }));
-
-    aSel.innerHTML = [...hybOpts, ...femOpts, ...maleOpts].map(o => `<option value="${ESC(o.id)}">${ESC(o.label)}</option>`).join("");
-    bSel.innerHTML = [...maleOpts, ...hybOpts, ...femOpts].map(o => `<option value="${ESC(o.id)}">${ESC(o.label)}</option>`).join("");
-
-    aSel.value = (hybOpts.some(o => o.id === prevA) || CHAR_BY_ID[prevA]) ? prevA : "meralina";
-    bSel.value = (hybOpts.some(o => o.id === prevB) || CHAR_BY_ID[prevB]) ? prevB : "ragnaroir";
-  }
-
-  renderBreedingPreview() {
-    const aId = document.getElementById("breed-a-select")?.value || "meralina";
-    const bId = document.getElementById("breed-b-select")?.value || "ragnaroir";
-    const catId = document.getElementById("breed-catalyst-select")?.value || "None";
-    const prev = previewBreeding(aId, bId, catId, this.game.hybrids);
-
-    const box = document.getElementById("breed-preview-box");
-    box.innerHTML = `
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
-        <div style="display:flex;align-items:center;gap:8px;min-width:0;">
-          <img src="${this.resolvePortrait(prev.parentA.id)}" style="width:44px;height:52px;border-radius:8px;object-fit:cover;object-position:top center;" alt="" />
-          <div style="min-width:0;">
-            <strong style="color:#f472b6;">${ESC(prev.parentA.name)}</strong>
-            <div class="muted" style="font-size:10.5px;">CR ${prev.parentA.cr} • ${ESC(prev.parentA.species)}</div>
-          </div>
-        </div>
-        <strong style="color:var(--gold);font-size:18px;">×</strong>
-        <div style="display:flex;align-items:center;gap:8px;min-width:0;text-align:right;">
-          <div style="min-width:0;">
-            <strong style="color:#38bdf8;">${ESC(prev.parentB.name)}</strong>
-            <div class="muted" style="font-size:10.5px;">CR ${prev.parentB.cr} • ${ESC(prev.parentB.species)}</div>
-          </div>
-          <img src="${this.resolvePortrait(prev.parentB.id)}" style="width:44px;height:52px;border-radius:8px;object-fit:cover;object-position:top center;" alt="" />
-        </div>
-      </div>
-      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px;padding-top:4px;border-top:1px solid rgba(255,255,255,0.08);">
-        <span>Dự kiến CR: <strong style="color:#fde047;">${prev.estCrMin}–${prev.estCrMax}</strong></span>
-        <span>Đột biến trội: <strong style="color:#c084fc;">${prev.mutChance}%</strong></span>
-        <span>Phí: <strong>${prev.cost.toLocaleString()} Cr</strong></span>
-      </div>
-      ${prev.notes.length ? `<div style="display:flex;flex-direction:column;gap:4px;">${prev.notes.map(n => `<div class="muted" style="color:${prev.blocked ? "#fb7185" : "#cbd5e1"};">${ESC(n)}</div>`).join("")}</div>` : `<div class="muted">✅ Sẵn sàng đồng bộ chuỗi DNA tại Buồng Gen 3D!</div>`}
-    `;
-  }
-
-  renderBreedingHybrids() {
-    const list = document.getElementById("breed-hybrids-list");
-    const hybs = this.game.hybrids || [];
-    if (hybs.length === 0) {
-      list.innerHTML = `<div class="muted">Chưa có hậu duệ nào được tạo. Hãy chọn 2 cá thể bên trái và nhấn Kích Hoạt Hợp Nhất Gen!</div>`;
-      return;
-    }
-
-    list.innerHTML = hybs.map((h) => {
-      const inDeck = (this.game.customDeck || []).includes(h.id);
-      const isProtag = this.game.protagonistId === h.id;
-      return `
-        <div class="codex-card" style="border-color:rgba(244,114,182,0.45);">
-          <div style="display:flex;gap:10px;align-items:center;">
-            <img src="${getHybridPortraitUrl(h)}" style="width:52px;height:62px;border-radius:10px;object-fit:cover;" alt="${ESC(h.name)}" />
-            <div style="flex:1;min-width:0;">
-              <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
-                <strong style="color:#fbcfe8;">${ESC(h.name)}</strong>
-                <span class="badge" style="color:#fde047;">CR ${h.cr}</span>
-              </div>
-              <div class="muted" style="font-size:11px;">${ESC(h.parentsLabel)} • Chu kỳ ${ESC(h.createdCycle)}</div>
-              <div style="font-size:11px;color:#7dd3fc;">✨ ${ESC(h.signatureSkill)} ${h.mutated ? "• 🔥 ĐỘT BIẾN TRỘI" : ""}</div>
-            </div>
-          </div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;">
-            <button class="btn-glass btn-compact" data-hyb-deck="${ESC(h.id)}">${inDeck ? "✓ Đang trong Bộ Bài" : "🃏 Cho Vào Bộ Bài"}</button>
-            <button class="btn-gold btn-compact" data-hyb-protag="${ESC(h.id)}">${isProtag ? "⭐ Đang Làm Chủ Tướng" : "⭐ Chọn Làm Chủ Tướng"}</button>
-          </div>
-        </div>
-      `;
-    }).join("");
-
-    list.querySelectorAll("[data-hyb-deck]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const hid = btn.dataset.hybDeck;
-        if (!this.game.customDeck.includes(hid)) {
-          if (this.game.customDeck.length >= 16) this.game.customDeck[this.game.customDeck.length - 1] = hid;
-          else this.game.customDeck.push(hid);
-          this.game.saveToSlot("auto");
-          SFX.cardPlay();
-          this.renderBreedingHybrids();
-          this.showToast("🃏 Đã đưa Hậu Duệ vào Bộ Bài!", "Hậu duệ lai sẵn sàng ra sân trong chế độ Đấu Thẻ Bài.");
-        }
-      });
-    });
-
-    list.querySelectorAll("[data-hyb-protag]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const hid = btn.dataset.hybProtag;
-        SFX.choice();
-        this.game.selectProtagonist(hid, false);
-        this.refreshTopResources();
-        this.renderBreedingHybrids();
-        this.showToast("⭐ Chủ Tướng Mới!", "Hậu duệ lai đã trở thành Nhân Vật Chính dẫn dắt câu chuyện!");
-      });
-    });
-  }
-
-  // ==========================================================================
-  // MODE 5: UNIFIED 72-CHARACTER CARD ROSTER, CUTSCENES, DIPLOMACY & CODEX
+  // MODE 4: UNIFIED 72-CHARACTER CARD ROSTER, CUTSCENES, DIPLOMACY & CODEX
   // ==========================================================================
   initCodexUI() {
     document.querySelectorAll("[data-ctab]").forEach((btn) => {
@@ -2383,7 +2308,7 @@ class Cycle12App {
 
     if (t === "roster") {
       const all = [...(this.game.hybrids || []).map(h => ({ ...h, isHybrid: true })), ...CHARACTERS].sort((a, b) => b.cr - a.cr);
-      const selected = resolveGeneticSubject(this.inspectedRosterId, this.game.hybrids);
+      const selected = this.resolveCharacterSubject(this.inspectedRosterId);
       const card = resolveCard(selected.id, this.game.hybrids);
       const fac = FACTIONS[selected.fac] || FACTIONS.independent;
       const loc = selected.loc ? findLocation(selected.loc) : null;
@@ -2445,8 +2370,7 @@ class Cycle12App {
             <div style="display:flex;gap:8px;flex-wrap:wrap;">
               <button class="btn-gold" id="btn-roster-make-protag">⭐ Chọn Làm Nhân Vật Chính (Chơi Góc Nhìn NV Này)</button>
               <button class="btn-primary" id="btn-roster-talk">💬 Đối Thoại Tương Tác</button>
-              <button class="btn-accent" id="btn-roster-breed">🧬 Đưa Vào Lai Tạo Gen</button>
-              <button class="btn-glass" id="btn-roster-duel">🃏 Đấu Thử Thẻ Bài</button>
+              <button class="btn-glass" id="btn-roster-duel">🃏 Đấu Thử Thẻ Bài (Bắt &amp; Lai H2)</button>
             </div>
           </div>
         </div>
@@ -2526,10 +2450,6 @@ class Cycle12App {
       document.getElementById("btn-roster-talk")?.addEventListener("click", () => {
         SFX.click();
         this.startEncounter(selected.id);
-      });
-      document.getElementById("btn-roster-breed")?.addEventListener("click", () => {
-        SFX.click();
-        this.openBreedingWith(selected.id);
       });
       document.getElementById("btn-roster-duel")?.addEventListener("click", () => {
         SFX.alert();

@@ -103,7 +103,7 @@ export const CHAPTERS = [
         sector: "__PROTAGONIST_SECTOR__",
         leftChar: "__PROTAGONIST__", rightChar: "ovalina", leftMood: "happy", rightMood: "happy",
         speaker: "ovalina",
-        text: (g) => `"Tầm nhìn tuyệt vời đấy, ${g.getProtagonist().name}! Khi kết hợp tinh hoa huyết thống của 15 chủng tộc tại Phòng Lab Lai Tạo Gen, ngươi sẽ tạo ra những lá bài Hậu Duệ không ai cản nổi!"`,
+        text: (g) => `"Tầm nhìn tuyệt vời đấy, ${g.getProtagonist().name}! Khi kết hợp tinh hoa huyết thống của 15 chủng tộc thông qua Hàng 2 Sinh Sản trong Đấu Thẻ Bài, ngươi sẽ triệu hồi những Token Hậu Duệ không ai cản nổi lên Hàng 1!"`,
         end: {
           title: "KHỞI NGUYÊN HOÀN TẤT: KIẾN TRÚC SƯ HUYẾT THỐNG",
           summary: "+300 Nghiên cứu & +120 Ảnh hưởng • Sẵn sàng mở màn Chương I.",
@@ -1192,8 +1192,8 @@ export const CHAPTERS = [
         text: (g) => {
           const hybridsCount = g.hybrids?.length || 0;
           return hybridsCount > 0
-            ? `"Ta cảm nhận rõ ${hybridsCount} dòng gen lai thế hệ mới mà ngươi đã tạo! Năng lượng cộng hưởng giữa các chủng tộc là thứ duy nhất có thể áp chế bóng tối nơi Vực Thẳm này."`
-            : `"Khe nứt này hấp thụ mọi đòn pháo truyền thống! Chỉ có những dòng gen hợp nhất từ Phòng Lab Lai Tạo hoặc một trận quyết đấu chiến thuật cực hạn mới đẩy lùi được lũ Starro & Ravenous."`;
+            ? `"Ta cảm nhận rõ ${hybridsCount} dòng gen lai thế hệ mới mà ngươi đã đánh thức! Năng lượng cộng hưởng giữa các chủng tộc là thứ duy nhất có thể áp chế bóng tối nơi Vực Thẳm này."`
+            : `"Khe nứt này hấp thụ mọi đòn pháo truyền thống! Chỉ có những Token hợp nhất sinh sản từ Hàng 2 hoặc một trận quyết đấu chiến thuật cực hạn mới đẩy lùi được lũ Starro & Ravenous."`;
         },
         choices: [
           {
@@ -1623,8 +1623,8 @@ export function buildEncounterScene(charId, gameState) {
             next: "enc_deal"
           },
           {
-            label: `⚔️ Thách đấu Thẻ Bài giao hữu với ${c.name}!`,
-            hint: `Đấu Thẻ Bài: ${CHAR_BY_ID[playerCharId]?.name || "Tướng"} vs ${c.name} (CR ${c.cr})`,
+            label: `⚔️ Thách đấu Thẻ Bài (Bắt & Lai Hàng 2) với ${c.name}!`,
+            hint: `Đấu Thẻ Bài 3 Hàng: ${CHAR_BY_ID[playerCharId]?.name || "Tướng"} vs ${c.name} (CR ${c.cr})`,
             battle: {
               playerId: playerCharId,
               enemyId: c.id,
@@ -1632,12 +1632,6 @@ export function buildEncounterScene(charId, gameState) {
               winNext: "enc_duel_win",
               loseNext: "enc_duel_lose"
             }
-          },
-          {
-            label: `🧬 Mời ${c.name} tới Phòng Lab Lai Tạo Gen`,
-            hint: "Mở buồng hợp nhất huyết thống với nhân vật này làm Gen mục tiêu!",
-            breedTargetId: c.id,
-            next: "enc_breed"
           },
           {
             label: "↩️ Kết thúc cuộc trò chuyện",
@@ -1727,19 +1721,6 @@ export function buildEncounterScene(charId, gameState) {
         end: {
           title: "Kết Thúc Trận Giao Hữu",
           summary: "+5 Độ tin cậy qua giao chiến."
-        }
-      },
-      enc_breed: {
-        sector: sectorId,
-        leftChar: playerCharId,
-        rightChar: c.id,
-        leftMood: "happy",
-        rightMood: "smug",
-        speaker: c.id,
-        text: `Thử nghiệm hợp nhất gen sao? Dòng máu ${c.species} của ta chắc chắn sẽ tạo nên hậu duệ đột biến ấn tượng cho bộ bài của ngươi đấy!`,
-        end: {
-          title: `Đã Đưa ${c.name} Vào Phòng Lab Gen`,
-          summary: "Chuyển sang tab 🧬 Lai Tạo để chọn Gen ghép cặp & Xúc tác!"
         }
       },
       enc_bye: {

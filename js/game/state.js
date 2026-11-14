@@ -13,8 +13,8 @@ export const ACHIEVEMENTS = [
   { id: "first_blood",   title: "Chiến Thần Sàn Bài",      name: "Chiến Thần Sàn Bài",      desc: "Giành chiến thắng đầu tiên trong Chế Độ Đấu Thẻ Bài.",         rewardCr: 450,  rewardInf: 30,  check: (g) => (g.stats?.battlesWon || 0) >= 1 },
   { id: "gladiator_5",   title: "Bá Chủ Bộ Bài",           name: "Bá Chủ Bộ Bài",           desc: "Thắng 5 trận Đấu Thẻ Bài chiến thuật.",                       rewardCr: 1200, rewardInf: 80,  check: (g) => (g.stats?.battlesWon || 0) >= 5 },
   { id: "void_walker",   title: "Chinh Phục Tháp Hư Không", name: "Chinh Phục Tháp Hư Không", desc: "Vượt qua Tầng 3 trong chế độ sinh tồn Tháp Hư Không.",         rewardCr: 1500, rewardInf: 110, check: (g) => (g.stats?.gauntletMax || 0) >= 3 },
-  { id: "first_hybrid",  title: "Kiến Tạo Huyết Thống",    name: "Kiến Tạo Huyết Thống",    desc: "Lai tạo thành công hậu duệ Hybrid đầu tiên trong Phòng Lab.",   rewardCr: 750,  rewardInf: 55,  check: (g) => (g.stats?.hybridsCreated || 0) >= 1 },
-  { id: "gene_architect",title: "Bậc Thầy Di Truyền",     name: "Bậc Thầy Di Truyền",     desc: "Sở hữu ít nhất 3 hậu duệ Lai Tạo trong kho gia phả.",          rewardCr: 1800, rewardInf: 140, check: (g) => (g.hybrids?.length || 0) >= 3 },
+  { id: "first_hybrid",  title: "Lai Tạo Thực Chiến",      name: "Lai Tạo Thực Chiến",      desc: "Kích hoạt Hàng 2 sinh Token lên Hàng 1 trong Đấu Thẻ Bài.",       rewardCr: 750,  rewardInf: 55,  check: (g) => (g.stats?.hybridsCreated || 0) >= 1 },
+  { id: "gene_architect",title: "Bậc Thầy Huyết Thống",    name: "Bậc Thầy Huyết Thống",    desc: "Sinh ít nhất 3 Token / Hậu Duệ qua Hàng 2 trong Đấu Thẻ Bài.",   rewardCr: 1800, rewardInf: 140, check: (g) => (g.hybrids?.length || 0) >= 3 || (g.stats?.hybridsCreated || 0) >= 3 },
   { id: "lore_seeker",   title: "Người Xem Sử Thi",         name: "Người Xem Sử Thi",         desc: "Hoàn tất Cutscene Lịch Sử Vũ Trụ Gaiastra.",                  rewardCr: 400,  rewardInf: 45,  check: (g) => (g.stats?.cutscenesWatched || 0) >= 1 },
   { id: "gotterfall_fire",title:"Cơn Thịnh Nộ Vì Sao",     name: "Cơn Thịnh Nộ Vì Sao",     desc: "Khai hỏa một Siêu vũ khí chiến lược cấp hành tinh.",          rewardCr: 600,  rewardInf: 50,  check: (g) => (g.stats?.superweaponsFired || 0) >= 1 },
   { id: "shadow_intel",  title: "Tai Mắt Bóng Đêm",        name: "Tai Mắt Bóng Đêm",        desc: "Thực hiện 2 chiến dịch Tình báo & Phá hoại thành công.",       rewardCr: 450,  rewardInf: 60,  check: (g) => (g.stats?.reconOps || 0) >= 2 },
@@ -657,6 +657,35 @@ export class GameState {
     if (this.vn.aiMemory.length > 28) {
       this.vn.aiMemory = this.vn.aiMemory.slice(-28);
     }
+  }
+
+  recordTokenBred(tok) {
+    if (!this.stats) this.stats = {};
+    this.stats.hybridsCreated = (this.stats.hybridsCreated || 0) + 1;
+    if (tok && tok.cr >= 300) {
+      if (!Array.isArray(this.hybrids)) this.hybrids = [];
+      const exist = this.hybrids.some((h) => h.name === tok.name && h.fac === tok.fac);
+      if (!exist) {
+        this.hybrids.push({
+          id: `hyb_duel_${this.stats.hybridsCreated}_${Date.now().toString(36)}`,
+          name: tok.name,
+          fac: tok.fac,
+          species: tok.species || "Token Lai",
+          race: tok.race || "hybrid",
+          gender: tok.gender || "Female",
+          cr: tok.cr,
+          h: tok.h || 1.85,
+          auraA: tok.auraA || "#38bdf8",
+          auraB: tok.auraB || "#f472b6",
+          mutated: Boolean(tok.mutated),
+          parentsLabel: tok.parentsLabel || "Hàng 2 Đấu Thẻ Bài",
+          createdCycle: `${this.cycleMajor}.${this.cycleMinor}`,
+          signatureSkill: tok.row1Effect?.tag || "Huyết Thống Thực Chiến"
+        });
+        if (this.hybrids.length > 24) this.hybrids.shift();
+      }
+    }
+    this.saveToSlot("auto");
   }
 
   // --- SAVE / LOAD MULTI-SLOT ---

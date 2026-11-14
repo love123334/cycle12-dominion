@@ -1,4 +1,4 @@
-const CACHE_NAME = "cycle12-dominion-v8.5";
+const CACHE_NAME = "cycle12-dominion-v9.0";
 
 const PRECACHE_ASSETS = [
   "./",
@@ -15,7 +15,6 @@ const PRECACHE_ASSETS = [
   "./js/data/cutscenes.js",
   "./js/game/state.js",
   "./js/game/card_engine.js",
-  "./js/game/breeding.js",
   "./js/game/ai_director.js",
   "./js/render/engine.js",
   "./js/render/portraits.js",

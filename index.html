@@ -38,7 +38,6 @@
       <button class="mode-tab-btn active" data-mode="vn">📖 Cốt Truyện</button>
       <button class="mode-tab-btn" data-mode="duel">🃏 Đấu Thẻ Bài</button>
       <button class="mode-tab-btn" data-mode="galaxy">🌌 Ngân Hà 3D</button>
-      <button class="mode-tab-btn" data-mode="breeding">🧬 Lai Tạo Gen</button>
       <button class="mode-tab-btn" data-mode="codex">👑 Nhân Vật & Hồ Sơ</button>
     </nav>
 
@@ -177,9 +176,11 @@
         <!-- CENTER RESOLVE & LOG BAR -->
         <div class="duel-mid-strip">
           <span class="badge" id="duel-turn-badge" style="color:var(--gold);">Lượt 1 • Rút +2/lượt</span>
-          <div id="duel-log-latest" class="duel-log-ticker">Chọn thẻ bài ở tay rồi đặt vào 1–3 làn (Nam thắng Nữ → đưa sang Hàng 2 &amp; tự lai cuối lượt + rút 2 lá)!</div>
+          <div id="duel-log-latest" class="duel-log-ticker">Chọn thẻ bài ở tay rồi đặt vào 1–3 làn (Nam thắng Nữ → đưa sang Hàng 2, sinh Token lên Hàng 1 &amp; kích hoạt điều kiện H1/H2 + rút 2 lá)!</div>
           <button class="btn-gold btn-compact" id="btn-resolve-clash">⚔️ Giao Chiến Chiều Dọc</button>
         </div>
+
+        <div id="duel-synergy-bar" class="duel-synergy-bar hidden"></div>
 
         <!-- PLAYER ROW 2: AUTO-BREEDING CHAMBERS & CAPTIVES -->
         <div class="duel-row2-bar player">
@@ -231,8 +232,14 @@
         <div id="deck-active-list" class="deck-active-strip"></div>
 
         <div class="deck-toolbar" style="margin-top:8px;">
-          <strong style="color:var(--primary);">📚 Kho Thẻ Thuộc Phe (Nhân Vật + Quân Dự Bị + Hậu Duệ Token Lai Tạo)</strong>
-          <input type="text" id="deck-search-input" placeholder="Tìm tên thẻ, loài, hiệu ứng Hàng 1/2..." style="max-width:250px;" />
+          <strong style="color:var(--primary);">📚 Kho Thẻ Thuộc Phe (Nhân Vật + Quân Dự Bị + Hậu Duệ Token)</strong>
+          <div class="deck-filter-bar" id="deck-filter-pills">
+            <button type="button" class="btn-glass btn-compact active" data-dfilter="all">Tất cả</button>
+            <button type="button" class="btn-glass btn-compact" data-dfilter="male">♂ Nam (Bắt Nữ)</button>
+            <button type="button" class="btn-glass btn-compact" data-dfilter="female">♀ Nữ (Vào H2)</button>
+            <button type="button" class="btn-glass btn-compact" data-dfilter="cond">⚡ ĐK H1/H2</button>
+            <input type="text" id="deck-search-input" placeholder="Tìm tên thẻ, loài, hiệu ứng..." style="max-width:210px;" />
+          </div>
         </div>
         <div id="deck-pool-grid" class="deck-pool-grid"></div>
       </div>
@@ -281,42 +288,7 @@
   </section>
 
   <!-- ========================================================================
-       MODE 4: 3D GENETICS & BREEDING LAB (LAI TẠO HUYẾT THỐNG & THẺ HYBRID)
-       ======================================================================== -->
-  <section id="panel-breeding" class="mode-panel hidden">
-    <div class="mobile-sheet-toggles mobile-only floating-insp-toggle">
-      <button class="btn-glass active" data-bsheet="left">🧬 Buồng Lai Tạo</button>
-      <button class="btn-glass" data-bsheet="right">📜 Hậu Duệ & Gia Phả</button>
-      <button class="btn-glass" data-bsheet="hide">👁️ Xem DNA 3D</button>
-    </div>
-
-    <aside class="hud-sidebar wide mobile-sheet-active" id="breeding-left-sidebar">
-      <div class="panel-section-title">🧬 Buồng Hợp Nhất Gen & Huyết Thống</div>
-      <label class="muted">Gen Chủ Đạo (A / Host — hỗ trợ cả Hậu Duệ Lai):</label>
-      <select id="breed-a-select"></select>
-
-      <label class="muted">Gen Đối Xứng (B / Sire):</label>
-      <select id="breed-b-select"></select>
-
-      <label class="muted">Xúc Tác Chủng Tộc (Catalyst):</label>
-      <select id="breed-catalyst-select"></select>
-
-      <div id="breed-preview-box" class="breed-preview-card"></div>
-
-      <button class="btn-accent" id="btn-execute-breed">🧬 Kích Hoạt Hợp Nhất Gen</button>
-      <div class="muted" style="font-size:11.5px;">
-        💡 Mỗi hậu duệ sinh ra được tự động đúc thành <strong>Thẻ Bài Hybrid</strong> để đưa thẳng vào Bộ Bài chiến đấu hoặc chọn làm Nhân Vật Chính!
-      </div>
-    </aside>
-
-    <aside class="hud-sidebar wide" id="breeding-right-sidebar">
-      <div class="panel-section-title">📜 Gia Phả Hậu Duệ & Thẻ Hybrid Đã Tạo</div>
-      <div id="breed-hybrids-list" class="roster-list"></div>
-    </aside>
-  </section>
-
-  <!-- ========================================================================
-       MODE 5: UNIFIED CHARACTER ROSTER (72+HYBRIDS), CUTSCENES & CODEX
+       MODE 4: UNIFIED CHARACTER ROSTER (72+HYBRIDS), CUTSCENES & CODEX
        ======================================================================== -->
   <section id="panel-codex" class="mode-panel hidden">
     <div class="codex-workspace">
@@ -339,7 +311,6 @@
     <button class="bottom-nav-btn active" data-mode="vn"><span>📖</span><small>Truyện</small></button>
     <button class="bottom-nav-btn" data-mode="duel"><span>🃏</span><small>Đấu Bài</small></button>
     <button class="bottom-nav-btn" data-mode="galaxy"><span>🌌</span><small>Ngân Hà</small></button>
-    <button class="bottom-nav-btn" data-mode="breeding"><span>🧬</span><small>Lai Tạo</small></button>
     <button class="bottom-nav-btn" data-mode="codex"><span>👑</span><small>Hồ Sơ</small></button>
   </nav>
 

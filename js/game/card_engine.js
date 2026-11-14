@@ -1,18 +1,18 @@
 // ============================================================================
-// CYCLE 12: AGE OF DOMINION — MARVEL SNAP × YU-GI-OH 3-ROW CARD ENGINE (v7)
+// CYCLE 12: AGE OF DOMINION — MARVEL SNAP × YU-GI-OH 3-ROW CARD ENGINE (v9)
 // Rules:
 // - Faction Lock: Leaders only command cards of their Faction (16-card deck).
 // - Draw 2 Cards From Deck Every Turn End (4 opening hand).
-// - Row 1 (3 Vertical Cosmic Lanes): Direct CR + Species/Faction combat.
+// - Row 1 (3 Vertical Cosmic Lanes): Direct CR + Species/Faction combat + Breeding Conditionals.
 // - Row 2 (Capture & Auto-Breeding Chambers):
 //   * Loser of each vertical lane moves to WINNER's Row 2 (cannot return to Row 1).
 //   * Male beats Female -> Female enters Winner's Row 2 in ACTIVE GESTATION,
-//     automatically rolling Token Hybrid synthesis at EVERY Turn End!
-//   * Tamarite = 100% strong Token; Omni-Womb = multi-variant/twin Tokens;
-//     Alien = 40%-96% random; Pure Human = low ~32% random & -28% CR Debuff!
+//     rolling Token synthesis at Turn End DIRECTLY ONTO EMPTY ROW 1 LANES
+//     (or reinforcing Row 1 allies if all 3 lanes are full) AND unlocking
+//     Row 1 / Row 2 conditional passives of allied cards!
+//   * Tamarite = 100% strong Token; Omni-Womb = multi-variant/twin Tokens + Row 2 boost;
+//     Alien = 40%-96% random; Pure Human = 32% & -28% CR Debuff (canceled by Dick).
 // - Row 3 (Outer Leader Slot): Protected while ANY card stays on Row 1.
-//   When Row 1 is empty, Total Attacker Row 1 CR vs Defender Row 3 CR resolves.
-// - Match ends on 3 Row-2 Captures OR Row 3 Leader defeat.
 // ============================================================================
 
 import {
@@ -38,7 +38,7 @@ const OMNI_VARIANTS = [
   { key: "titan", title: "Giáp Thú", crBonus: 95, r1Id: "omni_titan", tag: "Omni: Càn Quét (+95 CR)", desc: "Hàng 1: Token đột biến hình thái Giáp Thú (+95 CR)." },
   { key: "siphon", title: "Ký Sinh", crBonus: 45, r1Id: "nadir_psionic", tag: "Omni: Hấp Thụ (-70 CR địch)", desc: "Hàng 1: +45 CR & giảm 70 CR đối thủ đối diện (CR < 800)." },
   { key: "guard", title: "Máu Xanh", crBonus: 65, r1Id: "blue_blood_guard", tag: "Omni: Kháng Độc (+65 CR)", desc: "Hàng 1: +65 CR & miễn nhiễm trừ CR từ Virus/Nadir." },
-  { key: "twin", title: "Phân Bào Đôi", crBonus: 25, r1Id: "frontline_valor", tag: "Omni: Sinh Đôi (+25 CR)", desc: "Hàng 1: +25 CR — Omni-Womb tự phân đôi thành 2 Token lên tay!" }
+  { key: "twin", title: "Phân Bào Đôi", crBonus: 25, r1Id: "frontline_valor", tag: "Omni: Sinh Đôi (+25 CR)", desc: "Hàng 1: +25 CR — Omni-Womb tự phân đôi thành 2 Token lên Hàng 1!" }
 ];
 
 function shuffle(arr) {
@@ -126,6 +126,7 @@ export class CardBattleEngine {
       row1: [null, null, null],
       row2: [],
       hand: [],
+      totalTokensBred: 0,
       deck: shuffle(finalPDeckIds.map((id) => makeInstance(resolveCard(id, hybrids) || CARD_BY_ID.tr_syl_guard, "player", this.uidCounter++)))
     };
 
@@ -135,6 +136,7 @@ export class CardBattleEngine {
       row1: [null, null, null],
       row2: [],
       hand: [],
+      totalTokensBred: 0,
       deck: shuffle(finalEDeckIds.map((id) => makeInstance(resolveCard(id, []) || CARD_BY_ID.tr_wn_raider, "enemy", this.uidCounter++)))
     };
 
@@ -145,7 +147,7 @@ export class CardBattleEngine {
     const pFacName = (FACTIONS[pLeaderCard.fac] && FACTIONS[pLeaderCard.fac].name) || pLeaderCard.fac;
     const eFacName = (FACTIONS[eLeaderCard.fac] && FACTIONS[eLeaderCard.fac].name) || eLeaderCard.fac;
     this.pushLog(`⚔️ Khai chiến 3 Làn! ${pLeaderCard.name} [${pFacName}] vs ${eLeaderCard.name} [${eFacName}]. Mỗi lượt rút 2 lá!`);
-    this.pushLog(`💗 Luật Hàng 2: Thẻ Nam (♂) thắng thẻ Nữ (♀) sẽ đưa vào Hàng 2 & tự lai tạo Token mỗi cuối lượt!`);
+    this.pushLog(`💗 Luật Hàng 2: ♂ thắng ♀ -> Đưa sang Hàng 2, tự sinh Token lên HÀNG 1 & kích hoạt ĐK Hàng 1/2 cho đồng minh!`);
   }
 
   pushLog(msg) {
@@ -161,6 +163,57 @@ export class CardBattleEngine {
     return sideKey === "player" ? this.enemy : this.player;
   }
 
+  // Live snapshot of Row 2 Breeding & Row 1 Token state for Conditional Passives
+  getSideBreedingContext(sideKey = "player") {
+    const s = this.getSide(sideKey);
+    const activeBreeders = s.row2.filter((c) => Boolean(c.breedingActive));
+    const row1Tokens = s.row1.filter((c) => c && c.isToken);
+    const hasDick =
+      s.leader?.id === "dick" ||
+      s.row1.some((c) => c && c.id === "dick") ||
+      s.row2.some((c) => c && c.id === "dick");
+    const r2SymbiosisBonus = s.row2.reduce((sum, c) => sum + (c.row2Effect?.symbiosisR2Boost || 0), 0);
+    return {
+      activeBreeders,
+      activeBreedCount: activeBreeders.length,
+      row1Tokens,
+      row1TokenCount: row1Tokens.length,
+      totalTokensBred: s.totalTokensBred || 0,
+      hasActiveBreed: activeBreeders.length > 0,
+      hasRow1Token: row1Tokens.length > 0,
+      hasTokenOrBreed: activeBreeders.length > 0 || row1Tokens.length > 0 || (s.totalTokensBred || 0) > 0,
+      hasDick,
+      r2SymbiosisBonus
+    };
+  }
+
+  isConditionMet(card, oppCard = null, sideKey = "player") {
+    if (!card) return false;
+    const r1 = card.row1Effect || {};
+    const cond = r1.condType;
+    if (!cond) return false;
+    const ctx = this.getSideBreedingContext(sideKey);
+    const s = this.getSide(sideKey);
+    const opp = this.getOpp(sideKey);
+
+    switch (cond) {
+      case "row1_token":
+        return ctx.hasRow1Token || (r1.id === "cr_gap_burst" && Boolean(oppCard) && Math.abs((card.cr || 0) - (oppCard.cr || 0)) >= 250);
+      case "row1_ally_token":
+        return s.row1.some((ally) => ally && ally.uid !== card.uid && ally.isToken);
+      case "active_breed":
+        return ctx.hasActiveBreed;
+      case "token_bred":
+        return ctx.totalTokensBred > 0 || ctx.hasRow1Token;
+      case "active_breed_or_token":
+        return ctx.hasTokenOrBreed || (r1.id === "predita_will" && (isNadirCard(oppCard) || opp.row2.length >= 1));
+      case "active_breed_or_dick":
+        return ctx.hasTokenOrBreed || ctx.hasDick;
+      default:
+        return false;
+    }
+  }
+
   drawCards(sideKey, count = 2) {
     const s = this.getSide(sideKey);
     let drawn = 0;
@@ -174,7 +227,14 @@ export class CardBattleEngine {
 
   getRow2SupportAura(sideKey) {
     const s = this.getSide(sideKey);
-    return s.row2.reduce((sum, cap) => sum + ((cap.row2Effect && cap.row2Effect.crAura) || 40), 0);
+    const ctx = this.getSideBreedingContext(sideKey);
+    return s.row2.reduce((sum, cap) => {
+      let aura = (cap.row2Effect && cap.row2Effect.crAura) || 40;
+      if (cap.row2Effect?.doubleIfTokenBred && (ctx.hasRow1Token || ctx.totalTokensBred > 0)) {
+        aura *= 2;
+      }
+      return sum + aura;
+    }, 0);
   }
 
   getRow3LeaderAura(sideKey, targetCard) {
@@ -192,10 +252,14 @@ export class CardBattleEngine {
 
   // Computes transparent Combat CR for any card on Row 1 (with optional laneIdx) or Leader on Row 3
   evalCardCombatCR(card, oppCard = null, sideKey = "player", opts = {}) {
-    if (!card) return { total: 0, base: 0, r1Bonus: 0, laneBonus: 0, leaderAura: 0, row2Aura: 0, penalty: 0 };
+    if (!card) return { total: 0, base: 0, r1Bonus: 0, laneBonus: 0, leaderAura: 0, row2Aura: 0, penalty: 0, triggeredConditionals: [] };
     const s = this.getSide(sideKey);
     const opp = this.getOpp(sideKey);
-    const base = card.cr || 100;
+    const oppKey = sideKey === "player" ? "enemy" : "player";
+    const ctx = this.getSideBreedingContext(sideKey);
+    const oppCtx = this.getSideBreedingContext(oppKey);
+
+    const base = (card.cr || 100) + (card.tokenBoostCR || 0);
     const r1 = card.row1Effect || {};
     const oppR1 = (oppCard && oppCard.row1Effect) || {};
     const laneLoc = (typeof opts.laneIdx === "number" && this.lanes[opts.laneIdx]) ? this.lanes[opts.laneIdx] : null;
@@ -206,23 +270,47 @@ export class CardBattleEngine {
 
     let r1Bonus = r1.bonusFlat || 0;
     let laneBonus = 0;
+    const triggeredConditionals = [];
+    if (card.tokenBoostCR > 0) {
+      triggeredConditionals.push(`⚡ Củng Cố Token (+${card.tokenBoostCR} CR)`);
+    }
 
     if (!cancelRacial) {
       if (r1.id === "syl_empress") {
         const sylCount = s.row1.filter((c) => c && c.uid !== card.uid && (c.fac === "sylvarian" || (c.species || "").toLowerCase().includes("syl"))).length;
         r1Bonus += sylCount * 80;
+        if (sylCount > 0) triggeredConditionals.push(`👑 Đồng minh Sylvarian H1 (+${sylCount * 80} CR)`);
       } else if (r1.id === "nadirius_decree" && oppCard && (oppCard.fac === "sylvarian" || oppCard.fac === "western_nadir")) {
         r1Bonus += 100;
-      } else if (r1.id === "predita_will" && (isNadirCard(oppCard) || opp.row2.length >= 1)) {
+      } else if (r1.id === "predita_will" && (isNadirCard(oppCard) || opp.row2.length >= 1 || ctx.hasTokenOrBreed)) {
         r1Bonus += 180;
-      } else if (r1.id === "cr_gap_burst" && oppCard && Math.abs(base - (oppCard.cr || 0)) >= 250) {
+        triggeredConditionals.push(`🛡️ ĐK Predita / Token (+180 CR)`);
+      } else if (r1.id === "cr_gap_burst" && ((oppCard && Math.abs((card.cr || 0) - (oppCard.cr || 0)) >= 250) || ctx.hasRow1Token)) {
         r1Bonus += 240;
+        triggeredConditionals.push(`⚡ ĐK Nghịch Lý / Token H1 (+240 CR)`);
       } else if (r1.id === "supers_strike" && isMutantOrWombiote(oppCard)) {
         r1Bonus += 140;
       } else if (r1.id === "collector_harvest") {
         r1Bonus += s.row2.length * 100;
-      } else if (r1.id === "hyper_photon" && (s.leader.fac === "tamarite" || s.leader.fac === "sylvarian")) {
-        r1Bonus += 90;
+        if (ctx.hasTokenOrBreed) {
+          r1Bonus += 160;
+          triggeredConditionals.push(`🧪 ĐK Thu Thập Token/Lai (+160 CR)`);
+        }
+      } else if (r1.id === "hyper_photon") {
+        if (s.leader.fac === "tamarite" || s.leader.fac === "sylvarian") r1Bonus += 90;
+        if (ctx.hasTokenOrBreed && !card.isToken) {
+          r1Bonus += 180;
+          triggeredConditionals.push(`🌟 ĐK Tamarite Cộng Hưởng (+180 CR)`);
+        }
+      } else if (r1.id === "omni_host" && ctx.hasActiveBreed) {
+        r1Bonus += 140;
+        triggeredConditionals.push(`🧬 ĐK Buồng Lai Hàng 2 (+140 CR)`);
+      } else if (r1.id === "reformist_wave" && (ctx.totalTokensBred > 0 || ctx.hasRow1Token)) {
+        r1Bonus += 135;
+        triggeredConditionals.push(`🌀 ĐK Đã Sinh Token (+135 CR)`);
+      } else if (r1.id === "gotterfall_tactic" && (ctx.totalTokensBred > 0 || ctx.hasRow1Token)) {
+        r1Bonus += 110;
+        triggeredConditionals.push(`♟️ ĐK Chiến Lược Token (+110 CR)`);
       } else if (r1.id === "knight_bastion" && (isNadirCard(oppCard) || isMutantOrWombiote(oppCard))) {
         r1Bonus += 100;
       } else if (r1.id === "solar_blitz" && opts.attackingRow3) {
@@ -231,8 +319,6 @@ export class CardBattleEngine {
         r1Bonus += 100;
       } else if (card.id === "tr_nad_lancer" && opts.attackingRow3) {
         r1Bonus += 80;
-      } else if (card.id === "tr_col_ultrabot" && s.row2.length >= 1) {
-        r1Bonus += 75;
       } else if (card.id === "tr_col_stalker" && oppCard && oppCard.fac === "independent") {
         r1Bonus += 105;
       } else if (card.id === "tr_sal_veteran" && oppCard && oppCard.fac === "western_nadir") {
@@ -241,24 +327,43 @@ export class CardBattleEngine {
         const tamAllies = s.row1.filter((c) => c && c.uid !== card.uid && c.fac === "tamarite").length;
         r1Bonus += tamAllies * 90;
       }
+
+      // Generic fallback conditional evaluator for cards using r1.condType + r1.condBonus
+      if (r1.condBonus && !triggeredConditionals.some((t) => t.includes(`+${r1.condBonus}`)) &&
+          !["predita_will", "cr_gap_burst", "collector_harvest", "hyper_photon", "omni_host", "reformist_wave", "gotterfall_tactic"].includes(r1.id)) {
+        if (this.isConditionMet(card, oppCard, sideKey)) {
+          r1Bonus += r1.condBonus;
+          triggeredConditionals.push(`✨ ĐK Hàng 1/2 (+${r1.condBonus} CR)`);
+        }
+      }
+
+      // Row 1 Buff received BY spawned Tokens from Tamarite / Omni-Host allies on Row 1
+      if (card.isToken) {
+        const hasTamAura = s.row1.some((a) => a && a.uid !== card.uid && (a.row1Effect?.id === "hyper_photon" || a.row1Effect?.id === "omni_host"));
+        if (hasTamAura) {
+          r1Bonus += 90;
+          triggeredConditionals.push("💖 Aura Thủ Lĩnh Token (+90 CR)");
+        }
+      }
     }
 
     // Cosmic Lane modifiers (Marvel Snap twist)
     if (laneLoc) {
       if (laneLoc.id === "kronea_bastion" && card.fac === "sylvarian") laneBonus += 80;
-      else if (laneLoc.id === "predita_line" && base <= 600) laneBonus += 90;
+      else if (laneLoc.id === "predita_line" && (card.cr || 100) <= 600) laneBonus += 90;
       else if (laneLoc.id === "abyss_rift") {
         if (isNadirCard(card) || card.race === "demon") laneBonus += 90;
-        else if (base < 800) laneBonus -= 40;
+        else if ((card.cr || 100) < 800) laneBonus -= 40;
       }
     }
 
     // Opposing Debuffs (respecting CR >= 800 Immunity & Hinatian Blue Blood Guard)
     let penalty = 0;
-    const isImmuneToDebuff = base >= 800 || r1.id === "blue_blood_guard" || r1.id === "omni_titan";
+    const isImmuneToDebuff = (card.cr || 100) >= 800 || r1.id === "blue_blood_guard" || r1.id === "omni_titan";
     if (!isImmuneToDebuff && oppCard) {
-      if (oppR1.id === "abyss_terror") penalty += 120;
+      if (oppR1.id === "abyss_terror") penalty += oppCtx.hasTokenOrBreed ? 200 : 120;
       else if (oppR1.id === "nadir_psionic") penalty += 70;
+      else if (oppR1.id === "collector_harvest" && oppCtx.hasTokenOrBreed) penalty += 90;
       else if (oppCard.id === "tr_wn_natheron") penalty += 100;
       else if (oppCard.id === "tr_wn_raider" && card.fac === "sylvarian") penalty += 50;
     }
@@ -268,7 +373,7 @@ export class CardBattleEngine {
     const diffScale = sideKey === "enemy" ? Math.round((this.difficulty - 1) * 35) : 0;
 
     const total = Math.max(40, base + r1Bonus + laneBonus + leaderAura + row2Aura + diffScale - penalty);
-    return { total, base, r1Bonus, laneBonus, leaderAura, row2Aura, penalty };
+    return { total, base, r1Bonus, laneBonus, leaderAura, row2Aura, penalty, triggeredConditionals };
   }
 
   getRow1Cards(sideKey) {
@@ -314,8 +419,10 @@ export class CardBattleEngine {
   }
 
   // Compute exact Row 2 auto-breeding chance for an active Male-captured-Female pair:
-  // Tamarite = 100%; all others strictly 0-99%!
-  getEffectiveBreedChance(captive) {
+  // Tamarite = 100%; all others strictly 0-99% (including Row 2 symbiosis boosts)!
+  getEffectiveBreedChance(captive, sideKey = null) {
+    const resolvedSide = sideKey || (this.enemy.row2.includes(captive) ? "enemy" : "player");
+    const side = this.getSide(resolvedSide);
     const r2 = captive.row2Effect || {};
     if (r2.tier === "tamarite") return 100;
 
@@ -325,6 +432,17 @@ export class CardBattleEngine {
       chance = 82;
     } else if (sire && sire.id === "dick") {
       chance = Math.min(95, chance + 25);
+    }
+
+    // Cross-card Row 2 Synergy: Omni-Womb / Symbiont / Dick on OTHER Row 2 slots (or Dick on Row 1/3) boosts chance!
+    const ctx = this.getSideBreedingContext(resolvedSide);
+    const otherSymbiosis = side.row2.reduce(
+      (sum, other) => (other.uid !== captive.uid ? sum + (other.row2Effect?.symbiosisR2Boost || 0) : sum),
+      0
+    );
+    chance += otherSymbiosis;
+    if (ctx.hasDick && sire?.id !== "dick" && !(captive.row2Effect?.symbiosisR2Boost > 0)) {
+      chance += 15;
     }
 
     const lane = typeof captive.captureLane === "number" ? this.lanes[captive.captureLane] : null;
@@ -337,11 +455,13 @@ export class CardBattleEngine {
   }
 
   // Generate 1 (or 2 if Omni-Womb Twin morph!) Token Hybrid card(s) from Row 2 active breeding pair
+  // Spawns Token DIRECTLY ONTO empty Row 1 lane(s) (or reinforces Row 1 ally if Row 1 is full)!
   spawnTokensForCaptive(sideKey, captive, forcedRoll = null) {
     const side = this.getSide(sideKey);
+    const ctx = this.getSideBreedingContext(sideKey);
     const r2 = captive.row2Effect || {};
     const sire = captive.sireCard || side.leader;
-    const chance = this.getEffectiveBreedChance(captive);
+    const chance = this.getEffectiveBreedChance(captive, sideKey);
     const roll = forcedRoll !== null ? forcedRoll : Math.random() * 100;
 
     if (roll >= chance) {
@@ -356,16 +476,16 @@ export class CardBattleEngine {
     const created = [];
 
     for (let k = 0; k < countToSpawn; k++) {
-      if (side.hand.length >= this.maxHandSize) break;
       let tokenCR = (sire.cr * 0.45 + captive.cr * 0.55) * (r2.crMult || 0.9);
       if (r2.gapMutation && Math.abs((sire.cr || 0) - (captive.cr || 0)) >= 200) {
         tokenCR += 160;
       }
       if (morph) tokenCR += morph.crBonus;
 
-      // Apply Human Pure / Unbuffed Negative CR% Debuff!
-      if (r2.crPenaltyPct && r2.crPenaltyPct > 0) {
-        tokenCR = tokenCR * (1 - r2.crPenaltyPct / 100);
+      // Apply Human Pure / Unbuffed Negative CR% Debuff (canceled if Dick is present!)
+      const effectivePenaltyPct = ctx.hasDick ? 0 : (r2.crPenaltyPct || 0);
+      if (effectivePenaltyPct > 0) {
+        tokenCR = tokenCR * (1 - effectivePenaltyPct / 100);
       }
 
       const finalCR = Math.max(25, Math.round(tokenCR));
@@ -373,14 +493,14 @@ export class CardBattleEngine {
       const styleA = RACE_STYLE[sire.race] || { aura: "#38bdf8" };
       const styleB = RACE_STYLE[captive.race] || { aura: "#f472b6" };
 
-      const suffix = morph ? morph.title : (r2.tier === "tamarite" ? "Tamarite" : (r2.crPenaltyPct >= 20 ? "Yếu Gen" : "Hậu Duệ"));
+      const suffix = morph ? morph.title : (r2.tier === "tamarite" ? "Tamarite" : (effectivePenaltyPct >= 20 ? "Yếu Gen" : "Hậu Duệ"));
       const gender = Math.random() < 0.5 ? "Male" : "Female";
 
       const tokenObj = {
         id: `tok_${this.turn}_${this.uidCounter}`,
         isToken: true,
         name: `${sire.name.split(" ")[0]}×${captive.name.split(" ")[0]} [${suffix}]`,
-        fac: side.leader.fac, // Follows Owner Leader Faction so it can immediately be deployed onto Row 1!
+        fac: side.leader.fac, // Matches Owner Leader Faction & sits on Row 1
         species: morph ? `Omni-Token (${captive.species.split(" ")[0]})` : `Token (${sire.species.split(" ")[0]} × ${captive.species.split(" ")[0]})`,
         race: raceKey,
         gender,
@@ -388,28 +508,55 @@ export class CardBattleEngine {
         h: Number((((sire.h || 1.8) + (captive.h || 1.75)) / 2).toFixed(2)),
         auraA: styleA.aura,
         auraB: styleB.aura,
+        parentsLabel: `${sire.name} ♂ × ${captive.name} ♀`,
         mutated: r2.tier === "tamarite" || Boolean(r2.omniWomb),
         row1Effect: morph
           ? { id: morph.r1Id, tag: morph.tag, bonusFlat: morph.crBonus, desc: morph.desc }
           : (r2.tier === "tamarite"
-            ? { id: "hyper_photon", tag: "Token Tamarite (+110 CR)", bonusFlat: 110, desc: "Hàng 1: Token huyết thống Tamarite +110 CR chiến đấu!" }
+            ? { id: "hyper_photon", tag: "Token Tamarite (+110 CR)", bonusFlat: 110, desc: "Hàng 1: Token huyết thống Tamarite +110 CR chiến đấu & kích hoạt ĐK cho đồng minh!" }
             : (r2.blueBlood
               ? { id: "blue_blood_guard", tag: "Máu Xanh Miễn Virus (+70 CR)", bonusFlat: 70, desc: "Hàng 1: +70 CR & kháng trừ CR." }
-              : { id: "frontline_valor", tag: r2.crPenaltyPct >= 20 ? "Token Suy Yếu (+20 CR)" : "Token Lai Chiến (+55 CR)", bonusFlat: r2.crPenaltyPct >= 20 ? 20 : 55, desc: "Hàng 1: Token hậu duệ tham chiến." })),
+              : { id: "frontline_valor", tag: effectivePenaltyPct >= 20 ? "Token Suy Yếu (+20 CR)" : "Token Lai Chiến (+55 CR)", bonusFlat: effectivePenaltyPct >= 20 ? 20 : 55, desc: "Hàng 1: Token sinh từ Hàng 2 trực chiến & thỏa ĐK cho các lá khác." })),
         row2Effect: {
           id: "tok_r2",
           tier: r2.tier === "tamarite" ? "tamarite" : "alien",
           breedChance: r2.tier === "tamarite" ? 100 : 55,
           crAura: Math.max(30, Math.round(finalCR * 0.12)),
           crMult: 0.85,
-          crPenaltyPct: r2.crPenaltyPct || 0,
+          crPenaltyPct: effectivePenaltyPct,
           tag: r2.tier === "tamarite" ? "Token Tamarite (100%)" : "Hậu Duệ Thế Hệ Sau (55%)",
           desc: `Hàng 2: +${Math.max(30, Math.round(finalCR * 0.12))} CR hỗ trợ Hàng 1.`
         }
       };
 
       const inst = makeInstance(hybridToCard(tokenObj), sideKey, this.uidCounter++);
-      side.hand.push(inst);
+      inst.fromRow2Breeding = true;
+      inst.parentsLabel = tokenObj.parentsLabel;
+      inst.debuffCanceledByDick = ctx.hasDick && (r2.crPenaltyPct || 0) > 0;
+
+      // Priority 1: Spawn directly onto an open Row 1 Lane (prefer captureLane first!)
+      const candidateOrder = [captive.captureLane, 0, 1, 2].filter((idx, i, arr) => idx >= 0 && idx <= 2 && arr.indexOf(idx) === i);
+      const targetLane = candidateOrder.find((idx) => side.row1[idx] === null);
+
+      if (targetLane !== undefined) {
+        inst.deployedTurn = this.turn;
+        inst.spawnedZone = "row1";
+        inst.spawnedLane = targetLane;
+        side.row1[targetLane] = inst;
+      } else {
+        // Row 1 completely full (all 3 lanes occupied) -> Reinforce weakest Row 1 ally CR directly!
+        const allies = side.row1.filter(Boolean).sort((a, b) => a.cr - b.cr);
+        const targetAlly = allies[0];
+        if (targetAlly) {
+          const boost = Math.max(45, Math.round(finalCR * 0.35));
+          targetAlly.tokenBoostCR = (targetAlly.tokenBoostCR || 0) + boost;
+          inst.spawnedZone = "row1_boost";
+          inst.boostedAllyName = targetAlly.name;
+          inst.boostAmount = boost;
+        }
+      }
+
+      side.totalTokensBred = (side.totalTokensBred || 0) + 1;
       captive.spawnCount = (captive.spawnCount || 0) + 1;
       created.push(inst);
     }
@@ -567,7 +714,7 @@ export class CardBattleEngine {
       }
     }
 
-    // 5A. END OF TURN: Auto-Breed every active Male×Female pair sitting in Row 2!
+    // 5A. END OF TURN: Auto-Breed every active Male×Female pair sitting in Row 2 directly onto ROW 1!
     for (const sideKey of ["player", "enemy"]) {
       const side = this.getSide(sideKey);
       for (const cap of side.row2) {
@@ -577,12 +724,18 @@ export class CardBattleEngine {
           for (const tok of breedRes.spawned) {
             if (sideKey === "player") this.lastNewTokens.push(tok);
             const sideLbl = sideKey === "player" ? "Ta" : "Địch";
-            const debuffNote = cap.row2Effect?.crPenaltyPct >= 20 ? ` [Bất lợi Người Thuần -${cap.row2Effect.crPenaltyPct}% CR]` : "";
-            this.pushLog(`🧬 [Hàng 2 ${sideLbl} • ${breedRes.chance}%] ${cap.sireCard?.name || "?"} ♂ × ${cap.name} ♀ -> Sinh Token ${tok.name} (CR ${tok.cr})${debuffNote} lên tay!`);
+            const debuffNote = tok.debuffCanceledByDick
+              ? " [Dick Xóa Debuff!]"
+              : (cap.row2Effect?.crPenaltyPct >= 20 ? ` [-${cap.row2Effect.crPenaltyPct}% CR]` : "");
+            if (tok.spawnedZone === "row1_boost") {
+              this.pushLog(`⚡ [H2→Củng Cố H1 ${sideLbl} • ${breedRes.chance}%] ${cap.sireCard?.name || "?"} ♂ × ${cap.name} ♀ hợp nhất +${tok.boostAmount} CR cho ${tok.boostedAllyName} (H1 đầy)!`);
+            } else {
+              this.pushLog(`🧬 [H2→Hàng 1 Làn ${tok.spawnedLane + 1} ${sideLbl} • ${breedRes.chance}%] ${cap.sireCard?.name || "?"} ♂ × ${cap.name} ♀ sinh Token ${tok.name} (CR ${tok.cr})${debuffNote} lên thẳng HÀNG 1!`);
+            }
           }
         } else {
           const sideLbl = sideKey === "player" ? "Ta" : "Địch";
-          this.pushLog(`🎲 [Hàng 2 ${sideLbl} • ${breedRes.chance}%] ${cap.name} lượt này chưa kết hợp được Token.`);
+          this.pushLog(`🎲 [Hàng 2 ${sideLbl} • ${breedRes.chance}%] ${cap.name} lượt này chưa sinh được Token lên Hàng 1.`);
         }
       }
     }

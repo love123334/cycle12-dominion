@@ -1304,7 +1304,7 @@ select:focus, input[type="text"]:focus {
   border-top: 1px solid var(--panel-border);
   backdrop-filter: blur(16px);
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(4, 1fr);
 }
 
 .bottom-nav-btn {
@@ -2351,6 +2351,98 @@ select:focus, input[type="text"]:focus {
   margin-left: 6px;
 }
 
+/* ============================================================================
+   v9.0 IN-DUEL BREEDING H2->H1 & CONDITIONAL SYNERGY VISUALS
+   ============================================================================ */
+.duel-synergy-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 3px 8px;
+  border-radius: 9px;
+  background: rgba(8, 13, 30, 0.86);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  font-size: 10.5px;
+}
+
+.synergy-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 10px;
+  background: rgba(30, 41, 59, 0.85);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  color: #cbd5e1;
+  white-space: nowrap;
+}
+.synergy-pill.lit {
+  background: linear-gradient(90deg, rgba(16, 185, 129, 0.24), rgba(56, 189, 248, 0.22));
+  border-color: rgba(52, 211, 153, 0.72);
+  color: #d1fae5;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.25);
+}
+.synergy-pill.breed {
+  background: linear-gradient(90deg, rgba(236, 72, 153, 0.26), rgba(168, 85, 247, 0.24));
+  border-color: rgba(244, 114, 182, 0.72);
+  color: #fdf2f8;
+  box-shadow: 0 0 10px rgba(244, 114, 182, 0.25);
+}
+
+.hand-card.cond-lit,
+.tcg-unit-card.cond-lit {
+  border-color: #34d399;
+  box-shadow: 0 0 16px rgba(52, 211, 153, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.24);
+}
+.row2-captive-chip.cond-lit {
+  border-color: #fbbf24;
+  box-shadow: 0 0 14px rgba(251, 191, 36, 0.38);
+}
+
+.cond-pill.active {
+  display: inline-flex;
+  align-items: center;
+  font-size: 8px;
+  font-weight: 900;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: rgba(16, 185, 129, 0.28);
+  border: 1px solid rgba(52, 211, 153, 0.78);
+  color: #a7f3d0;
+  white-space: nowrap;
+}
+
+.token-pill.row2-spawn {
+  background: linear-gradient(90deg, rgba(236, 72, 153, 0.36), rgba(16, 185, 129, 0.34));
+  border-color: rgba(52, 211, 153, 0.75);
+  color: #ecfdf5;
+}
+
+.eff-line.h1.cond-active,
+.unit-eff-tag.cond-active {
+  color: #6ee7b7;
+  font-weight: 800;
+  background: rgba(16, 185, 129, 0.14);
+  border-radius: 5px;
+  padding: 1px 4px;
+}
+
+.deck-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+.deck-filter-bar .btn-glass.active {
+  background: rgba(56, 189, 248, 0.28);
+  border-color: rgba(56, 189, 248, 0.75);
+  color: #e0f2fe;
+}
+
 /* Laptop compact height tuning (720p-768p): keep Hand + Arena completely visible */
 @media (max-height: 820px) and (min-width: 961px) {
   .duel-shell { inset: 4px 12px; gap: 4px; }
@@ -2367,6 +2459,7 @@ select:focus, input[type="text"]:focus {
   .tcg-unit-card { min-height: 58px; padding: 3px 6px; gap: 6px; }
   .unit-thumb-frame { width: 38px; height: 50px; }
   .duel-mid-strip { padding: 3px 8px; }
+  .duel-synergy-bar { padding: 2px 8px; gap: 5px; font-size: 9.5px; }
   .card-inspector-bar { padding: 3px 8px; min-height: 36px; }
   .inspector-card-thumb { width: 32px; height: 38px; }
   .duel-hand-row { min-height: 108px; padding: 2px 2px; }
@@ -2395,6 +2488,8 @@ select:focus, input[type="text"]:focus {
   .lane-loc-desc { font-size: 8px; line-height: 1.2; white-space: normal; word-break: break-word; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   .lane-cr-meter { font-size: 8.8px; padding: 2px 4px; }
   .duel-mid-strip { flex-wrap: wrap; padding: 5px 7px; gap: 5px; min-width: 0; max-width: 100%; }
+  .duel-synergy-bar { padding: 3px 6px; gap: 4px; max-width: 100%; min-width: 0; }
+  .synergy-pill { font-size: 9.2px; padding: 1px 6px; }
   .duel-log-ticker { white-space: normal; width: 100%; flex: 1 0 100%; min-width: 0; order: 3; font-size: 10.5px; line-height: 1.3; }
   .board-row { gap: 4px; min-height: 0; align-items: stretch; width: 100%; min-width: 0; }
   .board-slot { min-width: 0; min-height: 92px; height: auto; padding: 2px; overflow: hidden; }
