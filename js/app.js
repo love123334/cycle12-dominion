@@ -1,7 +1,7 @@
 // ============================================================================
-// CYCLE 12: AGE OF DOMINION — MAIN APPLICATION CONTROLLER (v9.0)
-// Tactical 3-Row Card Game (In-Battle Row 2→Row 1 Breeding & Conditionals) +
-// Free Protagonist POV (72+Characters) + 11-Chapter VN + 3D Galaxy Conquest
+// CYCLE 12: AGE OF DOMINION — MAIN APPLICATION CONTROLLER (v10.0)
+// Tactical 3-Row Card Game (Row 2→Row 1 Breeding, Card Zoom Reader, Multi-Deck & Shop) +
+// Free Protagonist POV (72+ Characters) + 13-Chapter VN + 3D Galaxy Conquest
 // ============================================================================
 
 import { META, FACTIONS, PLAYABLE, SUPERWEAPONS, SPECIES, TIMELINE } from "./data/lore.js";
@@ -9,12 +9,15 @@ import { SECTORS, SECTOR_BY_ID, findLocation, SECTOR_KIND_LABEL, BODY_KIND_LABEL
 import { CHARACTERS, CHAR_BY_ID, RELATIONS, RACE_STYLE } from "./data/characters.js";
 import { CHAPTERS, CHAPTER_BY_ID, buildEncounterScene, resolveStoryChar, resolveStorySector } from "./data/story.js";
 import {
+  CARDS,
   CARD_BY_ID,
   resolveCard,
   getCardPortrait,
   getFactionCardPool,
   buildFactionDeck,
-  validateDeckForLeader
+  validateDeckForLeader,
+  getCardPriceInfo,
+  CARD_PACKS
 } from "./data/cards.js";
 import { buildHistoryCutscenes } from "./data/cutscenes.js";
 import { GameState, ACHIEVEMENTS } from "./game/state.js";
@@ -42,8 +45,12 @@ class Cycle12App {
     const hadAutoSave = this.game.loadFromSlot("auto");
 
     this.currentMode = "vn";
-    this.duelTab = "skirmish"; // 'skirmish' | 'gauntlet' | 'deck'
-    this.deckFilter = "all"; // 'all' | 'male' | 'female' | 'cond'
+    this.duelTab = "skirmish"; // 'skirmish' | 'gauntlet' | 'deck' | 'shop'
+    this.deckFilter = "all"; // 'all' | 'male' | 'female' | 'cond' | 'owned' | 'unowned'
+    this.deckZoomMode = false;
+    this.shopFilter = "all"; // 'all' | 'unowned' | 'owned' | 'legend'
+    this.shopFaction = "all";
+    this.zoomedCard = null;
     this.codexTab = "roster";  // 'roster' | 'cutscenes' | 'diplomacy' | 'events' | 'achievements' | 'species' | 'relations' | 'system'
 
     this.selectedSectorId = "sylvalon";
@@ -91,6 +98,7 @@ class Cycle12App {
     this.initCutsceneOverlay();
     this.initVNUI();
     this.initDuelUI();
+    this.initCardZoomModal();
     this.initGalaxyUI();
     this.initCodexUI();
 
@@ -1251,13 +1259,96 @@ class Cycle12App {
       if (this.duelEngine.over) this.showDuelOutcome();
     });
 
-    document.getElementById("btn-auto-deck").addEventListener("click", () => {
+    document.getElementById("btn-auto-deck")?.addEventListener("click", () => {
       SFX.choice();
-      this.game.customDeck = buildFactionDeck(this.game.protagonistId, this.game.hybrids);
-      this.game.saveToSlot("auto");
+      const deck = this.game.autoBuildActiveDeck();
       this.renderDeckBuilder();
-      const protag = this.game.getProtagonist();
-      this.showToast("✨ Đã xếp Bộ Bài Phe", `16 lá thuộc phe ${this.game.facName(protag.fac)} theo Thủ lĩnh ${protag.name}.`);
+      const active = this.game.getActiveDeck();
+      const lead = CHAR_BY_ID[active.leaderId] || this.game.getProtagonist();
+      this.showToast("✨ Đã xếp Bộ Bài Sở Hữu", `${deck.length} lá phe ${this.game.facName(lead.fac)} theo Thủ lĩnh ${lead.name}.`);
+    });
+
+    // Multi-Deck Management Controls
+    document.getElementById("deck-select")?.addEventListener("change", (e) => {
+      SFX.click();
+      const d = this.game.selectActiveDeck(e.target.value);
+      this.renderDeckBuilder();
+      if (d) this.showToast("🗂️ Đã chuyển Bộ Bài", `${d.name} (${d.cards.length}/16 lá)`);
+    });
+
+    document.getElementById("deck-leader-select")?.addEventListener("change", (e) => {
+      SFX.choice();
+      const res = this.game.setActiveDeckLeader(e.target.value);
+      this.renderDeckBuilder();
+      if (res.ok) {
+        this.showToast("👑 Đổi Thủ Lĩnh Bộ Bài", `${res.leader.name} • Phe ${this.game.facName(res.leader.fac)}`);
+      } else if (res.msg) {
+        SFX.alert();
+        this.showToast("Chưa thể chọn Thủ Lĩnh", res.msg);
+      }
+    });
+
+    document.getElementById("btn-deck-new")?.addEventListener("click", () => {
+      SFX.choice();
+      const active = this.game.getActiveDeck();
+      const d = this.game.createDeck(null, active?.leaderId || this.game.protagonistId, true);
+      this.renderDeckBuilder();
+      this.showToast("➕ Đã tạo Bộ Bài Mới", `${d.name} (${d.cards.length}/16 lá). Hãy chọn Thủ Lĩnh hoặc tùy chỉnh!`);
+    });
+
+    document.getElementById("btn-deck-rename")?.addEventListener("click", () => {
+      SFX.click();
+      const bar = document.querySelector(".deck-manager-bar");
+      if (!bar) return;
+      const existing = document.getElementById("deck-rename-inline");
+      if (existing) {
+        existing.remove();
+        return;
+      }
+      const active = this.game.getActiveDeck();
+      const row = document.createElement("div");
+      row.id = "deck-rename-inline";
+      row.className = "deck-rename-inline";
+      row.innerHTML = `
+        <input type="text" id="deck-rename-input" value="${ESC(active?.name || "")}" maxlength="42" placeholder="Nhập tên bộ bài..." />
+        <button type="button" class="btn-primary btn-compact" id="btn-deck-rename-save">✓ Lưu</button>
+        <button type="button" class="btn-glass btn-compact" id="btn-deck-rename-cancel">✕</button>
+      `;
+      bar.appendChild(row);
+      const inp = document.getElementById("deck-rename-input");
+      inp?.focus();
+      inp?.select();
+      const commitRename = () => {
+        const res = this.game.renameActiveDeck(inp?.value || "");
+        row.remove();
+        this.renderDeckBuilder();
+        if (res.ok) this.showToast("✏️ Đã đổi tên Bộ Bài", res.deck.name);
+        else if (res.msg) this.showToast("Không hợp lệ", res.msg);
+      };
+      document.getElementById("btn-deck-rename-save")?.addEventListener("click", commitRename);
+      document.getElementById("btn-deck-rename-cancel")?.addEventListener("click", () => row.remove());
+      inp?.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") commitRename();
+        if (ev.key === "Escape") row.remove();
+      });
+    });
+
+    document.getElementById("btn-deck-delete")?.addEventListener("click", () => {
+      const res = this.game.deleteActiveDeck();
+      if (res.ok) {
+        SFX.click();
+        this.renderDeckBuilder();
+        this.showToast("🗑️ Đã xóa Bộ Bài", `Đang chuyển sang ${res.deck.name}.`);
+      } else {
+        SFX.alert();
+        this.showToast("Không thể xóa", res.msg || "Phải giữ ít nhất 1 Bộ Bài.");
+      }
+    });
+
+    document.getElementById("btn-deck-zoom-mode")?.addEventListener("click", () => {
+      SFX.click();
+      this.deckZoomMode = !this.deckZoomMode;
+      this.renderDeckBuilder();
     });
 
     document.querySelectorAll("#deck-filter-pills [data-dfilter]").forEach((btn) => {
@@ -1269,7 +1360,47 @@ class Cycle12App {
       });
     });
 
-    document.getElementById("deck-search-input").addEventListener("input", () => this.renderDeckBuilder());
+    document.getElementById("deck-search-input")?.addEventListener("input", () => this.renderDeckBuilder());
+
+    // Multi-Source Shop Filters & Controls
+    document.querySelectorAll("#shop-filter-bar [data-sfilter]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        SFX.click();
+        this.shopFilter = btn.dataset.sfilter || "all";
+        document.querySelectorAll("#shop-filter-bar [data-sfilter]").forEach((b) => b.classList.toggle("active", b === btn));
+        this.renderShopView();
+      });
+    });
+
+    const shopFacSel = document.getElementById("shop-faction-filter");
+    if (shopFacSel) {
+      shopFacSel.innerHTML = `<option value="all">🌌 Tất Cả Phe (${Object.keys(FACTIONS).length})</option>` +
+        Object.keys(FACTIONS).map((fid) => `<option value="${fid}">${ESC(FACTIONS[fid].name)}</option>`).join("");
+      shopFacSel.addEventListener("change", () => {
+        SFX.click();
+        this.shopFaction = shopFacSel.value || "all";
+        this.renderShopView();
+      });
+    }
+    document.getElementById("shop-search-input")?.addEventListener("input", () => this.renderShopView());
+
+    // Row 3 Wing Leader Zoom Click Handlers
+    document.querySelector(".commander-bar.enemy.row3-slot")?.addEventListener("click", () => {
+      const eng = this.duelEngine;
+      if (!eng) return;
+      SFX.click();
+      const evalCR = eng.evalCardCombatCR(eng.enemy.leader, eng.getRow1Cards("player")[0] || null, "enemy", { attackingRow3: true });
+      this.inspectDuelCard(eng.enemy.leader, evalCR);
+      this.openCardZoomModal(eng.enemy.leader, { source: "duel", side: "enemy", zone: "row3", evalCR });
+    });
+    document.querySelector(".commander-bar.player.row3-slot")?.addEventListener("click", () => {
+      const eng = this.duelEngine;
+      if (!eng) return;
+      SFX.click();
+      const evalCR = eng.evalCardCombatCR(eng.player.leader, eng.getRow1Cards("enemy")[0] || null, "player", { attackingRow3: true });
+      this.inspectDuelCard(eng.player.leader, evalCR);
+      this.openCardZoomModal(eng.player.leader, { source: "duel", side: "player", zone: "row3", evalCR });
+    });
 
     // Victory / Post-Duel modal handlers
     const vModal = document.getElementById("duel-victory-modal");
@@ -1324,22 +1455,40 @@ class Cycle12App {
   setDuelTab(tab) {
     this.duelTab = tab;
     document.querySelectorAll("[data-dtab]").forEach((b) => b.classList.toggle("active", b.dataset.dtab === tab));
-    document.getElementById("duel-battle-view").classList.toggle("hidden", tab === "deck");
-    document.getElementById("duel-deck-view").classList.toggle("hidden", tab !== "deck");
-    document.getElementById("duel-skirmish-controls").classList.toggle("hidden", tab !== "skirmish");
-    document.getElementById("duel-gauntlet-controls").classList.toggle("hidden", tab !== "gauntlet");
+    document.getElementById("duel-battle-view")?.classList.toggle("hidden", tab === "deck" || tab === "shop");
+    document.getElementById("duel-deck-view")?.classList.toggle("hidden", tab !== "deck");
+    document.getElementById("duel-shop-view")?.classList.toggle("hidden", tab !== "shop");
+    document.getElementById("duel-skirmish-controls")?.classList.toggle("hidden", tab !== "skirmish");
+    document.getElementById("duel-gauntlet-controls")?.classList.toggle("hidden", tab !== "gauntlet");
 
     if (tab === "deck") {
       this.renderDeckBuilder();
+    } else if (tab === "shop") {
+      this.renderShopView();
     } else if (tab === "gauntlet" && this.duelContext.kind !== "gauntlet") {
       document.getElementById("gauntlet-floor-badge").textContent = `🗼 Tầng 1 • Kỷ lục: ${this.game.stats?.gauntletMax || 0}`;
+    } else if (tab === "skirmish") {
+      const activeDeck = this.game.getActiveDeck();
+      if (this.duelEngine && this.duelContext.kind === "skirmish" && this.duelEngine.turn === 1 && !this.duelEngine.player.row1.some(Boolean) && activeDeck && this.duelEngine.player.leader.id !== activeDeck.leaderId) {
+        this.startCardMatch({ kind: "skirmish", enemyId: document.getElementById("duel-enemy-select")?.value || "overlord" });
+      } else if (this.duelEngine) {
+        this.renderDuelUI();
+      }
     }
   }
 
   startCardMatch({ kind = "skirmish", playerCharId = null, enemyId = "overlord", buffMult = 1, modeLabel = "Đấu Thẻ 3 Hàng", gauntletFloor = 0, difficulty = 1 } = {}) {
-    const pId = playerCharId || this.game.protagonistId || "arisia";
-    const legalDeck = validateDeckForLeader(this.game.customDeck || [], pId, this.game.hybrids || []);
-    const activeDeck = legalDeck.length >= 6 ? legalDeck : buildFactionDeck(pId, this.game.hybrids || []);
+    const activeDeckObj = this.game.getActiveDeck();
+    const pId = playerCharId || activeDeckObj?.leaderId || this.game.protagonistId || "arisia";
+    const sourceCards = playerCharId && playerCharId !== activeDeckObj?.leaderId
+      ? (this.game.customDeck || [])
+      : (activeDeckObj?.cards || []);
+    const legalOwned = validateDeckForLeader(sourceCards, pId, this.game.hybrids || [], this.game.collection);
+    const ownedPoolDeck = buildFactionDeck(pId, this.game.hybrids || [], this.game.collection);
+    // Keep custom Story battles resilient even if player owns < 6 cards of an alternate story lead
+    const activeDeck = legalOwned.length >= 6
+      ? legalOwned
+      : (ownedPoolDeck.length >= 6 ? ownedPoolDeck : buildFactionDeck(pId, this.game.hybrids || [], null));
 
     const effDifficulty = buffMult > 1 ? Math.min(difficulty, 0.85) : difficulty;
     this.duelContext = { kind, enemyId, floor: gauntletFloor, buffMult };
@@ -1353,6 +1502,7 @@ class Cycle12App {
       gameStateRef: this.game
     });
     this.duelEngine.modeLabel = modeLabel;
+    this.inspectedDuelCard = null;
     document.getElementById("duel-victory-modal").classList.add("hidden");
     this.renderDuelUI();
   }
@@ -1370,6 +1520,337 @@ class Cycle12App {
       gauntletFloor: floor,
       difficulty: 0.9 + floor * 0.2
     });
+  }
+
+  initCardZoomModal() {
+    const modal = document.getElementById("card-zoom-modal");
+    if (!modal) return;
+    document.getElementById("btn-close-card-zoom")?.addEventListener("click", () => {
+      SFX.click();
+      this.closeCardZoomModal();
+    });
+    modal.addEventListener("click", (e) => {
+      if (e.target === modal) {
+        SFX.click();
+        this.closeCardZoomModal();
+      }
+    });
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && !modal.classList.contains("hidden")) {
+        this.closeCardZoomModal();
+      }
+    });
+  }
+
+  closeCardZoomModal() {
+    document.getElementById("card-zoom-modal")?.classList.add("hidden");
+    this.zoomedCard = null;
+  }
+
+  bindZoomTriggers(rootEl, resolveCtxFn) {
+    if (!rootEl) return;
+    rootEl.querySelectorAll("[data-zoom-trigger]").forEach((trg) => {
+      trg.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        SFX.click();
+        const host = trg.closest("[data-zoom-host]") || trg;
+        const resolved = resolveCtxFn(host, trg);
+        if (resolved?.card) this.openCardZoomModal(resolved.card, resolved.ctx || {});
+      });
+    });
+    rootEl.querySelectorAll("[data-zoom-host]").forEach((host) => {
+      host.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        SFX.click();
+        const resolved = resolveCtxFn(host, host);
+        if (resolved?.card) this.openCardZoomModal(resolved.card, resolved.ctx || {});
+      });
+    });
+  }
+
+  openCardZoomModal(card, ctx = {}) {
+    if (!card) return;
+    const modal = document.getElementById("card-zoom-modal");
+    if (!modal) return;
+    this.zoomedCard = { card, ctx };
+
+    const hybrids = this.game.hybrids || [];
+    const baseChar = CHAR_BY_ID[card.baseCharId || card.id] || null;
+    const facObj = FACTIONS[card.fac] || {};
+    const facColor = facObj.color || "#38bdf8";
+    const facLabel = facObj.name || card.fac;
+    const isM = card.gender === "Male";
+    const r1 = card.row1Effect || {};
+    const r2 = card.row2Effect || {};
+    const evalCR = ctx.evalCR || null;
+    const priceInfo = getCardPriceInfo(card);
+    const isCollectible = !card.isToken && !card.fromRow2Breeding;
+    const maxCap = this.game.getMaxCopies(card);
+    const owned = isCollectible ? this.game.getOwnedCount(card.id) : 1;
+    const activeDeck = this.game.getActiveDeck();
+    const inDeckCount = (activeDeck?.cards || []).filter((id) => id === card.id).length;
+    const eng = this.duelEngine;
+    const sideKey = ctx.side || "player";
+    const sCtx = eng ? eng.getSideBreedingContext(sideKey) : null;
+
+    document.getElementById("cz-name").innerHTML = `${ESC(card.name)} <span class="gender-pill ${isM ? "male" : "female"}">${isM ? "♂ Nam" : "♀ Nữ"}</span>`;
+    document.getElementById("cz-subtitle").textContent =
+      `${card.species || "Sinh vật"} • Phe ${facLabel} • ${card.unique ? "★ Nhân Vật Độc Nhất" : "🛡️ Quân Dự Bị"} • ${priceInfo.tierLabel}`;
+
+    const breakdownLines = [];
+    if (evalCR) {
+      breakdownLines.push(`Gốc CR ${card.cr}`);
+      if (evalCR.breakdown) {
+        Object.entries(evalCR.breakdown).forEach(([k, v]) => {
+          if (v && k !== "base") breakdownLines.push(`${k}: ${v > 0 ? "+" : ""}${v}`);
+        });
+      }
+      if (evalCR.triggeredConditionals?.length) {
+        breakdownLines.push(...evalCR.triggeredConditionals);
+      }
+    }
+
+    const r1CondTag = r1.condType
+      ? (evalCR?.triggeredConditionals?.length || (eng && eng.isConditionMet(card, null, sideKey))
+        ? `<span class="badge" style="color:#6ee7b7;border-color:rgba(52,211,153,0.65);">✅ ĐK Hàng 1 Đã Kích Hoạt (+${r1.condBonus || 0} CR)</span>`
+        : `<span class="badge" style="color:#fde047;border-color:rgba(250,204,21,0.5);">⚡ Hiệu Ứng Có Điều Kiện (+${r1.condBonus || 0} CR)</span>`)
+      : `<span class="badge">⚔️ Trực Chiến Tiêu Chuẩn</span>`;
+
+    const breedPctStr = card.breedingActive && eng
+      ? `${eng.getEffectiveBreedChance(card, sideKey)}%/lượt (Đang lai cùng ♂ ${card.sireCard?.name || "Nam"} • Đã sinh ${card.spawnCount || 0} Token→H1)`
+      : (r2.tier === "tamarite"
+        ? "100% Sinh Token khi bị ♂ bắt vào Hàng 2"
+        : (r2.omniWomb ? `Omni-Womb (${r2.breedChance || 85}% sinh dị biến/lượt)` : `${r2.breedChance || 50}% sinh Token lên Hàng 1 (0–99%)`));
+
+    const debuffNote = r2.crPenaltyPct
+      ? (card.debuffCanceledByDick || sCtx?.hasDick
+        ? `<div class="cz-note ok">✅ Nhân tố <strong>Dick</strong> đang hóa giải Debuff -${r2.crPenaltyPct}% CR cho Token lai!</div>`
+        : `<div class="cz-note warn">⚠️ <strong>Debuff Người Thuần:</strong> Nếu không có Dick hỗ trợ, con lai sinh ra bị giảm -${r2.crPenaltyPct}% CR.</div>`)
+      : "";
+
+    const specialStatusNotes = [];
+    if (card.fromRow2Breeding) specialStatusNotes.push("🧬 Sinh ra từ Buồng Lai Hàng 2 và tự nhảy lên Hàng 1");
+    if (card.isToken) specialStatusNotes.push(`🪙 Thẻ Token Lai${card.motherId ? ` (Mẹ: ${CHAR_BY_ID[card.motherId]?.name || card.motherId})` : ""}${card.fatherId ? ` × (Cha: ${CHAR_BY_ID[card.fatherId]?.name || card.fatherId})` : ""}`);
+    if (card.isHybrid) specialStatusNotes.push("✦ Dòng Lai Vĩnh Viễn trong kho gen");
+    if (r2.symbiosisR2Boost) specialStatusNotes.push(`✨ Cộng sinh Hàng 2: Tăng +${r2.symbiosisR2Boost}% tỷ lệ sinh Token cho mọi cặp lai cùng bên`);
+    if (r2.doubleIfTokenBred) specialStatusNotes.push(`⚡ Nhân đôi Aura CR Hàng 2 (+${(r2.crAura || 40) * 2} CR) khi Hàng 1 đã có Token lai`);
+
+    const skillsHtml = baseChar?.skills?.length
+      ? `<div class="cz-skills">${baseChar.skills.map((sk) => `<span class="badge">${ESC(sk)}</span>`).join("")}</div>`
+      : "";
+    const loreBio = baseChar?.bio || (card.isHybrid ? "Chiến binh lai tạo đa chủng tộc mang đặc tính dung hợp từ hai dòng máu." : "Đơn vị chiến thuật chuyên trách của phe phái trong Chu Kỳ 12.");
+
+    const bodyEl = document.getElementById("cz-body");
+    bodyEl.innerHTML = `
+      <div class="cz-visual-col">
+        <div class="cz-portrait-frame ${this.getCardRarityClass(card)}" style="--card-accent:${facColor};">
+          <img src="${getCardPortrait(card)}" alt="${ESC(card.name)}" />
+          <div class="cz-portrait-overlay">
+            <span class="cz-cr-badge">⚔️ CR ${evalCR ? evalCR.total : card.cr}${evalCR && evalCR.total !== card.cr ? ` <small>(Gốc ${card.cr})</small>` : ""}</span>
+            ${card.fromRow2Breeding ? `<span class="token-pill row2-spawn">🧬 H2→H1</span>` : (card.isToken ? `<span class="token-pill">🪙 TOKEN</span>` : (card.isHybrid ? `<span class="token-pill hybrid">✦ LAI</span>` : ""))}
+          </div>
+        </div>
+        <div class="cz-meta-pills">
+          <span class="badge" style="color:${facColor};border-color:${facColor};">${ESC(facLabel)}</span>
+          <span class="badge">${ESC(card.species || "Khác")}</span>
+          ${isCollectible ? `<span class="badge" style="color:${owned > 0 ? "#4ade80" : "#fda4af"};">${owned > 0 ? `✓ Sở hữu ${owned}/${maxCap}` : "🔒 Chưa sở hữu"}</span>` : ""}
+          ${activeDeck && isCollectible && card.fac === (CHAR_BY_ID[activeDeck.leaderId]?.fac) && card.id !== activeDeck.leaderId ? `<span class="badge">📚 Trong Deck: ${inDeckCount}/${maxCap}</span>` : ""}
+          ${baseChar?.h ? `<span class="badge">📏 ${baseChar.h}m</span>` : ""}
+        </div>
+        ${isCollectible && !card.isHybrid ? `
+          <div class="cz-economy-box">
+            <div>🪙 Mua lẻ: <strong>${priceInfo.credits.toLocaleString()} Cr</strong></div>
+            <div>⚒️ Chế tạo: <strong>${priceInfo.dust} Mảnh Gen</strong></div>
+            <div>♻️ Phân giải: <strong>+${priceInfo.dustYield} Mảnh Gen</strong></div>
+          </div>
+        ` : ""}
+      </div>
+
+      <div class="cz-detail-col">
+        ${evalCR ? `
+          <div class="cz-block cr-live">
+            <div class="cz-block-title">⚡ Chỉ Số Chiến Đấu Trực Tiếp Trong Trận</div>
+            <div class="cz-block-text"><strong>Tổng CR: ${evalCR.total}</strong> • ${ESC(breakdownLines.join(" | ") || `Gốc ${card.cr}`)}</div>
+          </div>
+        ` : ""}
+
+        <div class="cz-block row1">
+          <div class="cz-block-head">
+            <span class="cz-block-title">⚔️ HÀNG 1 — HIỆU ỨNG CHIẾN ĐẤU TRỰC TIẾP</span>
+            ${r1CondTag}
+          </div>
+          <div class="cz-block-text">${ESC(r1.desc || "Chiến đấu trực diện theo Tổng CR, phe phái và hiệu ứng làn.")}</div>
+          ${r1.tag ? `<div class="cz-tag-line">Nhãn hiệu ứng: <code>${ESC(r1.tag)}</code></div>` : ""}
+        </div>
+
+        <div class="cz-block row2">
+          <div class="cz-block-head">
+            <span class="cz-block-title">🧬 HÀNG 2 — HIỆU ỨNG SINH SẢN &amp; HỖ TRỢ</span>
+            <span class="badge" style="color:#f472b6;">Hỗ trợ +${r2.crAura || 60} CR</span>
+          </div>
+          <div class="cz-block-text">${ESC(r2.desc || "Khi bị bắt giữ hoặc lai cặp Nam×Nữ tại Hàng 2 sẽ kích hoạt hỗ trợ Hàng 1.")}</div>
+          <div class="cz-tag-line">🧬 Tỷ lệ lai / cơ chế: <strong>${ESC(breedPctStr)}</strong></div>
+          ${debuffNote}
+        </div>
+
+        ${specialStatusNotes.length ? `
+          <div class="cz-block special">
+            <div class="cz-block-title">✦ Trạng Thái &amp; Đặc Tính Đột Biến</div>
+            ${specialStatusNotes.map((n) => `<div class="cz-note ok">${ESC(n)}</div>`).join("")}
+          </div>
+        ` : ""}
+
+        <div class="cz-block lore">
+          <div class="cz-block-title">📜 Hồ Sơ Nhân Vật &amp; Tiểu Sử Lore</div>
+          ${skillsHtml}
+          <p class="cz-bio-text">${ESC(loreBio)}</p>
+        </div>
+      </div>
+    `;
+
+    // Build Context-Sensitive Actions Footer
+    const actionsEl = document.getElementById("cz-actions");
+    const btns = [];
+
+    if (ctx.source === "duel" && ctx.zone === "hand" && eng && !eng.over) {
+      btns.push(`<button type="button" class="btn-primary btn-compact" id="btn-cz-deploy">📥 Triển Khai Ra Hàng 1</button>`);
+    }
+
+    const deckFac = CHAR_BY_ID[activeDeck?.leaderId]?.fac;
+    if (isCollectible && activeDeck && card.fac === deckFac && card.id !== activeDeck.leaderId) {
+      if (owned > inDeckCount && activeDeck.cards.length < 16) {
+        btns.push(`<button type="button" class="btn-primary btn-compact" id="btn-cz-add-deck">➕ Thêm Vào ${ESC(activeDeck.name)}</button>`);
+      }
+      if (inDeckCount > 0) {
+        btns.push(`<button type="button" class="btn-glass btn-compact" id="btn-cz-rem-deck">➖ Gỡ 1 Khỏi Deck (${inDeckCount})</button>`);
+      }
+    }
+
+    if (isCollectible && !card.isHybrid) {
+      if (owned < maxCap) {
+        btns.push(`<button type="button" class="btn-gold btn-compact" id="btn-cz-buy">🪙 Mua (${priceInfo.credits.toLocaleString()} Cr)</button>`);
+        btns.push(`<button type="button" class="btn-accent btn-compact" id="btn-cz-craft">⚒️ Chế Tạo (${priceInfo.dust} Mảnh)</button>`);
+      }
+      if (card.unique && owned === 0 && CHAR_BY_ID[card.id]) {
+        const aff = this.game.getAffinity(card.id);
+        const infCost = aff >= 35 ? 0 : (card.cr >= 750 ? 90 : 45);
+        btns.push(`<button type="button" class="btn-glass btn-compact" id="btn-cz-recruit">${infCost === 0 ? "🤝 Chiêu Mộ Miễn Phí (Thân ≥35)" : `🤝 Chiêu Mộ (${infCost} Ảnh Hưởng)`}</button>`);
+      }
+      if (owned > 0 && card.id !== this.game.protagonistId) {
+        btns.push(`<button type="button" class="btn-glass btn-compact" id="btn-cz-dismantle">♻️ Phân Giải (+${priceInfo.dustYield} Mảnh)</button>`);
+      }
+    }
+
+    btns.push(`<button type="button" class="btn-glass btn-compact" id="btn-cz-close-footer">Đóng</button>`);
+    actionsEl.innerHTML = btns.join("");
+
+    document.getElementById("btn-cz-close-footer")?.addEventListener("click", () => {
+      SFX.click();
+      this.closeCardZoomModal();
+    });
+
+    document.getElementById("btn-cz-deploy")?.addEventListener("click", () => {
+      const firstEmpty = this.duelEngine?.player.row1.findIndex((s) => s === null);
+      if (firstEmpty == null || firstEmpty < 0) {
+        SFX.alert();
+        this.showToast("Hàng 1 đã đầy", "Hãy thu hồi 1 lá hoặc bấm Giao Chiến!");
+        return;
+      }
+      const res = this.duelEngine.deployCardToRow1(ctx.idx, firstEmpty);
+      if (res.ok) {
+        SFX.cardPlay();
+        this.closeCardZoomModal();
+        this.renderDuelUI();
+      } else {
+        SFX.alert();
+        this.showToast("Không thể ra bài", res.reason);
+      }
+    });
+
+    document.getElementById("btn-cz-add-deck")?.addEventListener("click", () => {
+      const r = this.game.addCardToActiveDeck(card.id);
+      if (r.ok) {
+        SFX.cardPlay();
+        this.renderDeckBuilder();
+        this.openCardZoomModal(card, ctx);
+      } else {
+        SFX.alert();
+        this.showToast("Không thể thêm", r.msg);
+      }
+    });
+
+    document.getElementById("btn-cz-rem-deck")?.addEventListener("click", () => {
+      const pos = this.game.getActiveDeck().cards.lastIndexOf(card.id);
+      if (pos >= 0) {
+        SFX.click();
+        this.game.removeCardFromActiveDeck(pos);
+        this.renderDeckBuilder();
+        this.openCardZoomModal(card, ctx);
+      }
+    });
+
+    document.getElementById("btn-cz-buy")?.addEventListener("click", () => {
+      const r = this.game.buyCardWithCredits(card.id);
+      if (r.ok) {
+        SFX.victory();
+        this.refreshTopResources();
+        this.renderDeckBuilder();
+        this.renderShopView();
+        this.showToast("🪙 Mua Thẻ Thành Công!", `${card.name} (${r.count}/${maxCap})`);
+        this.openCardZoomModal(card, ctx);
+      } else {
+        SFX.alert();
+        this.showToast("Chưa thể mua", r.msg);
+      }
+    });
+
+    document.getElementById("btn-cz-craft")?.addEventListener("click", () => {
+      const r = this.game.craftCardWithDust(card.id);
+      if (r.ok) {
+        SFX.breed();
+        this.refreshTopResources();
+        this.renderDeckBuilder();
+        this.renderShopView();
+        this.showToast("⚒️ Chế Tạo Thành Công!", `${card.name} (${r.count}/${maxCap})`);
+        this.openCardZoomModal(card, ctx);
+      } else {
+        SFX.alert();
+        this.showToast("Chưa đủ Mảnh Gen", r.msg);
+      }
+    });
+
+    document.getElementById("btn-cz-recruit")?.addEventListener("click", () => {
+      const r = this.game.recruitCharacterCard(card.id);
+      if (r.ok) {
+        SFX.victory();
+        this.refreshTopResources();
+        this.renderDeckBuilder();
+        this.renderShopView();
+        this.showToast("🤝 Chiêu Mộ Thành Công!", `${card.name} đã vào Kho Thẻ!`);
+        this.openCardZoomModal(card, ctx);
+      } else {
+        SFX.alert();
+        this.showToast("Chưa thể chiêu mộ", r.msg);
+      }
+    });
+
+    document.getElementById("btn-cz-dismantle")?.addEventListener("click", () => {
+      const r = this.game.dismantleCard(card.id);
+      if (r.ok) {
+        SFX.click();
+        this.refreshTopResources();
+        this.renderDeckBuilder();
+        this.renderShopView();
+        this.showToast("♻️ Đã Phân Giải Thẻ", `+${r.dustGained} Mảnh Gen (Còn ${r.remaining} bản)`);
+        this.openCardZoomModal(card, ctx);
+      } else {
+        SFX.alert();
+        this.showToast("Không thể phân giải", r.msg);
+      }
+    });
+
+    modal.classList.remove("hidden");
   }
 
   getCardRarityClass(c) {
@@ -1394,9 +1875,12 @@ class Cycle12App {
       rarity,
       opts.selected ? "selected" : "",
       opts.playable === false ? "unaffordable" : "playable",
+      opts.locked ? "card-locked" : "",
       condLit ? "cond-lit" : ""
     ].filter(Boolean).join(" ");
     const attrs = opts.attrs || "";
+    const zoomAttrs = opts.zoomAttrs || `data-zoom-host="1" data-zoom-card="${ESC(c.id)}"`;
+    const ownBadge = opts.ownText ? `<span class="own-pill ${opts.locked ? "locked" : ""}">${ESC(opts.ownText)}</span>` : "";
     const customStyle = `--card-accent:${accent};${opts.style || ""}`;
     const titleStr = opts.title || `H1: ${r1.desc || ""} | H2: ${r2.desc || ""}`;
     const badgeTop = c.fromRow2Breeding
@@ -1408,11 +1892,13 @@ class Cycle12App {
           : (c.isHybrid ? `<span class="token-pill hybrid">✦ LAI</span>` : "")));
 
     return `
-      <button class="${extraCls}" style="${customStyle}" ${attrs} title="${ESC(titleStr)}">
+      <button type="button" class="${extraCls}" style="${customStyle}" ${attrs} ${zoomAttrs} title="${ESC(titleStr)}">
         <span class="card-foil-sweep"></span>
+        <span class="card-zoom-trigger" data-zoom-trigger="1" role="button" tabindex="0" title="Phóng to đọc toàn bộ thông số &amp; hiệu ứng">🔍</span>
         <span class="card-cr-gem">${c.cr}</span>
         <div class="card-top-badges">
           <span class="gender-pill ${isM ? "male" : "female"}">${isM ? "♂" : "♀"}</span>
+          ${ownBadge}
           ${badgeTop}
         </div>
         <div class="card-art-stage">
@@ -1481,11 +1967,16 @@ class Cycle12App {
           <span class="muted">${ESC(card.species)} • ${ESC(facLabel)}</span>
           ${card.fromRow2Breeding ? `<span class="badge" style="color:#a7f3d0;border-color:rgba(52,211,153,0.6);">🧬 TOKEN TỪ HÀNG 2</span>` : (card.isToken ? `<span class="badge" style="color:#f472b6;border-color:rgba(244,114,182,0.5);">🪙 TOKEN LAI</span>` : "")}
           ${condHtml}
+          <button type="button" class="btn-primary btn-compact insp-zoom-btn" id="btn-inspect-zoom">🔍 Phóng To / Đọc Đủ Eff</button>
         </div>
         <div class="inspector-eff h1">⚔️ <strong>H1:</strong> ${ESC(r1.desc || "Đánh trực tiếp theo tổng CR")}</div>
         <div class="inspector-eff h2">🧬 <strong>H2:</strong> ${ESC(r2.desc || "Hỗ trợ +60 CR")}${penWarn}${symNote}${dblNote}${sireLine}</div>
       </div>
     `;
+    document.getElementById("btn-inspect-zoom")?.addEventListener("click", () => {
+      SFX.click();
+      this.openCardZoomModal(card, { source: "duel", evalCR });
+    });
   }
 
   renderDuelUI() {
@@ -1497,7 +1988,8 @@ class Cycle12App {
     const pFacName = FACTIONS[pLeader.fac]?.name || pLeader.fac;
     const eFacName = FACTIONS[eLeader.fac]?.name || eLeader.fac;
 
-    document.getElementById("deck-count-badge").textContent = validateDeckForLeader(this.game.customDeck || [], this.game.protagonistId, this.game.hybrids).length;
+    document.getElementById("deck-count-badge").textContent =
+      this.game.getActiveDeck()?.cards?.length ?? validateDeckForLeader(this.game.customDeck || [], this.game.protagonistId, this.game.hybrids, this.game.collection).length;
 
     // Row 3 Outer Leader Slots
     const eRow3Eval = eng.evalCardCombatCR(eLeader, eng.getRow1Cards("player")[0] || null, "enemy", { attackingRow3: true });
@@ -1570,15 +2062,16 @@ class Cycle12App {
           : `🔒 Tù binh • H2: +${effAura} CR (${ESC(r2.tag || "")})${dblBadge}`;
         return `
           <div class="row2-captive-chip ${isBreeding ? "breeding-chamber" : ""} ${(dblLit || symLit) ? "cond-lit" : ""}"
-               data-inspect-side="${sideKey}" data-inspect-zone="row2" data-inspect-idx="${idx}"
+               data-zoom-host="1" data-inspect-side="${sideKey}" data-inspect-zone="row2" data-inspect-idx="${idx}"
                title="${ESC(r2.desc || "")}">
             <img src="${getCardPortrait(c)}" alt="${ESC(c.name)}" />
-            <div>
+            <div style="flex:1;min-width:0;">
               <strong>${ESC(c.name)}</strong>
               <span class="gender-pill ${c.gender === "Male" ? "male" : "female"}">${c.gender === "Male" ? "♂" : "♀"}</span>
               <span class="muted">(${ESC(c.species)})</span>
               <div style="font-size:10px;color:${isBreeding ? "#f9a8d4" : (isEnemy ? "#fda4af" : "#bae6fd")};">${subText}</div>
             </div>
+            <button type="button" class="card-zoom-mini" data-zoom-trigger="1" title="Phóng to đọc đủ thông số &amp; H2">🔍</button>
           </div>
         `;
       }).join("");
@@ -1637,9 +2130,10 @@ class Cycle12App {
         <div class="board-slot">
           <div class="tcg-unit-card enemy-unit ${this.getCardRarityClass(u)} ${u.isToken ? "is-token" : ""} ${condLit ? "cond-lit" : ""}"
                style="--card-accent:${accent};"
-               data-inspect-side="enemy" data-inspect-zone="row1" data-inspect-idx="${i}"
+               data-zoom-host="1" data-inspect-side="enemy" data-inspect-zone="row1" data-inspect-idx="${i}"
                title="${ESC(u.row1Effect?.desc || "")}">
             <span class="card-foil-sweep"></span>
+            <span class="card-zoom-trigger" data-zoom-trigger="1" role="button" tabindex="0" title="Phóng to đọc toàn bộ thông số &amp; hiệu ứng">🔍</span>
             <span class="card-cr-gem">${evalCR.total}</span>
             ${tokBadge}
             <div class="unit-thumb-frame">
@@ -1687,12 +2181,13 @@ class Cycle12App {
         : (u.isToken ? `<span class="token-pill">🪙 TOKEN</span>` : "");
       return `
         <div class="board-slot">
-          <button class="tcg-unit-card ${this.getCardRarityClass(u)} ${canRecall ? "ready" : ""} ${u.isToken ? "is-token" : ""} ${condLit ? "cond-lit" : ""}"
+          <button type="button" class="tcg-unit-card ${this.getCardRarityClass(u)} ${canRecall ? "ready" : ""} ${u.isToken ? "is-token" : ""} ${condLit ? "cond-lit" : ""}"
                   style="--card-accent:${accent};"
                   data-recall-lane="${i}"
-                  data-inspect-side="player" data-inspect-zone="row1" data-inspect-idx="${i}"
+                  data-zoom-host="1" data-inspect-side="player" data-inspect-zone="row1" data-inspect-idx="${i}"
                   title="${canRecall ? "Bấm để thu hồi về tay trước khi Giao Chiến" : ESC(u.row1Effect?.desc || "")}">
             <span class="card-foil-sweep"></span>
+            <span class="card-zoom-trigger" data-zoom-trigger="1" role="button" tabindex="0" title="Phóng to đọc toàn bộ thông số &amp; hiệu ứng">🔍</span>
             <span class="card-cr-gem">${evalCR.total}</span>
             ${tokBadge}
             <div class="unit-thumb-frame">
@@ -1731,7 +2226,8 @@ class Cycle12App {
     });
 
     pRow1El.querySelectorAll("[data-recall-lane]").forEach((btn) => {
-      btn.addEventListener("click", () => {
+      btn.addEventListener("click", (e) => {
+        if (e.target.closest("[data-zoom-trigger]")) return;
         const res = eng.recallFromRow1(Number(btn.dataset.recallLane));
         if (res.ok) {
           SFX.click();
@@ -1751,11 +2247,13 @@ class Cycle12App {
       playable: canDeploy,
       selected: eng.selectedHandIdx === idx,
       condMet: eng.isConditionMet(c, previewOpp, "player"),
+      zoomAttrs: `data-zoom-host="1" data-zoom-card="${ESC(c.id)}"`,
       attrs: `data-hand-idx="${idx}" data-inspect-side="player" data-inspect-zone="hand" data-inspect-idx="${idx}"`
     })).join("");
 
     handEl.querySelectorAll("[data-hand-idx]").forEach((btn) => {
-      btn.addEventListener("click", () => {
+      btn.addEventListener("click", (e) => {
+        if (e.target.closest("[data-zoom-trigger]")) return;
         const idx = Number(btn.dataset.handIdx);
         const card = eng.player.hand[idx];
         if (card) this.inspectDuelCard(card);
@@ -1784,7 +2282,8 @@ class Cycle12App {
       });
     });
 
-    // Attach hover/click card inspection across Board & Row 2
+    // Attach hover/click card inspection & Zoom Modal triggers across Board, Hand & Row 2
+    const battleViewEl = document.getElementById("duel-battle-view");
     document.querySelectorAll("#duel-battle-view [data-inspect-zone]").forEach((el) => {
       const resolveSubject = () => {
         const side = eng[el.dataset.inspectSide];
@@ -1801,6 +2300,19 @@ class Cycle12App {
       if (el.dataset.inspectZone !== "hand") el.addEventListener("click", resolveSubject);
     });
 
+    this.bindZoomTriggers(battleViewEl, (host) => {
+      const sideKey = host.dataset.inspectSide;
+      const zone = host.dataset.inspectZone;
+      const idx = Number(host.dataset.inspectIdx);
+      const card = eng[sideKey]?.[zone]?.[idx];
+      if (!card) return null;
+      const oppSide = sideKey === "player" ? "enemy" : "player";
+      const evalCR = zone === "row1"
+        ? eng.evalCardCombatCR(card, eng[oppSide]?.row1?.[idx], sideKey, { laneIdx: idx })
+        : null;
+      return { card, ctx: { source: "duel", side: sideKey, zone, idx, evalCR } };
+    });
+
     if (hasSelectedHand) this.inspectDuelCard(hasSelectedHand);
     else if (!this.inspectedDuelCard) this.inspectDuelCard(pLeader, pRow3Eval);
   }
@@ -1810,10 +2322,12 @@ class Cycle12App {
     const won = eng.winner === "player";
     won ? SFX.victory() : SFX.alert();
 
+    let spoil = null;
     if (won) {
       this.game.recordBattleWin();
       this.game.addRes(this.game.playerFaction, "credits", 600);
       this.game.addRes(this.game.playerFaction, "influence", 25);
+      spoil = this.game.grantBattleSpoil(eng.enemy.leader.id, 0.48);
       if (this.duelContext.kind === "gauntlet") {
         this.game.recordGauntletFloor(this.duelContext.floor || 1);
       }
@@ -1827,18 +2341,24 @@ class Cycle12App {
       tiebreak: "Phân định thắng bại cuối trận!"
     };
 
+    const spoilMsg = won && spoil
+      ? (spoil.card
+        ? ` • 🎁 Rớt thẻ mới: ${spoil.card.name} (+${spoil.dust} Mảnh Gen)!`
+        : ` • ⚒️ +${spoil.dust} Mảnh Gen!`)
+      : "";
+
     const modal = document.getElementById("duel-victory-modal");
     document.getElementById("victory-title").textContent = won ? "🏆 CHIẾN THẮNG VÁN BÀI!" : "💀 THẤT BẠI!";
     document.getElementById("victory-title").style.color = won ? "var(--gold)" : "var(--danger)";
     document.getElementById("victory-desc").textContent = won
-      ? `${eng.player.leader.name} thắng ${eng.enemy.leader.name} (${reasonMap[eng.winReason] || ""}) (+600 Credits, +25 Ảnh hưởng)!`
-      : `${eng.enemy.leader.name} thắng trận (${reasonMap[eng.winReason] || ""}). Hãy chỉnh Bộ Bài Phe hoặc dùng Hàng 2 Lai Tạo!`;
+      ? `${eng.player.leader.name} thắng ${eng.enemy.leader.name} (${reasonMap[eng.winReason] || ""}) (+600 Credits, +25 Ảnh hưởng${spoilMsg})`
+      : `${eng.enemy.leader.name} thắng trận (${reasonMap[eng.winReason] || ""}). Hãy chỉnh Bộ Bài Phe, mua thêm thẻ ở Chợ hoặc dùng Hàng 2 Lai Tạo!`;
 
     document.getElementById("btn-victory-story").classList.toggle("hidden", !this.pendingStoryBattle);
     document.getElementById("btn-victory-conquer").classList.toggle("hidden", !(won && this.pendingInvasionSectorId));
     document.getElementById("btn-victory-next-floor").classList.toggle("hidden", !(won && this.duelContext.kind === "gauntlet"));
 
-    // Offer Faction-Pure Card Draft reward on Gauntlet win
+    // Offer Faction-Pure Card Draft reward on Gauntlet win & unlock card into Collection
     const draftBox = document.getElementById("gauntlet-draft-box");
     const pFac = eng.player.leader.fac;
     if (won && this.duelContext.kind === "gauntlet") {
@@ -1849,13 +2369,14 @@ class Cycle12App {
       draftBox.querySelectorAll("[data-draft-card]").forEach(b => {
         b.addEventListener("click", () => {
           const cid = b.dataset.draftCard;
-          if (!this.game.customDeck.includes(cid)) {
-            if (this.game.customDeck.length < 16) this.game.customDeck.push(cid);
-            else this.game.customDeck[this.game.customDeck.length - 1] = cid;
-          }
+          const uRes = this.game.unlockCard(cid, 1);
+          const addRes = this.game.addCardToActiveDeck(cid);
           this.game.addRes(this.game.playerFaction, "credits", 500);
           this.refreshTopResources();
-          this.showToast("🎁 Đã thêm lá thưởng!", `Lá bài phe đã được thêm vào Bộ Bài (+500 Cr).`);
+          const note = uRes.overflowDust > 0
+            ? `Đã sở hữu tối đa → Quy đổi +${uRes.overflowDust} Mảnh Gen (+500 Cr)!`
+            : (addRes.ok ? `Đã mở khóa thẻ & thêm vào ${this.game.getActiveDeck().name} (+500 Cr).` : "Đã mở khóa vào Kho Thẻ (+500 Cr).");
+          this.showToast("🎁 Đã nhận thưởng Tháp!", note);
           draftBox.innerHTML = `<span class="badge" style="color:#4ade80;">✓ Đã nhận thưởng!</span>`;
         });
       });
@@ -1868,82 +2389,360 @@ class Cycle12App {
   }
 
   renderDeckBuilder() {
-    const protag = this.game.getProtagonist();
-    const fac = protag.fac || this.game.playerFaction;
-    const facName = this.game.facName(fac);
+    const decks = this.game.ensureDecksInitialized() || this.game.decks || [];
+    const activeDeck = this.game.getActiveDeck();
     const hybrids = this.game.hybrids || [];
+    const lead = CHAR_BY_ID[activeDeck.leaderId] || this.game.getProtagonist();
+    const fac = lead.fac || this.game.playerFaction;
+    const facName = this.game.facName(fac);
 
-    // Strictly sanitize stored deck against current Leader & Faction
-    this.game.customDeck = validateDeckForLeader(this.game.customDeck || [], protag.id, hybrids);
-    const deck = this.game.customDeck;
+    // Sync Deck Selector & Leader Selector
+    const deckSel = document.getElementById("deck-select");
+    if (deckSel) {
+      deckSel.innerHTML = decks.map((d) => {
+        const dFac = FACTIONS[CHAR_BY_ID[d.leaderId]?.fac]?.short || "?";
+        return `<option value="${ESC(d.id)}">${ESC(d.name)} (${ESC(dFac)} • ${d.cards.length}/16)</option>`;
+      }).join("");
+      deckSel.value = activeDeck.id;
+    }
+
+    const leadSel = document.getElementById("deck-leader-select");
+    if (leadSel) {
+      const sortedChars = [...CHARACTERS].sort((a, b) => {
+        const oa = this.game.getOwnedCount(a.id) > 0 ? 1 : 0;
+        const ob = this.game.getOwnedCount(b.id) > 0 ? 1 : 0;
+        if (oa !== ob) return ob - oa;
+        return b.cr - a.cr;
+      });
+      leadSel.innerHTML = sortedChars.map((c) => {
+        const owned = this.game.getOwnedCount(c.id) > 0;
+        const fShort = FACTIONS[c.fac]?.short || c.fac;
+        return `<option value="${ESC(c.id)}" ${owned ? "" : "disabled"}>${owned ? "" : "🔒 "}${ESC(c.name)} (${ESC(fShort)} • CR ${c.cr})${owned ? "" : " — Mua ở Chợ"}</option>`;
+      }).join("");
+      leadSel.value = lead.id;
+    }
+
+    const delBtn = document.getElementById("btn-deck-delete");
+    if (delBtn) delBtn.disabled = decks.length <= 1;
+
+    const zoomBtn = document.getElementById("btn-deck-zoom-mode");
+    if (zoomBtn) {
+      zoomBtn.classList.toggle("active", this.deckZoomMode);
+      zoomBtn.textContent = this.deckZoomMode ? "👁️ Soi Thẻ: BẬT (Chạm để Zoom)" : "👁️ Soi Thẻ: TẮT";
+    }
+
+    // Enforce Ownership & Faction Leader Lock on Active Deck
+    activeDeck.cards = validateDeckForLeader(activeDeck.cards, lead.id, hybrids, this.game.collection);
+    this.game.syncActiveDeckRef();
+    const deck = activeDeck.cards;
+
     document.getElementById("deck-count-badge").textContent = deck.length;
+    const countTextEl = document.getElementById("deck-active-count-text");
+    if (countTextEl) countTextEl.textContent = deck.length;
 
     const ruleBanner = document.getElementById("deck-faction-rule");
     if (ruleBanner) {
-      ruleBanner.innerHTML = `🔒 <strong>Luật Phe Phái &amp; 3 Hàng:</strong> Thủ lĩnh <strong>${ESC(protag.name)}</strong> (CR ${protag.cr}) trấn thủ <strong>Hàng 3</strong>. Bộ bài 16 lá (rút 2 lá/lượt) chỉ được dùng các thẻ thuộc phe <strong style="color:var(--gold);">${ESC(facName)}</strong>!`;
+      const ownCap = this.game.getFactionOwnedCapacity(fac);
+      ruleBanner.innerHTML = `🔒 <strong>Bộ Bài "${ESC(activeDeck.name)}" • Luật Phe Phái &amp; Sở Hữu:</strong> Thủ lĩnh <strong>${ESC(lead.name)}</strong> (CR ${lead.cr}) trấn thủ <strong>Hàng 3</strong>. Bộ bài tối đa 16 lá thuộc phe <strong style="color:var(--gold);">${ESC(facName)}</strong> từ Kho Thẻ (Đang mở: ${ownCap} slot khả dụng • ⚒️ Mảnh Gen: ${this.game.cardDust || 0}). Bấm <strong>🔍</strong> trên bất kỳ thẻ nào để Zoom đọc full H1/H2/Lore!`;
     }
 
     const activeEl = document.getElementById("deck-active-list");
-    activeEl.innerHTML = deck.map((cid, idx) => {
-      const c = resolveCard(cid, hybrids);
-      if (!c) return "";
-      const gMark = c.gender === "Male" ? "♂" : "♀";
-      return `<button class="deck-chip ${c.isHybrid ? "hybrid" : ""}" data-remove-idx="${idx}">${gMark} [CR ${c.cr}] ${ESC(c.name)} ✕</button>`;
-    }).join("");
+    activeEl.innerHTML = deck.length
+      ? deck.map((cid, idx) => {
+          const c = resolveCard(cid, hybrids);
+          if (!c) return "";
+          const gMark = c.gender === "Male" ? "♂" : "♀";
+          return `
+            <div class="deck-chip ${c.isHybrid ? "hybrid" : ""}" data-zoom-host="1" data-zoom-card="${ESC(cid)}">
+              <button type="button" class="chip-main" data-remove-idx="${idx}" data-cid="${ESC(cid)}" title="${this.deckZoomMode ? "Chạm để phóng to đọc chi tiết" : "Bấm để gỡ khỏi Bộ Bài"}">
+                ${gMark} [CR ${c.cr}] ${ESC(c.name)} ${this.deckZoomMode ? "" : "✕"}
+              </button>
+              <button type="button" class="chip-zoom-btn" data-zoom-trigger="1" title="Phóng to đọc toàn bộ thông số &amp; hiệu ứng">🔍</button>
+            </div>
+          `;
+        }).join("")
+      : `<span class="muted" style="font-size:12px;">Chưa có thẻ trong bộ bài — bấm vào thẻ đã sở hữu bên dưới hoặc bấm ✨ Tự Xếp Đội Hình Phe!</span>`;
 
     activeEl.querySelectorAll("[data-remove-idx]").forEach((b) => {
-      b.addEventListener("click", () => {
+      b.addEventListener("click", (e) => {
+        if (e.target.closest("[data-zoom-trigger]")) return;
+        const cid = b.dataset.cid;
+        const card = resolveCard(cid, hybrids);
+        if (this.deckZoomMode && card) {
+          SFX.click();
+          this.openCardZoomModal(card, { source: "deck" });
+          return;
+        }
         SFX.click();
-        this.game.customDeck.splice(Number(b.dataset.removeIdx), 1);
-        this.game.saveToSlot("auto");
+        this.game.removeCardFromActiveDeck(Number(b.dataset.removeIdx));
         this.renderDeckBuilder();
       });
     });
 
+    this.bindZoomTriggers(activeEl, (host) => ({
+      card: resolveCard(host.dataset.zoomCard, hybrids),
+      ctx: { source: "deck" }
+    }));
+
     const q = (document.getElementById("deck-search-input")?.value || "").trim().toLowerCase();
     const df = this.deckFilter || "all";
     const factionPool = getFactionCardPool(fac, hybrids).filter((c) => {
-      if (c.id === protag.id) return false; // Leader is permanently seated on Row 3!
+      if (c.id === lead.id) return false;
+      const owned = this.game.getOwnedCount(c.id);
       if (df === "male" && c.gender !== "Male") return false;
       if (df === "female" && c.gender !== "Female") return false;
       if (df === "cond" && !(c.row1Effect?.condType || c.row2Effect?.symbiosisR2Boost || c.row2Effect?.doubleIfTokenBred || c.row2Effect?.omniWomb || c.row2Effect?.tier === "tamarite")) return false;
+      if (df === "owned" && owned <= 0) return false;
+      if (df === "unowned" && owned > 0) return false;
       if (!q) return true;
       return `${c.name} ${c.species || ""} ${c.row1Effect?.desc || ""} ${c.row2Effect?.desc || ""}`.toLowerCase().includes(q);
     });
 
     const poolEl = document.getElementById("deck-pool-grid");
-    poolEl.innerHTML = factionPool.map((c) => this.renderTCGCardHTML(c, {
-      playable: true,
-      lazy: true,
-      condMet: Boolean(c.row1Effect?.condType),
-      style: "width:auto;min-width:0;",
-      attrs: `data-add-card="${ESC(c.id)}"`
-    })).join("");
+    poolEl.innerHTML = factionPool.length
+      ? factionPool.map((c) => {
+          const owned = this.game.getOwnedCount(c.id);
+          const maxCap = this.game.getMaxCopies(c);
+          const inDeck = deck.filter((id) => id === c.id).length;
+          const isLocked = owned <= 0;
+          const ownText = isLocked
+            ? `🔒 Mua ${getCardPriceInfo(c).credits.toLocaleString()} Cr`
+            : `✓ ${inDeck}/${owned}${maxCap > 1 ? ` (Tối đa ${maxCap})` : ""}`;
+          return this.renderTCGCardHTML(c, {
+            playable: !isLocked && inDeck < owned && deck.length < 16,
+            locked: isLocked,
+            ownText,
+            lazy: true,
+            condMet: Boolean(c.row1Effect?.condType),
+            style: "width:auto;min-width:0;",
+            zoomAttrs: `data-zoom-host="1" data-zoom-card="${ESC(c.id)}"`,
+            attrs: `data-add-card="${ESC(c.id)}"`
+          });
+        }).join("")
+      : `<div class="muted" style="grid-column:1 / -1;padding:16px;">Không có lá nào khớp bộ lọc hiện tại.</div>`;
 
     poolEl.querySelectorAll("[data-add-card]").forEach((b) => {
-      b.addEventListener("click", () => {
-        if (this.game.customDeck.length >= 16) {
-          SFX.alert();
-          this.showToast("Bộ bài đã đủ 16 lá", "Bấm vào lá phía trên để gỡ bớt trước khi thêm mới!");
-          return;
-        }
+      b.addEventListener("click", (e) => {
+        if (e.target.closest("[data-zoom-trigger]")) return;
         const cid = b.dataset.addCard;
         const card = resolveCard(cid, hybrids);
-        const count = this.game.customDeck.filter((id) => id === cid).length;
-        if (card?.unique && count >= 1) {
-          SFX.alert();
-          this.showToast("Nhân vật Độc Nhất", `${card.name} là thẻ độc nhất, mỗi bộ bài chỉ có 1 lá!`);
+        if (this.deckZoomMode && card) {
+          SFX.click();
+          this.openCardZoomModal(card, { source: "deck" });
           return;
         }
-        if (!card?.unique && count >= 3) {
-          SFX.alert();
-          this.showToast("Tối đa 3 bản sao", `Mỗi đơn vị Quân Dự Bị chỉ mang tối đa 3 lá!`);
+        const owned = this.game.getOwnedCount(cid);
+        if (owned <= 0 && card) {
+          SFX.click();
+          this.openCardZoomModal(card, { source: "deck" });
+          this.showToast("🔒 Thẻ chưa mở khóa", `Bạn có thể Mua / Chế Tạo ${card.name} ngay trong cửa sổ Zoom hoặc tab Chợ!`);
           return;
         }
-        SFX.cardPlay();
-        this.game.customDeck.push(cid);
-        this.game.saveToSlot("auto");
-        this.renderDeckBuilder();
+        const r = this.game.addCardToActiveDeck(cid);
+        if (r.ok) {
+          SFX.cardPlay();
+          this.renderDeckBuilder();
+        } else {
+          SFX.alert();
+          this.showToast("Không thể thêm thẻ", r.msg);
+        }
+      });
+    });
+
+    this.bindZoomTriggers(poolEl, (host) => ({
+      card: resolveCard(host.dataset.zoomCard, hybrids),
+      ctx: { source: "deck" }
+    }));
+  }
+
+  renderShopView() {
+    const view = document.getElementById("duel-shop-view");
+    if (!view) return;
+    const facRes = this.game.resources[this.game.playerFaction] || { credits: 0, influence: 0, research: 0 };
+    const totalOwnedKinds = CARDS.filter((c) => this.game.getOwnedCount(c.id) > 0).length;
+    const totalOwnedCopies = CARDS.reduce((sum, c) => sum + this.game.getOwnedCount(c.id), 0);
+
+    const currBar = document.getElementById("shop-currency-bar");
+    if (currBar) {
+      currBar.innerHTML = `
+        <span class="shop-curr-pill">🪙 Credits: <strong style="color:var(--gold);">${(facRes.credits || 0).toLocaleString()}</strong></span>
+        <span class="shop-curr-pill">🤝 Ảnh Hưởng: <strong style="color:#f472b6;">${facRes.influence || 0}</strong></span>
+        <span class="shop-curr-pill">🔬 Nghiên Cứu: <strong style="color:#6ee7b7;">${facRes.research || 0}</strong></span>
+        <span class="shop-curr-pill">⚒️ Mảnh Gen: <strong style="color:#c084fc;">${this.game.cardDust || 0}</strong></span>
+        <span class="shop-curr-pill">🃏 Bộ Sưu Tập: <strong>${totalOwnedKinds}/${CARDS.length} mẫu (${totalOwnedCopies} lá)</strong></span>
+      `;
+    }
+
+    const activeFac = CHAR_BY_ID[this.game.getActiveDeck()?.leaderId]?.fac || this.game.playerFaction;
+    const prefFac = this.shopFaction !== "all" ? this.shopFaction : activeFac;
+    const packsGrid = document.getElementById("shop-packs-grid");
+    if (packsGrid) {
+      packsGrid.innerHTML = CARD_PACKS.map((p) => {
+        const costs = [];
+        if (p.costCredits) costs.push(`🪙 ${p.costCredits.toLocaleString()} Cr`);
+        if (p.costInfluence) costs.push(`🤝 ${p.costInfluence} Ảnh hưởng`);
+        if (p.costResearch) costs.push(`🔬 ${p.costResearch} Nghiên cứu`);
+        const facHint = p.id === "faction_pack" ? ` • Ưu tiên phe ${this.game.facName(prefFac)}` : "";
+        return `
+          <div class="shop-pack-card">
+            <div class="pack-head">
+              ${p.icon ? `<span class="pack-icon">${ESC(p.icon)}</span>` : ""}
+              <div>
+                <div class="pack-title">${ESC(p.name)}</div>
+                <div class="pack-sub">${p.count} lá ngẫu nhiên${ESC(facHint)}</div>
+              </div>
+            </div>
+            <div class="pack-desc">${ESC(p.desc)}</div>
+            <div class="pack-footer">
+              <span class="pack-cost">${costs.join(" • ")}</span>
+              <button type="button" class="btn-primary btn-compact" data-open-pack="${ESC(p.id)}">📦 Mở Gói</button>
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      packsGrid.querySelectorAll("[data-open-pack]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const r = this.game.openCardPack(btn.dataset.openPack, prefFac);
+          if (!r.ok) {
+            SFX.alert();
+            this.showToast("Chưa đủ tài nguyên", r.msg);
+            return;
+          }
+          SFX.breed();
+          this.refreshTopResources();
+          this.checkAndToastAchievements();
+          const resBox = document.getElementById("shop-pack-result");
+          if (resBox) {
+            resBox.classList.remove("hidden");
+            resBox.innerHTML = `
+              <div class="pack-result-head">
+                <strong>🎉 Khui Thành Công: ${ESC(r.pack.name)}</strong>
+                ${r.totalDustGained > 0 ? `<span class="badge" style="color:#c084fc;">♻️ Thẻ trùng → +${r.totalDustGained} Mảnh Gen</span>` : `<span class="badge" style="color:#4ade80;">✓ Tất cả đã vào Kho Thẻ!</span>`}
+              </div>
+              <div class="pack-rewards-row">
+                ${r.rewards.map((item) => this.renderTCGCardHTML(item.card, {
+                  playable: true,
+                  ownText: item.overflowDust > 0 ? `♻️ +${item.overflowDust} Mảnh` : (item.isNew ? "✨ MỚI!" : `✓ x${item.ownedAfter}`),
+                  condMet: Boolean(item.card.row1Effect?.condType),
+                  style: "width:auto;min-width:0;",
+                  zoomAttrs: `data-zoom-host="1" data-zoom-card="${ESC(item.card.id)}"`,
+                  attrs: `data-pack-pull="${ESC(item.card.id)}"`
+                })).join("")}
+              </div>
+            `;
+            this.bindZoomTriggers(resBox, (host) => ({
+              card: resolveCard(host.dataset.zoomCard, this.game.hybrids),
+              ctx: { source: "shop" }
+            }));
+            resBox.querySelectorAll("[data-pack-pull]").forEach((cardBtn) => {
+              cardBtn.addEventListener("click", () => {
+                SFX.click();
+                this.openCardZoomModal(resolveCard(cardBtn.dataset.packPull, this.game.hybrids), { source: "shop" });
+              });
+            });
+          }
+          this.renderShopView();
+        });
+      });
+    }
+
+    const sf = this.shopFilter || "all";
+    const sFac = this.shopFaction || "all";
+    const q = (document.getElementById("shop-search-input")?.value || "").trim().toLowerCase();
+    const list = CARDS.filter((c) => {
+      if (sFac !== "all" && c.fac !== sFac) return false;
+      const owned = this.game.getOwnedCount(c.id);
+      const maxCap = this.game.getMaxCopies(c);
+      if (sf === "unowned" && owned >= maxCap) return false;
+      if (sf === "owned" && owned <= 0) return false;
+      if (sf === "legend" && !c.unique && (c.cr || 0) < 650) return false;
+      if (!q) return true;
+      return `${c.name} ${c.species || ""} ${FACTIONS[c.fac]?.name || ""} ${c.row1Effect?.desc || ""} ${c.row2Effect?.desc || ""}`.toLowerCase().includes(q);
+    }).sort((a, b) => (b.cr || 0) - (a.cr || 0));
+
+    const cardsGrid = document.getElementById("shop-cards-grid");
+    if (!cardsGrid) return;
+    cardsGrid.innerHTML = list.length
+      ? list.map((c) => {
+          const owned = this.game.getOwnedCount(c.id);
+          const maxCap = this.game.getMaxCopies(c);
+          const price = getCardPriceInfo(c);
+          const facCol = FACTIONS[c.fac]?.color || "#38bdf8";
+          const facShort = FACTIONS[c.fac]?.short || c.fac;
+          const isM = c.gender === "Male";
+          return `
+            <div class="shop-card-tile ${this.getCardRarityClass(c)} ${owned === 0 ? "is-unowned" : ""}" style="--card-accent:${facCol};" data-zoom-host="1" data-zoom-card="${ESC(c.id)}">
+              <div class="shop-tile-top">
+                <div class="shop-tile-thumb" data-zoom-trigger="1" title="Bấm để Zoom Đọc Đủ Thông Số">
+                  <img src="${getCardPortrait(c)}" alt="${ESC(c.name)}" loading="lazy" />
+                  <span class="card-cr-gem">${c.cr}</span>
+                </div>
+                <div class="shop-tile-meta">
+                  <div class="shop-tile-name">${ESC(c.name)} <span class="gender-pill ${isM ? "male" : "female"}">${isM ? "♂" : "♀"}</span></div>
+                  <div class="shop-tile-sub" style="color:${facCol};">${ESC(c.species)} • ${ESC(facShort)} • ${c.unique ? "★ Độc Nhất" : "🛡️ Dự Bị"}</div>
+                  <div class="shop-tile-eff">⚔️ ${ESC(c.row1Effect?.tag || "Trực chiến")} • 🧬 ${ESC(c.row2Effect?.tag || `+${c.row2Effect?.crAura || 60} CR`)}</div>
+                  <div class="shop-tile-own ${owned >= maxCap ? "full" : ""}">${owned > 0 ? `✓ Sở hữu ${owned}/${maxCap}` : "🔒 Chưa sở hữu"}</div>
+                </div>
+              </div>
+              <div class="shop-tile-actions">
+                <button type="button" class="btn-glass btn-compact" data-zoom-trigger="1">🔍 Đọc Đủ</button>
+                <button type="button" class="btn-gold btn-compact" data-shop-buy="${ESC(c.id)}" ${owned >= maxCap ? "disabled" : ""}>🪙 ${price.credits.toLocaleString()}</button>
+                <button type="button" class="btn-accent btn-compact" data-shop-craft="${ESC(c.id)}" ${owned >= maxCap ? "disabled" : ""}>⚒️ ${price.dust}</button>
+                ${owned > 0 && c.id !== this.game.protagonistId ? `<button type="button" class="btn-glass btn-compact" data-shop-dismantle="${ESC(c.id)}" title="Phân giải 1 bản lấy Mảnh Gen">♻️ +${price.dustYield}</button>` : ""}
+              </div>
+            </div>
+          `;
+        }).join("")
+      : `<div class="muted" style="grid-column:1 / -1;padding:16px;">Không tìm thấy thẻ nào trong Chợ theo bộ lọc hiện tại.</div>`;
+
+    this.bindZoomTriggers(cardsGrid, (host) => ({
+      card: resolveCard(host.dataset.zoomCard, this.game.hybrids),
+      ctx: { source: "shop" }
+    }));
+
+    cardsGrid.querySelectorAll("[data-shop-buy]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const r = this.game.buyCardWithCredits(btn.dataset.shopBuy);
+        if (r.ok) {
+          SFX.victory();
+          this.refreshTopResources();
+          this.showToast("🪙 Mua Thẻ Thành Công!", `${r.card.name} (${r.count}/${this.game.getMaxCopies(r.card)})`);
+          this.renderShopView();
+        } else {
+          SFX.alert();
+          this.showToast("Chưa thể mua", r.msg);
+        }
+      });
+    });
+
+    cardsGrid.querySelectorAll("[data-shop-craft]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const r = this.game.craftCardWithDust(btn.dataset.shopCraft);
+        if (r.ok) {
+          SFX.breed();
+          this.refreshTopResources();
+          this.showToast("⚒️ Chế Tạo Thành Công!", `${r.card.name} (${r.count}/${this.game.getMaxCopies(r.card)})`);
+          this.renderShopView();
+        } else {
+          SFX.alert();
+          this.showToast("Chưa đủ Mảnh Gen", r.msg);
+        }
+      });
+    });
+
+    cardsGrid.querySelectorAll("[data-shop-dismantle]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const r = this.game.dismantleCard(btn.dataset.shopDismantle);
+        if (r.ok) {
+          SFX.click();
+          this.refreshTopResources();
+          this.showToast("♻️ Đã Phân Giải Thẻ", `+${r.dustGained} Mảnh Gen (Còn ${r.remaining} bản)`);
+          this.renderShopView();
+        } else {
+          SFX.alert();
+          this.showToast("Không thể phân giải", r.msg);
+        }
       });
     });
   }
@@ -2371,6 +3170,10 @@ class Cycle12App {
               <button class="btn-gold" id="btn-roster-make-protag">⭐ Chọn Làm Nhân Vật Chính (Chơi Góc Nhìn NV Này)</button>
               <button class="btn-primary" id="btn-roster-talk">💬 Đối Thoại Tương Tác</button>
               <button class="btn-glass" id="btn-roster-duel">🃏 Đấu Thử Thẻ Bài (Bắt &amp; Lai H2)</button>
+              <button class="btn-glass" id="btn-roster-zoom-card">🔍 Phóng To Thẻ Bài</button>
+              ${this.game.getOwnedCount(selected.id) > 0
+                ? `<span class="badge" style="color:#4ade80;border-color:rgba(74,222,128,0.55);">✓ Đã Sở Hữu Thẻ Bài</span>`
+                : `<button class="btn-accent" id="btn-roster-recruit-card">🤝 Chiêu Mộ Thẻ (${aff >= 35 ? "Miễn Phí" : `${selected.cr >= 750 ? 90 : 45} Ảnh Hưởng`})</button>`}
             </div>
           </div>
         </div>
@@ -2458,6 +3261,22 @@ class Cycle12App {
         this.switchMode("duel");
         this.setDuelTab("skirmish");
         this.startCardMatch({ kind: "skirmish", enemyId: selected.id, modeLabel: `🃏 Đấu Thử vs ${selected.name}` });
+      });
+      document.getElementById("btn-roster-zoom-card")?.addEventListener("click", () => {
+        SFX.click();
+        this.openCardZoomModal(resolveCard(selected.id, this.game.hybrids), { source: "codex" });
+      });
+      document.getElementById("btn-roster-recruit-card")?.addEventListener("click", () => {
+        const r = this.game.recruitCharacterCard(selected.id);
+        if (r.ok) {
+          SFX.victory();
+          this.refreshTopResources();
+          this.renderCodexTab();
+          this.showToast("🤝 Chiêu Mộ Thành Công!", `Đã mở khóa thẻ bài ${selected.name} vào Kho Thẻ!`);
+        } else {
+          SFX.alert();
+          this.showToast("Chưa đủ điều kiện chiêu mộ", r.msg);
+        }
       });
       return;
     }

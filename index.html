@@ -121,7 +121,8 @@
         <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
           <button class="btn-glass active" data-dtab="skirmish">⚔️ Đấu Trường Snap × Yu-Gi-Oh</button>
           <button class="btn-glass" data-dtab="gauntlet">🗼 Tháp Hư Không</button>
-          <button class="btn-glass" data-dtab="deck">🗂️ Bộ Bài Phe (<span id="deck-count-badge">16</span>/16)</button>
+          <button class="btn-glass" data-dtab="deck">🗂️ Tạo &amp; Xếp Deck (<span id="deck-count-badge">16</span>/16)</button>
+          <button class="btn-glass" data-dtab="shop">🛒 Chợ &amp; Gói Thẻ</button>
         </div>
 
         <div id="duel-skirmish-controls" style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
@@ -220,28 +221,71 @@
         </div>
       </div>
 
-      <!-- FACTION-LOCKED DECK BUILDER VIEW -->
+      <!-- FACTION-LOCKED MULTI-DECK BUILDER VIEW -->
       <div id="duel-deck-view" class="duel-deck-panel hidden">
+        <div class="deck-manager-bar">
+          <div class="deck-manager-left">
+            <span class="badge" style="color:var(--gold);">🗂️ Bộ Bài:</span>
+            <select id="deck-select" style="max-width:190px;"></select>
+            <select id="deck-leader-select" style="max-width:210px;" title="Chọn Thủ Lĩnh Hàng 3 (trong số thẻ đã sở hữu)"></select>
+          </div>
+          <div class="deck-manager-actions">
+            <button type="button" class="btn-primary btn-compact" id="btn-deck-new">+ Tạo Deck</button>
+            <button type="button" class="btn-glass btn-compact" id="btn-deck-rename">✏️ Đổi Tên</button>
+            <button type="button" class="btn-danger btn-compact" id="btn-deck-delete">🗑️ Xóa</button>
+          </div>
+        </div>
+
         <div class="faction-rule-banner" id="deck-faction-rule">
-          📜 Luật Phe Phái: Chỉ sử dụng thẻ cùng phe với Thủ lĩnh đại diện.
+          📜 Luật Phe Phái: Chỉ sử dụng thẻ cùng phe với Thủ lĩnh đại diện và nằm trong Kho Thẻ Đã Sở Hữu.
         </div>
         <div class="deck-toolbar">
-          <strong style="color:var(--gold);">🗂️ Bộ Bài Phe Đang Dùng (16 lá — Bấm thẻ để gỡ)</strong>
-          <button class="btn-accent btn-compact" id="btn-auto-deck">✨ Tự Xếp Đội Hình Phe</button>
+          <strong style="color:var(--gold);">🗂️ Bộ Bài Đang Dùng (<span id="deck-active-count-text">16</span>/16 lá — Bấm 🔍 để Zoom Đọc, ✕ để Gỡ)</strong>
+          <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+            <button type="button" class="btn-glass btn-compact" id="btn-deck-zoom-mode" title="Bật để chạm bất kỳ thẻ nào là phóng to đọc chi tiết thay vì thêm/gỡ nhanh">👁️ Soi Thẻ: TẮT</button>
+            <button type="button" class="btn-accent btn-compact" id="btn-auto-deck">✨ Tự Xếp Đội Hình Phe</button>
+          </div>
         </div>
         <div id="deck-active-list" class="deck-active-strip"></div>
 
         <div class="deck-toolbar" style="margin-top:8px;">
-          <strong style="color:var(--primary);">📚 Kho Thẻ Thuộc Phe (Nhân Vật + Quân Dự Bị + Hậu Duệ Token)</strong>
+          <strong style="color:var(--primary);">📚 Kho Thẻ Thuộc Phe (Sở Hữu &amp; Chưa Mở Khóa — Bấm 🔍 để Zoom Đọc Đủ Eff)</strong>
           <div class="deck-filter-bar" id="deck-filter-pills">
             <button type="button" class="btn-glass btn-compact active" data-dfilter="all">Tất cả</button>
-            <button type="button" class="btn-glass btn-compact" data-dfilter="male">♂ Nam (Bắt Nữ)</button>
-            <button type="button" class="btn-glass btn-compact" data-dfilter="female">♀ Nữ (Vào H2)</button>
+            <button type="button" class="btn-glass btn-compact" data-dfilter="owned">Đang Có</button>
+            <button type="button" class="btn-glass btn-compact" data-dfilter="unowned">Chưa Có / Mua</button>
+            <button type="button" class="btn-glass btn-compact" data-dfilter="male">♂ Nam</button>
+            <button type="button" class="btn-glass btn-compact" data-dfilter="female">♀ Nữ</button>
             <button type="button" class="btn-glass btn-compact" data-dfilter="cond">⚡ ĐK H1/H2</button>
-            <input type="text" id="deck-search-input" placeholder="Tìm tên thẻ, loài, hiệu ứng..." style="max-width:210px;" />
+            <input type="text" id="deck-search-input" placeholder="Tìm tên thẻ, loài, hiệu ứng..." style="max-width:200px;" />
           </div>
         </div>
         <div id="deck-pool-grid" class="deck-pool-grid"></div>
+      </div>
+
+      <!-- MULTI-SOURCE CARD SHOP, PACKS & CRAFT VIEW -->
+      <div id="duel-shop-view" class="duel-shop-panel hidden">
+        <div class="shop-currency-bar" id="shop-currency-bar"></div>
+
+        <div class="shop-section-head">
+          <strong style="color:var(--gold);">📦 Mở Gói Thẻ &amp; Chiêu Mộ Đa Nguồn</strong>
+          <span class="muted" style="font-size:11px;">Mua Credits • Mở Gói Nghiên Cứu/Ảnh Hưởng • Rèn Mảnh Gen • Thu Phục Tướng &amp; Thắng Trận!</span>
+        </div>
+        <div id="shop-packs-grid" class="shop-packs-grid"></div>
+        <div id="shop-pack-result" class="shop-pack-result hidden"></div>
+
+        <div class="deck-toolbar" style="margin-top:10px;">
+          <strong style="color:var(--primary);">🛒 Chợ Thẻ Lẻ &amp; Xưởng Rèn Mảnh Gen (Bấm 🔍 để Zoom Đọc Chi Tiết Thẻ)</strong>
+          <div class="deck-filter-bar" id="shop-filter-bar">
+            <select id="shop-faction-filter" style="max-width:170px;"></select>
+            <button type="button" class="btn-glass btn-compact active" data-sfilter="all">Tất cả</button>
+            <button type="button" class="btn-glass btn-compact" data-sfilter="unowned">Có Thể Mua</button>
+            <button type="button" class="btn-glass btn-compact" data-sfilter="owned">Đã Sở Hữu</button>
+            <button type="button" class="btn-glass btn-compact" data-sfilter="cond">⚡ ĐK H1/H2</button>
+            <input type="text" id="shop-search-input" placeholder="Tìm tên thẻ, loài, hiệu ứng..." style="max-width:195px;" />
+          </div>
+        </div>
+        <div id="shop-cards-grid" class="shop-cards-grid"></div>
       </div>
     </div>
   </section>
@@ -378,6 +422,21 @@
         <button class="btn-danger btn-compact" id="btn-close-vn-history">✕ Đóng</button>
       </div>
       <div id="vn-history-list" class="vn-history-list"></div>
+    </div>
+  </div>
+
+  <!-- FULL CARD ZOOM & EFFECT READER MODAL -->
+  <div id="card-zoom-modal" class="modal-overlay hidden">
+    <div class="modal-card card-zoom-modal-card">
+      <div class="card-zoom-topbar">
+        <div style="min-width:0;">
+          <h2 id="cz-name" style="margin:0; font-size:19px; color:#fff;"></h2>
+          <div id="cz-subtitle" class="muted" style="font-size:12px;"></div>
+        </div>
+        <button type="button" class="btn-glass btn-compact" id="btn-close-card-zoom">✕ Đóng</button>
+      </div>
+      <div id="cz-body" class="card-zoom-body"></div>
+      <div id="cz-actions" class="card-zoom-actions"></div>
     </div>
   </div>
 

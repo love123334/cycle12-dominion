@@ -5,7 +5,16 @@
 import { FACTIONS, PLAYABLE, SUPERWEAPONS, EVENT_POOL } from "../data/lore.js";
 import { SECTORS, SECTOR_BY_ID } from "../data/galaxy.js";
 import { CHARACTERS, CHAR_BY_ID } from "../data/characters.js";
-import { buildFactionDeck, validateDeckForLeader } from "../data/cards.js";
+import {
+  CARDS,
+  CARD_BY_ID,
+  resolveCard,
+  getFactionCardPool,
+  buildFactionDeck,
+  validateDeckForLeader,
+  getCardPriceInfo,
+  CARD_PACKS
+} from "../data/cards.js";
 
 const SAVE_PREFIX = "CYCLE12_SAVE_V3_";
 
@@ -55,7 +64,13 @@ export class GameState {
     };
 
     this.hybrids = [];
-    this.customDeck = buildFactionDeck(this.protagonistId, this.hybrids);
+    this.collection = {};
+    this.cardDust = 260;
+    this.decks = [];
+    this.activeDeckId = "deck_1";
+    this.grantStarterCollectionFor(this.protagonistId);
+    this.ensureDecksInitialized();
+    this.customDeck = this.getActiveDeck().cards;
 
     this.sectors = {};
     for (const s of SECTORS) {
@@ -216,7 +231,15 @@ export class GameState {
     if (!this.resources[this.playerFaction]) {
       this.resources[this.playerFaction] = { credits: 50000, influence: 400, research: 350, tributes: 0 };
     }
-    this.customDeck = buildFactionDeck(subj.id, this.hybrids);
+    this.grantStarterCollectionFor(subj.id);
+    const active = this.getActiveDeck();
+    if (active) {
+      active.leaderId = subj.id;
+      active.cards = buildFactionDeck(subj.id, this.hybrids, this.collection);
+      this.customDeck = active.cards;
+    } else {
+      this.ensureDecksInitialized();
+    }
 
     if (restartStory) {
       this.vn.currentChapterId = "ch0_origin";
@@ -613,11 +636,23 @@ export class GameState {
     }
     this.addTension(8);
 
+    // Chinh phục khu vực giúp chiêu mộ ngẫu nhiên 1 tướng đồn trú tại đây hoặc nhận Mảnh Gen
+    const garrison = this.sectors[secId].garrison || [];
+    const recruitable = garrison.find((cid) => this.getOwnedCount(cid) === 0 && CARD_BY_ID[cid]);
+    let spoilMsg = "";
+    if (recruitable) {
+      this.unlockCard(recruitable, 1);
+      spoilMsg = ` • Đã thu phục thẻ ${CARD_BY_ID[recruitable].name}!`;
+    } else {
+      this.cardDust = (this.cardDust || 0) + 45;
+      spoilMsg = " • +45 Mảnh Gen Rèn Thẻ!";
+    }
+
     this.eventLog.unshift({
       turn: `Cycle ${this.cycleMajor}.${this.cycleMinor}`,
       type: "conquest",
       title: `Chiếm đóng: ${sData.name}`,
-      desc: `${this.facName(winnerFaction)} đã kiểm soát khu vực từ tay ${this.facName(oldOwner)}!`
+      desc: `${this.facName(winnerFaction)} đã kiểm soát khu vực từ tay ${this.facName(oldOwner)}!${spoilMsg}`
     });
     this.saveToSlot("auto");
     return true;
@@ -688,6 +723,369 @@ export class GameState {
     this.saveToSlot("auto");
   }
 
+  // --- CARD COLLECTION, SHOP, PACKS, CRAFT & MULTI-DECK SYSTEM (v10) ---
+  getOwnedCount(cardId) {
+    if (!cardId) return 0;
+    if ((this.hybrids || []).some((h) => h.id === cardId)) return 1;
+    return this.collection?.[cardId] || 0;
+  }
+
+  getMaxCopies(card) {
+    if (!card) return 1;
+    return card.unique || card.isHybrid ? 1 : 3;
+  }
+
+  unlockCard(cardId, delta = 1) {
+    if (!this.collection) this.collection = {};
+    const card = resolveCard(cardId, this.hybrids);
+    if (!card) return { ok: false, added: 0, overflowDust: 0, count: 0 };
+    const maxCap = this.getMaxCopies(card);
+    const cur = this.collection[cardId] || 0;
+    const room = Math.max(0, maxCap - cur);
+    const added = Math.min(delta, room);
+    const overflow = Math.max(0, delta - added);
+    this.collection[cardId] = cur + added;
+    let overflowDust = 0;
+    if (overflow > 0) {
+      const price = getCardPriceInfo(card);
+      overflowDust = price.dustYield * overflow;
+      this.cardDust = (this.cardDust || 0) + overflowDust;
+    }
+    return { ok: true, added, overflowDust, count: this.collection[cardId] };
+  }
+
+  grantStarterCollectionFor(leaderId = "arisia") {
+    if (!this.collection) this.collection = {};
+    const leader = resolveCard(leaderId, this.hybrids) || CARD_BY_ID.arisia;
+    const fac = leader.fac || "sylvarian";
+    this.collection[leader.id] = Math.max(1, this.collection[leader.id] || 0);
+
+    const pool = getFactionCardPool(fac, this.hybrids).filter((c) => c.id !== leader.id);
+    // Grant x2-x3 starter reserve troops so every faction always has 16+ legal deck cards
+    const troops = pool.filter((c) => !c.unique);
+    const smallFaction = pool.length <= 12;
+    for (const t of troops) {
+      const targetQty = smallFaction ? 3 : 2;
+      this.collection[t.id] = Math.max(this.collection[t.id] || 0, targetQty);
+    }
+
+    // Unlock low-to-mid CR starter characters (keep high CR >= 700 Legends/Mythics collectible in Shop/Packs!)
+    const starters = pool
+      .filter((c) => c.unique && c.cr < 700)
+      .sort((a, b) => a.cr - b.cr);
+    for (const ch of starters) {
+      if (this.getFactionOwnedCapacity(fac, leader.id) >= 16) break;
+      this.collection[ch.id] = Math.max(1, this.collection[ch.id] || 0);
+    }
+
+    // Guarantee at least 16 legal deck slots for starter leader if pool is tiny
+    if (this.getFactionOwnedCapacity(fac, leader.id) < 16) {
+      for (const t of troops) {
+        this.collection[t.id] = 3;
+      }
+      const asc = pool.filter((c) => c.unique).sort((a, b) => a.cr - b.cr);
+      for (const c of asc) {
+        if (this.getFactionOwnedCapacity(fac, leader.id) >= 16) break;
+        this.collection[c.id] = 1;
+      }
+    }
+  }
+
+  getFactionOwnedCapacity(facId, excludeId = null) {
+    return getFactionCardPool(facId, this.hybrids)
+      .filter((c) => c.id !== excludeId)
+      .reduce((sum, c) => sum + Math.min(this.getMaxCopies(c), this.getOwnedCount(c.id)), 0);
+  }
+
+  ensureDecksInitialized() {
+    if (!Array.isArray(this.decks) || this.decks.length === 0) {
+      const lid = this.protagonistId || "arisia";
+      const lead = resolveCard(lid, this.hybrids) || CARD_BY_ID.arisia;
+      this.decks = [{
+        id: "deck_1",
+        name: `Khởi Nguyên (${lead.name.split(" ")[0]})`,
+        leaderId: lead.id,
+        cards: buildFactionDeck(lead.id, this.hybrids, this.collection)
+      }];
+      this.activeDeckId = "deck_1";
+    }
+    for (const d of this.decks) {
+      if (!d.leaderId || !resolveCard(d.leaderId, this.hybrids)) d.leaderId = this.protagonistId || "arisia";
+      d.cards = validateDeckForLeader(d.cards || [], d.leaderId, this.hybrids, this.collection);
+      if (d.cards.length === 0) {
+        d.cards = buildFactionDeck(d.leaderId, this.hybrids, this.collection);
+      }
+    }
+    const active = this.getActiveDeck();
+    this.activeDeckId = active.id;
+    this.customDeck = active.cards;
+    return this.decks;
+  }
+
+  getActiveDeck() {
+    if (!Array.isArray(this.decks) || this.decks.length === 0) this.ensureDecksInitialized();
+    return this.decks.find((d) => d.id === this.activeDeckId) || this.decks[0];
+  }
+
+  syncActiveDeckRef() {
+    const active = this.getActiveDeck();
+    active.cards = validateDeckForLeader(active.cards || [], active.leaderId, this.hybrids, this.collection);
+    this.customDeck = active.cards;
+    return active;
+  }
+
+  createDeck(name = null, leaderId = null, autoFill = true) {
+    const lid = leaderId || this.getActiveDeck()?.leaderId || this.protagonistId || "arisia";
+    this.grantStarterCollectionFor(lid);
+    const lead = resolveCard(lid, this.hybrids) || CARD_BY_ID.arisia;
+    const cleanName = String(name || "").trim() || `Bộ Bài #${this.decks.length + 1} (${lead.name.split(" ")[0]})`;
+    const newId = `deck_${Date.now().toString(36)}_${this.decks.length + 1}`;
+    const cards = autoFill ? buildFactionDeck(lead.id, this.hybrids, this.collection) : [];
+    const deck = { id: newId, name: cleanName, leaderId: lead.id, cards };
+    this.decks.push(deck);
+    this.activeDeckId = newId;
+    this.customDeck = deck.cards;
+    this.saveToSlot("auto");
+    return deck;
+  }
+
+  selectActiveDeck(deckId) {
+    const target = (this.decks || []).find((d) => d.id === deckId);
+    if (!target) return null;
+    this.activeDeckId = target.id;
+    this.syncActiveDeckRef();
+    this.saveToSlot("auto");
+    return target;
+  }
+
+  setActiveDeckLeader(leaderId) {
+    const lead = resolveCard(leaderId, this.hybrids);
+    if (!lead || this.getOwnedCount(lead.id) <= 0) {
+      return { ok: false, msg: "Bạn chưa sở hữu thẻ Tướng này để đặt làm Thủ Lĩnh Hàng 3!" };
+    }
+    const active = this.getActiveDeck();
+    active.leaderId = lead.id;
+    this.grantStarterCollectionFor(lead.id);
+    active.cards = buildFactionDeck(lead.id, this.hybrids, this.collection);
+    this.customDeck = active.cards;
+    this.saveToSlot("auto");
+    return { ok: true, deck: active, leader: lead };
+  }
+
+  renameActiveDeck(newName) {
+    const clean = String(newName || "").trim();
+    if (!clean) return { ok: false, msg: "Tên bộ bài không được để trống." };
+    const active = this.getActiveDeck();
+    active.name = clean.slice(0, 42);
+    this.saveToSlot("auto");
+    return { ok: true, deck: active };
+  }
+
+  deleteActiveDeck() {
+    if (!this.decks || this.decks.length <= 1) {
+      return { ok: false, msg: "Cần giữ lại ít nhất 1 Bộ Bài chiến đấu!" };
+    }
+    this.decks = this.decks.filter((d) => d.id !== this.activeDeckId);
+    this.activeDeckId = this.decks[0].id;
+    this.syncActiveDeckRef();
+    this.saveToSlot("auto");
+    return { ok: true, deck: this.getActiveDeck() };
+  }
+
+  addCardToActiveDeck(cardId) {
+    const active = this.getActiveDeck();
+    const leader = resolveCard(active.leaderId, this.hybrids) || CARD_BY_ID.arisia;
+    const card = resolveCard(cardId, this.hybrids);
+    if (!card) return { ok: false, msg: "Không tìm thấy thẻ bài." };
+    if (card.id === leader.id) return { ok: false, msg: `${card.name} đang trấn thủ Hàng 3 của Bộ Bài này!` };
+    if (card.fac !== leader.fac) {
+      return { ok: false, msg: `Luật Phe: Thủ lĩnh ${leader.name} chỉ dùng thẻ thuộc phe ${this.facName(leader.fac)}!` };
+    }
+    if (active.cards.length >= 16) return { ok: false, msg: "Bộ bài đã đủ tối đa 16 lá — hãy gỡ bớt lá trước khi thêm." };
+    const owned = this.getOwnedCount(cardId);
+    const inDeck = active.cards.filter((id) => id === cardId).length;
+    const maxCap = this.getMaxCopies(card);
+    if (owned <= 0) return { ok: false, msg: `Bạn chưa sở hữu ${card.name}! Hãy mua, mở gói hoặc rèn từ Mảnh Gen.` };
+    if (inDeck >= maxCap) {
+      return { ok: false, msg: maxCap === 1 ? `${card.name} là Nhân Vật Độc Nhất (tối đa 1 lá/bộ).` : "Mỗi đơn vị Dự Bị tối đa 3 bản sao." };
+    }
+    if (inDeck >= owned) {
+      return { ok: false, msg: `Bạn mới sở hữu ${owned} bản ${card.name}. Hãy mua/mở thêm bản sao!` };
+    }
+    active.cards.push(cardId);
+    this.customDeck = active.cards;
+    this.saveToSlot("auto");
+    return { ok: true, card };
+  }
+
+  removeCardFromActiveDeck(idx) {
+    const active = this.getActiveDeck();
+    if (idx < 0 || idx >= active.cards.length) return false;
+    active.cards.splice(idx, 1);
+    this.customDeck = active.cards;
+    this.saveToSlot("auto");
+    return true;
+  }
+
+  autoBuildActiveDeck() {
+    const active = this.getActiveDeck();
+    active.cards = buildFactionDeck(active.leaderId, this.hybrids, this.collection);
+    this.customDeck = active.cards;
+    this.saveToSlot("auto");
+    return active.cards;
+  }
+
+  buyCardWithCredits(cardId) {
+    const card = resolveCard(cardId, this.hybrids);
+    if (!card) return { ok: false, msg: "Thẻ bài không tồn tại." };
+    const maxCap = this.getMaxCopies(card);
+    const owned = this.getOwnedCount(cardId);
+    if (owned >= maxCap) {
+      return { ok: false, msg: `Đã sở hữu tối đa (${owned}/${maxCap}) bản ${card.name}!` };
+    }
+    const price = getCardPriceInfo(card);
+    const facRes = this.resources[this.playerFaction] || (this.resources[this.playerFaction] = { credits: 0, influence: 0, research: 0, tributes: 0 });
+    if ((facRes.credits || 0) < price.credits) {
+      return { ok: false, msg: `Không đủ Credits! Cần ${price.credits.toLocaleString()} Cr (Hiện có: ${(facRes.credits || 0).toLocaleString()}).` };
+    }
+    facRes.credits -= price.credits;
+    const res = this.unlockCard(cardId, 1);
+    this.addChronicle(`🛒 Mua thẻ bài ${card.name} (CR ${card.cr}) với giá ${price.credits.toLocaleString()} Credits.`, "Chợ Thẻ Bài", "trade");
+    this.saveToSlot("auto");
+    return { ok: true, card, cost: price.credits, count: res.count };
+  }
+
+  craftCardWithDust(cardId) {
+    const card = resolveCard(cardId, this.hybrids);
+    if (!card) return { ok: false, msg: "Thẻ bài không tồn tại." };
+    const maxCap = this.getMaxCopies(card);
+    const owned = this.getOwnedCount(cardId);
+    if (owned >= maxCap) return { ok: false, msg: `Đã đủ số lượng tối đa ${card.name}!` };
+    const price = getCardPriceInfo(card);
+    if ((this.cardDust || 0) < price.dust) {
+      return { ok: false, msg: `Thiếu Mảnh Gen! Cần ${price.dust} Mảnh (Hiện có: ${this.cardDust || 0}).` };
+    }
+    this.cardDust -= price.dust;
+    const res = this.unlockCard(cardId, 1);
+    this.saveToSlot("auto");
+    return { ok: true, card, costDust: price.dust, count: res.count };
+  }
+
+  dismantleCard(cardId) {
+    const card = resolveCard(cardId, this.hybrids);
+    if (!card) return { ok: false, msg: "Không tìm thấy thẻ." };
+    const owned = this.getOwnedCount(cardId);
+    if (owned <= 0) return { ok: false, msg: "Bạn chưa có bản sao nào để phân giải." };
+    if (card.id === this.protagonistId) return { ok: false, msg: "Không thể phân giải Nhân Vật Chính đang chọn." };
+    const inAnyDeck = (this.decks || []).some((d) => d.leaderId === card.id || (d.cards || []).filter((id) => id === card.id).length >= owned);
+    if (inAnyDeck) {
+      return { ok: false, msg: "Thẻ đang được dùng tối đa trong Bộ Bài! Hãy gỡ khỏi Bộ Bài trước hoặc chỉ phân giải bản dư." };
+    }
+    const yieldDust = getCardPriceInfo(card).dustYield;
+    this.collection[cardId] = owned - 1;
+    this.cardDust = (this.cardDust || 0) + yieldDust;
+    this.saveToSlot("auto");
+    return { ok: true, card, dustGained: yieldDust, remaining: this.collection[cardId] };
+  }
+
+  recruitCharacterCard(charId) {
+    const card = CARD_BY_ID[charId];
+    if (!card) return { ok: false, msg: "Không tìm thấy thẻ nhân vật." };
+    if (this.getOwnedCount(charId) >= 1) return { ok: false, msg: `Bạn đã sở hữu thẻ ${card.name}!` };
+    const aff = this.getAffinity(charId);
+    const infCost = aff >= 35 ? 0 : (card.cr >= 750 ? 90 : 45);
+    const facRes = this.resources[this.playerFaction] || { credits: 0, influence: 0, research: 0 };
+    if (infCost > 0 && (facRes.influence || 0) < infCost) {
+      return { ok: false, msg: `Cần Độ tin cậy >= 35 (Miễn phí) hoặc ${infCost} Ảnh Hưởng để chiêu mộ ${card.name}!` };
+    }
+    if (infCost > 0) facRes.influence -= infCost;
+    this.unlockCard(charId, 1);
+    this.addChronicle(`🤝 Chiêu mộ thành công thẻ bài ${card.name} (${card.species} • CR ${card.cr}) vào Kho Thẻ!`, "Chiêu Mộ", "diplomacy");
+    this.saveToSlot("auto");
+    return { ok: true, card, infCost };
+  }
+
+  openCardPack(packId, preferredFac = null) {
+    const pack = CARD_PACKS.find((p) => p.id === packId);
+    if (!pack) return { ok: false, msg: "Gói thẻ không hợp lệ." };
+    const facRes = this.resources[this.playerFaction] || (this.resources[this.playerFaction] = { credits: 0, influence: 0, research: 0, tributes: 0 });
+    if ((facRes.credits || 0) < pack.costCredits) {
+      return { ok: false, msg: `Thiếu Credits! Cần ${pack.costCredits.toLocaleString()} Cr.` };
+    }
+    if ((facRes.influence || 0) < pack.costInfluence) {
+      return { ok: false, msg: `Thiếu Ảnh Hưởng! Cần ${pack.costInfluence} Ảnh hưởng.` };
+    }
+    if ((facRes.research || 0) < pack.costResearch) {
+      return { ok: false, msg: `Thiếu Nghiên Cứu! Cần ${pack.costResearch} Nghiên cứu.` };
+    }
+
+    facRes.credits -= pack.costCredits;
+    facRes.influence -= pack.costInfluence;
+    facRes.research -= pack.costResearch;
+
+    const targetFac = preferredFac || resolveCard(this.getActiveDeck()?.leaderId, this.hybrids)?.fac || this.playerFaction;
+    const allCards = [...CARDS];
+
+    const pickFrom = (pool, preferUnowned = true) => {
+      const unowned = pool.filter((c) => this.getOwnedCount(c.id) < this.getMaxCopies(c));
+      const src = (preferUnowned && unowned.length > 0 && Math.random() < 0.82) ? unowned : pool;
+      return src[Math.floor(Math.random() * src.length)] || allCards[0];
+    };
+
+    const rewards = [];
+    let totalDustGained = 0;
+
+    for (let i = 0; i < pack.count; i++) {
+      let pool = allCards;
+      if (pack.mode === "faction") {
+        pool = allCards.filter((c) => c.fac === targetFac);
+      } else if (pack.mode === "gene") {
+        pool = allCards.filter((c) => c.row1Effect?.condType || c.row2Effect?.omniWomb || c.row2Effect?.tier === "tamarite" || c.row2Effect?.symbiosisR2Boost || c.row2Effect?.doubleIfTokenBred);
+      } else if (pack.mode === "mythic") {
+        pool = i === 0 ? allCards.filter((c) => c.cr >= 700 && c.unique) : allCards.filter((c) => c.cr >= 500);
+      } else if (pack.mode === "scout") {
+        pool = allCards.filter((c) => c.fac === targetFac || c.fac === "independent" || c.fac === "sylvarian" || c.fac === "tamarite");
+      }
+      if (pool.length === 0) pool = allCards;
+
+      const chosen = pickFrom(pool, true);
+      const prev = this.getOwnedCount(chosen.id);
+      const res = this.unlockCard(chosen.id, 1);
+      totalDustGained += res.overflowDust;
+      rewards.push({
+        card: chosen,
+        isNew: prev === 0 && res.added > 0,
+        added: res.added,
+        overflowDust: res.overflowDust,
+        ownedAfter: res.count
+      });
+    }
+
+    this.addChronicle(`📦 Mở ${pack.name}: nhận ${rewards.map((r) => r.card.name).join(", ")}${totalDustGained > 0 ? ` (+${totalDustGained} Mảnh Gen)` : ""}.`, "Mở Gói Thẻ", "pack");
+    this.saveToSlot("auto");
+    return { ok: true, pack, rewards, totalDustGained };
+  }
+
+  grantBattleSpoil(enemyLeaderId, bonusChance = 0.45) {
+    const enemyFac = resolveCard(enemyLeaderId, this.hybrids)?.fac || "western_nadir";
+    const pool = getFactionCardPool(enemyFac, this.hybrids).filter((c) => !c.isHybrid);
+    const unowned = pool.filter((c) => this.getOwnedCount(c.id) < this.getMaxCopies(c));
+    const playerUnowned = CARDS.filter((c) => c.fac === this.playerFaction && this.getOwnedCount(c.id) < this.getMaxCopies(c));
+    const candidates = unowned.length > 0 && Math.random() < 0.65 ? unowned : (playerUnowned.length > 0 ? playerUnowned : unowned);
+
+    if (candidates.length > 0 && Math.random() < bonusChance) {
+      const pick = candidates[Math.floor(Math.random() * candidates.length)];
+      this.unlockCard(pick.id, 1);
+      this.cardDust = (this.cardDust || 0) + 30;
+      this.saveToSlot("auto");
+      return { card: pick, dust: 30 };
+    }
+    const dust = 55;
+    this.cardDust = (this.cardDust || 0) + dust;
+    this.saveToSlot("auto");
+    return { card: null, dust };
+  }
+
   // --- SAVE / LOAD MULTI-SLOT ---
   serialize() {
     return JSON.stringify({
@@ -705,6 +1103,10 @@ export class GameState {
       relations: this.relations,
       superweaponCooldowns: this.superweaponCooldowns,
       hybrids: this.hybrids,
+      collection: this.collection,
+      cardDust: this.cardDust,
+      decks: this.decks,
+      activeDeckId: this.activeDeckId,
       customDeck: this.customDeck,
       vn: this.vn,
       stats: this.stats,
@@ -746,12 +1148,49 @@ export class GameState {
       if (data.relations) this.relations = data.relations;
       if (data.superweaponCooldowns) this.superweaponCooldowns = data.superweaponCooldowns;
       this.hybrids = Array.isArray(data.hybrids) ? data.hybrids : [];
-      const validated = Array.isArray(data.customDeck) && data.customDeck.length > 0
-        ? validateDeckForLeader(data.customDeck, this.protagonistId, this.hybrids)
-        : [];
-      this.customDeck = validated.length >= 6
-        ? validated
-        : buildFactionDeck(this.protagonistId, this.hybrids);
+      this.collection = (data.collection && typeof data.collection === "object") ? { ...data.collection } : {};
+      this.cardDust = typeof data.cardDust === "number" ? data.cardDust : 260;
+
+      // Migrate or restore collection & multi-deck store cleanly
+      this.grantStarterCollectionFor(this.protagonistId);
+      if (Array.isArray(data.customDeck)) {
+        for (const cid of data.customDeck) {
+          if (resolveCard(cid, this.hybrids) && (this.collection[cid] || 0) < 1) {
+            this.unlockCard(cid, 1);
+          }
+        }
+      }
+
+      if (Array.isArray(data.decks) && data.decks.length > 0) {
+        this.decks = data.decks.map((d) => ({
+          id: d.id || `deck_${Math.random().toString(36).slice(2, 7)}`,
+          name: d.name || "Bộ Bài Tùy Chỉnh",
+          leaderId: d.leaderId || this.protagonistId,
+          cards: Array.isArray(d.cards) ? [...d.cards] : []
+        }));
+        for (const d of this.decks) {
+          for (const cid of d.cards) {
+            if (resolveCard(cid, this.hybrids) && (this.collection[cid] || 0) < 1) {
+              this.unlockCard(cid, 1);
+            }
+          }
+        }
+        this.activeDeckId = data.activeDeckId || this.decks[0].id;
+      } else {
+        const lead = resolveCard(this.protagonistId, this.hybrids) || CARD_BY_ID.arisia;
+        const legacyCards = Array.isArray(data.customDeck) && data.customDeck.length > 0
+          ? validateDeckForLeader(data.customDeck, this.protagonistId, this.hybrids, this.collection)
+          : buildFactionDeck(this.protagonistId, this.hybrids, this.collection);
+        this.decks = [{
+          id: "deck_1",
+          name: `Khởi Nguyên (${lead.name.split(" ")[0]})`,
+          leaderId: lead.id,
+          cards: legacyCards
+        }];
+        this.activeDeckId = "deck_1";
+      }
+      this.ensureDecksInitialized();
+      this.customDeck = this.getActiveDeck().cards;
       if (data.vn) {
         this.vn = {
           currentChapterId: "ch0_origin",

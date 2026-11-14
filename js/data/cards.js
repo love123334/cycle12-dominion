@@ -248,35 +248,47 @@ function charToCard(c) {
   };
 }
 
-// 18 Faction Reserve Units across ALL 8 factions with balanced Male/Female genders
+// 36 Faction Reserve Units across ALL 8 factions with balanced Male/Female genders
 const TROOP_SPECS = [
   // ERIS UNION
   { id: "tr_eris_sentinel", name: "Eris Outer Sentinel", fac: "eris", gender: "Male", species: "Cấu Thể Eris", race: "erisian", cr: 420,
     r1: { id: "tr1", tag: "Giáp Khối Đa Diện", bonusFlat: 80, desc: "Hàng 1: +80 CR tại Outer Layer hoặc khi dẫn đầu CR." },
-    r2: { id: "tr2", tier: "alien", breedChance: 64, crAura: 85, crMult: 0.85, crPenaltyPct: 0, tag: "Tinh Thể Eris (64%)", desc: "Hàng 2: 64% sinh Token ánh sáng & +85 CR Hàng 1." } },
+    r2: { id: "tr2", tier: "alien", breedChance: 64, crAura: 85, crMult: 0.85, crPenaltyPct: 0, tag: "Tinh Thể Eris (64%)", desc: "Hàng 2: 64% sinh Token ánh sáng lên Hàng 1 & +85 CR Hàng 1." } },
   { id: "tr_eris_arbiter", name: "Eris Reset Arbiter", fac: "eris", gender: "Female", species: "Thiên Sứ Eris", race: "erisian", cr: 620,
     r1: { id: "tr1", tag: "Khóa Chân Không", bonusFlat: 110, desc: "Hàng 1: +110 CR & hủy bỏ buff chủng tộc đối diện." },
-    r2: { id: "tr2", tier: "omniwomb", breedChance: 80, omniWomb: true, crAura: 110, crMult: 0.95, crPenaltyPct: 0, tag: "Ma Trận Eris (80%)", desc: "Hàng 2: 80% sinh Token Erisian đa biến & +110 CR Hàng 1." } },
+    r2: { id: "tr2", tier: "omniwomb", breedChance: 80, omniWomb: true, crAura: 110, crMult: 0.95, crPenaltyPct: 0, tag: "Ma Trận Eris (80%)", desc: "Hàng 2: 80% sinh Token Erisian đa biến lên Hàng 1 & +110 CR." } },
   { id: "tr_eris_keeper", name: "Eris Chronos Keeper", fac: "eris", gender: "Female", species: "Erisian", race: "erisian", cr: 340,
     r1: { id: "tr1", tag: "Ngưng Đọng Chu Kỳ", bonusFlat: 75, desc: "Hàng 1: +75 CR; rút +1 thẻ phe Eris khi ra sân." },
-    r2: { id: "tr2", tier: "alien", breedChance: 62, crAura: 70, crMult: 0.85, crPenaltyPct: 5, tag: "Chuỗi Thời Gian (62%)", desc: "Hàng 2: 62% sinh Token & +70 CR Hàng 1." } },
+    r2: { id: "tr2", tier: "alien", breedChance: 62, crAura: 70, crMult: 0.85, crPenaltyPct: 5, tag: "Chuỗi Thời Gian (62%)", desc: "Hàng 2: 62% sinh Token lên Hàng 1 & +70 CR Hàng 1." } },
   { id: "tr_eris_prism", name: "Outer Layer Prism", fac: "eris", gender: "Male", species: "Sinh Thể Ánh Sáng", race: "erisian", cr: 510,
     r1: { id: "tr1", tag: "Khúc Xạ Vũ Trụ", bonusFlat: 95, desc: "Hàng 1: +95 CR và +50 CR cho Thủ lĩnh Hàng 3." },
-    r2: { id: "tr2", tier: "alien", breedChance: 66, crAura: 95, crMult: 0.88, crPenaltyPct: 0, tag: "Phản Chiếu Gen (66%)", desc: "Hàng 2: +95 CR cho Hàng 1." } },
+    r2: { id: "tr2", tier: "alien", breedChance: 66, crAura: 95, crMult: 0.88, crPenaltyPct: 0, tag: "Phản Chiếu Gen (66%)", desc: "Hàng 2: 66% sinh Token lên Hàng 1 & +95 CR cho Hàng 1." } },
+  { id: "tr_eris_warden", name: "Outer Loop Warden", fac: "eris", gender: "Male", species: "Hộ Vệ Eris", race: "erisian", cr: 480,
+    r1: { id: "tr1", tag: "Tuần Tra Chu Kỳ", bonusFlat: 90, condType: "active_breed_or_token", condBonus: 110, desc: "Hàng 1: +90 CR. ĐK có Token/Lai Hàng 2 -> +110 CR!" },
+    r2: { id: "tr2", tier: "alien", breedChance: 68, crAura: 90, crMult: 0.88, crPenaltyPct: 0, tag: "Hào Quang Eris (68%)", desc: "Hàng 2: 68% sinh Token lên Hàng 1 & +90 CR Hàng 1." } },
+  { id: "tr_eris_weaver", name: "Null-Space Weaver", fac: "eris", gender: "Female", species: "Erisian Hư Vô", race: "erisian", cr: 560,
+    r1: { id: "tr1", tag: "Đan Lưới Không Gian", bonusFlat: 105, desc: "Hàng 1: +105 CR giao chiến trực diện." },
+    r2: { id: "tr2", tier: "alien_buff", breedChance: 74, symbiosisR2Boost: 12, crAura: 100, crMult: 0.92, crPenaltyPct: 0, tag: "Cộng Sinh Eris (+12% H2)", desc: "Hàng 2: 74% sinh Token lên Hàng 1 & +12% tỷ lệ mọi ô Hàng 2." } },
 
   // NADIRIUS EMPIRE
   { id: "tr_nad_knight", name: "Nadirius Astral Knight", fac: "nadirius", gender: "Male", species: "Hiệp Sĩ Nadir", race: "nadir", cr: 460,
     r1: { id: "tr1", tag: "Trật Tự Thép", bonusFlat: 90, desc: "Hàng 1: +90 CR; +100 CR thêm khi đấu Western Nadir." },
-    r2: { id: "tr2", tier: "alien", breedChance: 65, crAura: 85, crMult: 0.85, crPenaltyPct: 0, tag: "Huyết Thống Đế Quốc (65%)", desc: "Hàng 2: +85 CR cho Hàng 1." } },
+    r2: { id: "tr2", tier: "alien", breedChance: 65, crAura: 85, crMult: 0.85, crPenaltyPct: 0, tag: "Huyết Thống Đế Quốc (65%)", desc: "Hàng 2: 65% sinh Token lên Hàng 1 & +85 CR." } },
   { id: "tr_nad_warden", name: "Citadel Obsidian Warden", fac: "nadirius", gender: "Female", species: "Thần Vệ Nadir", race: "nadir", cr: 580,
     r1: { id: "tr1", tag: "Thành Lũy Citadel", bonusFlat: 115, desc: "Hàng 1: +115 CR bảo vệ tối đa tuyến đầu." },
-    r2: { id: "tr2", tier: "alien_buff", breedChance: 72, crAura: 105, crMult: 0.9, crPenaltyPct: 0, tag: "Huyết Mạch Citadel (72%)", desc: "Hàng 2: 72% sinh Token Nadirius & +105 CR Hàng 1." } },
+    r2: { id: "tr2", tier: "alien_buff", breedChance: 72, crAura: 105, crMult: 0.9, crPenaltyPct: 0, tag: "Huyết Mạch Citadel (72%)", desc: "Hàng 2: 72% sinh Token Nadirius lên Hàng 1 & +105 CR." } },
   { id: "tr_nad_lancer", name: "Nadirius Shadow Lancer", fac: "nadirius", gender: "Male", species: "Tiên Phong Nadir", race: "nadir", cr: 390,
     r1: { id: "tr1", tag: "Mũi Thương Phản Kích", bonusFlat: 85, desc: "Hàng 1: +85 CR; +80 CR khi đánh lá Hàng 3." },
-    r2: { id: "tr2", tier: "alien", breedChance: 60, crAura: 75, crMult: 0.82, crPenaltyPct: 5, tag: "Xung Huyết Nadir (60%)", desc: "Hàng 2: +75 CR cho Hàng 1." } },
+    r2: { id: "tr2", tier: "alien", breedChance: 60, crAura: 75, crMult: 0.82, crPenaltyPct: 5, tag: "Xung Huyết Nadir (60%)", desc: "Hàng 2: 60% sinh Token lên Hàng 1 & +75 CR." } },
   { id: "tr_nad_envoy", name: "Nadirius Royal Praetor", fac: "nadirius", gender: "Female", species: "Thần Nadir", race: "nadir", cr: 670,
     r1: { id: "tr1", tag: "Uy Nghiêm Hoàng Tộc", bonusFlat: 120, desc: "Hàng 1: +120 CR." },
-    r2: { id: "tr2", tier: "alien_buff", breedChance: 78, crAura: 120, crMult: 0.95, crPenaltyPct: 0, tag: "Gen Vệ Thần (78%)", desc: "Hàng 2: 78% sinh Token Hoàng Tộc & +120 CR Hàng 1." } },
+    r2: { id: "tr2", tier: "alien_buff", breedChance: 78, crAura: 120, crMult: 0.95, crPenaltyPct: 0, tag: "Gen Vệ Thần (78%)", desc: "Hàng 2: 78% sinh Token Hoàng Tộc lên Hàng 1 & +120 CR." } },
+  { id: "tr_nad_templar", name: "Citadel Solar Templar", fac: "nadirius", gender: "Male", species: "Hộ Vệ Nadir", race: "nadir", cr: 530,
+    r1: { id: "tr1", tag: "Khiên Quang Ám", bonusFlat: 95, condType: "row1_token", condBonus: 120, desc: "Hàng 1: +95 CR. ĐK có Token Hàng 1 -> +120 CR!" },
+    r2: { id: "tr2", tier: "alien", breedChance: 70, crAura: 95, crMult: 0.9, crPenaltyPct: 0, tag: "Lửa Citadel (70%)", desc: "Hàng 2: 70% sinh Token lên Hàng 1 & +95 CR." } },
+  { id: "tr_nad_siren", name: "Nadirius Astra Siren", fac: "nadirius", gender: "Female", species: "Nữ Tư Tế Nadir", race: "nadir", cr: 495,
+    r1: { id: "tr1", tag: "Khúc Ca Hoàng Đế", bonusFlat: 100, desc: "Hàng 1: +100 CR chiến đấu trực diện." },
+    r2: { id: "tr2", tier: "alien_buff", breedChance: 76, doubleIfTokenBred: true, crAura: 95, crMult: 0.92, crPenaltyPct: 0, tag: "×2 Aura H2 (76%)", desc: "Hàng 2: 76% sinh Token lên Hàng 1; ×2 Aura (+190 CR) khi có Token!" } },
 
   // WESTERN NADIR
   { id: "tr_wn_raider", name: "Abyssal Border Raider", fac: "western_nadir", gender: "Male", species: "Chiến Binh Vực Thẳm", race: "nadir", cr: 410,
@@ -288,6 +300,12 @@ const TROOP_SPECS = [
   { id: "tr_wn_starro", name: "Western Starro Matriarch", fac: "western_nadir", gender: "Female", species: "Starro Ký Sinh", race: "mutant", cr: 540,
     r1: { id: "tr1", tag: "Kiểm Soát Tâm Trí", bonusFlat: 105, condType: "row1_token", condBonus: 110, desc: "Hàng 1: +105 CR. ĐK có Token trên Hàng 1 -> +110 CR!" },
     r2: { id: "tr2", tier: "wombiote", breedChance: 86, omniWomb: true, symbiosisR2Boost: 10, crAura: 110, crMult: 0.92, crPenaltyPct: 0, tag: "Starro → H1 (86%)", desc: "Hàng 2: 86% phân bào tạo Token lên HÀNG 1 & +110 CR Hàng 1." } },
+  { id: "tr_wn_symbiote", name: "Abyssal SpineFiend", fac: "western_nadir", gender: "Male", species: "Ác Quỷ Nadir", race: "demon", cr: 475,
+    r1: { id: "tr1", tag: "Cộng Hưởng Bóng Đêm", bonusFlat: 95, condType: "active_breed", condBonus: 130, desc: "Hàng 1: +95 CR. ĐK Hàng 2 đang Lai Tạo -> +130 CR!" },
+    r2: { id: "tr2", tier: "alien_buff", breedChance: 75, crAura: 90, crMult: 0.92, crPenaltyPct: 0, tag: "Huyết Quỷ → H1 (75%)", desc: "Hàng 2: 75% sinh Token quỷ lên Hàng 1 & +90 CR." } },
+  { id: "tr_wn_broodmother", name: "Void Egg-Bearer", fac: "western_nadir", gender: "Female", species: "Brood Vực Thẳm", race: "wombiote", cr: 590,
+    r1: { id: "tr1", tag: "Mẹ Ổ Hư Không", bonusFlat: 110, desc: "Hàng 1: +110 CR bảo vệ tổ kén." },
+    r2: { id: "tr2", tier: "omniwomb", breedChance: 88, omniWomb: true, symbiosisR2Boost: 14, crAura: 115, crMult: 0.96, crPenaltyPct: 0, tag: "Omni-Brood (88% • +14% H2)", desc: "Hàng 2: 88% sinh Token đa hình lên Hàng 1 & +14% tỷ lệ cho mọi ô Hàng 2!" } },
 
   // THE COLLECTORS
   { id: "tr_col_ultrabot", name: "Tokyzhou Ultra-Bot Mk.II", fac: "collectors", gender: "Male", species: "Ultra Bot Cyborg", race: "cyborg", cr: 430,
@@ -296,6 +314,15 @@ const TROOP_SPECS = [
   { id: "tr_col_stalker", name: "Vander Bio-Harvester", fac: "collectors", gender: "Female", species: "Omni-Womb Thí Nghiệm", race: "mutant", cr: 510,
     r1: { id: "tr1", tag: "Săn Mẫu Vật", bonusFlat: 105, condType: "active_breed", condBonus: 120, desc: "Hàng 1: +105 CR (săn Tự Do/Người). ĐK Hàng 2 đang Lai -> +120 CR!" },
     r2: { id: "tr2", tier: "omniwomb", breedChance: 90, omniWomb: true, symbiosisR2Boost: 15, crAura: 100, crMult: 0.96, crPenaltyPct: 0, tag: "Omni-Womb → H1 (90%)", desc: "Hàng 2: 90% tạo Token đa dạng lên HÀNG 1 & +15% tỷ lệ Hàng 2!" } },
+  { id: "tr_col_splicer", name: "Nexus Gene-Splicer", fac: "collectors", gender: "Female", species: "Wombiote Biến Đổi", race: "wombiote", cr: 470,
+    r1: { id: "tr1", tag: "Ghép Chuỗi DNA", bonusFlat: 90, condType: "active_breed_or_token", condBonus: 130, desc: "Hàng 1: +90 CR. ĐK có Token/Lai Hàng 2 -> +130 CR!" },
+    r2: { id: "tr2", tier: "wombiote", breedChance: 85, symbiosisR2Boost: 16, crAura: 95, crMult: 0.94, crPenaltyPct: 0, tag: "Wombiote (+16% H2 • 85%)", desc: "Hàng 2: 85% sinh Token lên Hàng 1 & kích +16% tỷ lệ mọi buồng Hàng 2!" } },
+  { id: "tr_col_warden", name: "Containment Pod Warden", fac: "collectors", gender: "Male", species: "Ký Chủ Thử Nghiệm", race: "mutant", cr: 535,
+    r1: { id: "tr1", tag: "Trấn Giữ Lồng Kính", bonusFlat: 110, desc: "Hàng 1: +110 CR." },
+    r2: { id: "tr2", tier: "alien_buff", breedChance: 72, doubleIfTokenBred: true, crAura: 90, crMult: 0.9, crPenaltyPct: 0, tag: "×2 Aura H2 (72%)", desc: "Hàng 2: 72% sinh Token lên Hàng 1 & ×2 Aura (+180 CR) khi có Token!" } },
+  { id: "tr_col_drone", name: "Collector Capture Drone", fac: "collectors", gender: "Male", species: "Bio-Drone", race: "cyborg", cr: 390,
+    r1: { id: "tr1", tag: "Bắn Lưới Từ Tính", bonusFlat: 85, desc: "Hàng 1: +85 CR tấn công nhanh." },
+    r2: { id: "tr2", tier: "alien", breedChance: 65, crAura: 75, crMult: 0.85, crPenaltyPct: 0, tag: "Thu Mẫu (65%)", desc: "Hàng 2: 65% sinh Token lên Hàng 1 & +75 CR." } },
 
   // SALVIC UNION
   { id: "tr_sal_veteran", name: "Predita 10-Year Veteran", fac: "salvic", gender: "Male", species: "Prozonian", race: "prozonian", cr: 480,
@@ -304,19 +331,47 @@ const TROOP_SPECS = [
   { id: "tr_sal_paladin", name: "Salvic Shield Maiden", fac: "salvic", gender: "Female", species: "Prozonian", race: "prozonian", cr: 390,
     r1: { id: "tr1", tag: "Khiên Thép Salvic", bonusFlat: 90, desc: "Hàng 1: +90 CR bảo hộ." },
     r2: { id: "tr2", tier: "alien", breedChance: 66, doubleIfTokenBred: true, crAura: 80, crMult: 0.86, crPenaltyPct: 5, tag: "Salvic → H1 (66% • ×2 Aura)", desc: "Hàng 2: 66% sinh Token lên HÀNG 1 & x2 Aura Hàng 2 nếu đã sinh Token!" } },
+  { id: "tr_sal_medic", name: "Predita Field Biologist", fac: "salvic", gender: "Female", species: "Prozonian", race: "prozonian", cr: 440,
+    r1: { id: "tr1", tag: "Hồi Phục Huyết Mạch", bonusFlat: 90, condType: "active_breed_or_token", condBonus: 115, desc: "Hàng 1: +90 CR. ĐK có Token/Lai Hàng 2 -> +115 CR!" },
+    r2: { id: "tr2", tier: "alien_buff", breedChance: 72, symbiosisR2Boost: 10, crAura: 90, crMult: 0.9, crPenaltyPct: 0, tag: "Sinh Học (+10% H2 • 72%)", desc: "Hàng 2: 72% sinh Token lên Hàng 1 & +10% tỷ lệ cho mọi ô Hàng 2." } },
+  { id: "tr_sal_vanguard", name: "Prozonian Assault Knight", fac: "salvic", gender: "Male", species: "Prozonian", race: "prozonian", cr: 560,
+    r1: { id: "tr1", tag: "Kiếm Phá Trận", bonusFlat: 115, desc: "Hàng 1: +115 CR xung kích." },
+    r2: { id: "tr2", tier: "alien", breedChance: 68, crAura: 100, crMult: 0.9, crPenaltyPct: 0, tag: "Hiệp Sĩ → H1 (68%)", desc: "Hàng 2: 68% sinh Token Hiệp Sĩ lên Hàng 1 & +100 CR." } },
 
   // TAMARITE
   { id: "tr_tam_paragon", name: "Pherone Photon Maiden", fac: "tamarite", gender: "Female", species: "Tamarite", race: "tamarite", cr: 610,
     r1: { id: "tr_tam_paragon_r1", tag: "Bão Quang Phổ", bonusFlat: 120, condType: "active_breed_or_token", condBonus: 140, desc: "Hàng 1: +120 CR (+90/Tamarite). ĐK có Token/Lai -> +140 CR!" },
     r2: { id: "tr2", tier: "tamarite", breedChance: 100, omniWomb: false, crAura: 125, crMult: 1.15, crPenaltyPct: 0, tag: "Tamarite → H1 (100%)", desc: "Hàng 2: Mặc định 100% sinh Token Tamarite thẳng lên HÀNG 1 trống!" } },
+  { id: "tr_tam_guard", name: "Tamarite Solar Sentinel", fac: "tamarite", gender: "Male", species: "Tamarite", race: "tamarite", cr: 580,
+    r1: { id: "tr1", tag: "Quang Khiên Thiên Đường", bonusFlat: 110, condType: "row1_token", condBonus: 130, desc: "Hàng 1: +110 CR. ĐK có Token Hàng 1 -> +130 CR!" },
+    r2: { id: "tr2", tier: "tamarite", breedChance: 100, omniWomb: false, crAura: 115, crMult: 1.1, crPenaltyPct: 0, tag: "Tamarite → H1 (100%)", desc: "Hàng 2: Mặc định 100% sinh Token Tamarite lên Hàng 1 & +115 CR." } },
+  { id: "tr_tam_weaver", name: "Paradise Gene-Priestess", fac: "tamarite", gender: "Female", species: "Tamarite", race: "tamarite", cr: 640,
+    r1: { id: "tr1", tag: "Thánh Nữ Huyết Thống", bonusFlat: 125, desc: "Hàng 1: +125 CR quang năng." },
+    r2: { id: "tr2", tier: "tamarite", breedChance: 100, omniWomb: true, symbiosisR2Boost: 15, crAura: 130, crMult: 1.18, crPenaltyPct: 0, tag: "Tamarite Omni (100% • +15%)", desc: "Hàng 2: 100% sinh Token Omni-Womb lên Hàng 1 & +15% tỷ lệ mọi ô Hàng 2!" } },
+  { id: "tr_tam_enforcer", name: "Pherone Dawn Duelist", fac: "tamarite", gender: "Male", species: "Tamarite", race: "tamarite", cr: 515,
+    r1: { id: "tr1", tag: "Bình Minh Pherone", bonusFlat: 100, condType: "active_breed", condBonus: 125, desc: "Hàng 1: +100 CR. ĐK Hàng 2 đang Lai Tạo -> +125 CR!" },
+    r2: { id: "tr2", tier: "tamarite", breedChance: 100, omniWomb: false, crAura: 110, crMult: 1.08, crPenaltyPct: 0, tag: "Tamarite → H1 (100%)", desc: "Hàng 2: Mặc định 100% sinh Token Tamarite lên Hàng 1!" } },
 
   // SYLVARIAN & INDEPENDENT reserves
   { id: "tr_syl_guard", name: "Kronea Royal Guard", fac: "sylvarian", gender: "Male", species: "Sylvarian", race: "sylvarian", cr: 410,
     r1: { id: "tr1", tag: "Vệ Binh Hoàng Cung", bonusFlat: 85, condType: "row1_ally_token", condBonus: 95, desc: "Hàng 1: +85 CR. ĐK có Token Lai đồng hành trên Hàng 1 -> +95 CR!" },
     r2: { id: "tr2", tier: "alien", breedChance: 60, crAura: 80, crMult: 0.85, crPenaltyPct: 5, tag: "Astraum → H1 (60%)", desc: "Hàng 2: 60% sinh Token lên HÀNG 1 & +80 CR Hàng 1." } },
+  { id: "tr_syl_ranger", name: "Sylvarian Star Ranger", fac: "sylvarian", gender: "Female", species: "Sylvarian", race: "sylvarian", cr: 520,
+    r1: { id: "tr1", tag: "Xạ Thủ Tinh Cầu", bonusFlat: 100, condType: "active_breed_or_token", condBonus: 115, desc: "Hàng 1: +100 CR. ĐK có Token/Lai Hàng 2 -> +115 CR!" },
+    r2: { id: "tr2", tier: "alien_buff", breedChance: 70, crAura: 95, crMult: 0.9, crPenaltyPct: 0, tag: "Sylvarian → H1 (70%)", desc: "Hàng 2: 70% sinh Token lên Hàng 1 & +95 CR." } },
+  { id: "tr_syl_diplomat", name: "Astraum Peace Envoy", fac: "sylvarian", gender: "Male", species: "Sylvarian", race: "sylvarian", cr: 450,
+    r1: { id: "tr1", tag: "Sứ Giả Kronea", bonusFlat: 95, desc: "Hàng 1: +95 CR." },
+    r2: { id: "tr2", tier: "alien", breedChance: 66, doubleIfTokenBred: true, crAura: 85, crMult: 0.88, crPenaltyPct: 0, tag: "×2 Aura H2 (66%)", desc: "Hàng 2: 66% sinh Token lên Hàng 1 & ×2 Aura (+170 CR) khi có Token!" } },
+
   { id: "tr_ind_merc", name: "Gaiastra Horizon Merc", fac: "independent", gender: "Female", species: "Người", race: "human", cr: 350,
     r1: { id: "tr1", tag: "Lính Đánh Thuê Tự Do", bonusFlat: 90, condType: "active_breed_or_dick", condBonus: 110, desc: "Hàng 1: +90 CR. ĐK có Token/Dick/Lai Tạo -> +110 CR!" },
-    r2: { id: "tr2", tier: "human_debuff", breedChance: 32, crAura: 35, crMult: 0.72, crPenaltyPct: 28, tag: "Người Thuần (32% • -28% CR)", desc: "Hàng 2 (Bất lợi): 32% sinh Token lên HÀNG 1 & bị giảm -28% CR (trừ khi có Dick)." } }
+    r2: { id: "tr2", tier: "human_debuff", breedChance: 32, crAura: 35, crMult: 0.72, crPenaltyPct: 28, tag: "Người Thuần (32% • -28% CR)", desc: "Hàng 2 (Bất lợi): 32% sinh Token lên HÀNG 1 & bị giảm -28% CR (trừ khi có Dick)." } },
+  { id: "tr_ind_smuggler", name: "Void-Lane Card Smuggler", fac: "independent", gender: "Male", species: "Người", race: "human", cr: 435,
+    r1: { id: "tr1", tag: "Buôn Lậu Ngoài Vòng", bonusFlat: 95, condType: "active_breed_or_dick", condBonus: 115, desc: "Hàng 1: +95 CR. ĐK có Token/Dick/Lai -> +115 CR!" },
+    r2: { id: "tr2", tier: "human_debuff", breedChance: 32, crAura: 40, crMult: 0.72, crPenaltyPct: 28, tag: "Người Thuần (32% • -28% CR)", desc: "Hàng 2 (Bất lợi): 32% sinh Token & bị giảm -28% CR (Dick hóa giải)." } },
+  { id: "tr_ind_mystic", name: "Drifter Star Oracle", fac: "independent", gender: "Female", species: "Tiên Tri Tự Do", race: "erisian", cr: 510,
+    r1: { id: "tr1", tag: "Tinh Tú Tự Do", bonusFlat: 100, desc: "Hàng 1: +100 CR." },
+    r2: { id: "tr2", tier: "alien_buff", breedChance: 74, doubleIfTokenBred: true, crAura: 95, crMult: 0.92, crPenaltyPct: 0, tag: "×2 Aura H2 (74%)", desc: "Hàng 2: 74% sinh Token lên Hàng 1 & ×2 Aura (+190 CR) khi có Token!" } }
 ];
 
 export const FACTION_TROOP_CARDS = TROOP_SPECS.map((t) => ({
@@ -396,35 +451,145 @@ export function getFactionCardPool(factionId, hybrids = []) {
 
 // Builds a strict 16-card Faction Deck for the chosen Leader (excludes Leader on Row 3)
 // Sized at 16 cards to sustain Draw-2-Per-Turn cadence cleanly!
-export function buildFactionDeck(leaderId = "arisia", hybrids = []) {
+// When ownedCollection map is passed, respects player ownership counts (1 for unique, <=3 for troops).
+export function buildFactionDeck(leaderId = "arisia", hybrids = [], ownedCollection = null) {
   const leader = resolveCard(leaderId, hybrids) || CARD_BY_ID.arisia;
   const fac = leader.fac || "sylvarian";
-  const pool = getFactionCardPool(fac, hybrids).filter((c) => c.id !== leader.id);
+  const allPool = getFactionCardPool(fac, hybrids).filter((c) => c.id !== leader.id);
+
+  if (!ownedCollection) {
+    const deck = [];
+    for (const c of allPool) {
+      if (deck.length >= 16) break;
+      deck.push(c.id);
+    }
+    const troops = allPool.filter((c) => !c.unique);
+    let idx = 0;
+    while (deck.length < 16 && allPool.length > 0) {
+      const src = troops.length > 0 ? troops[idx % troops.length] : allPool[idx % allPool.length];
+      deck.push(src.id);
+      idx++;
+    }
+    return deck.slice(0, 16);
+  }
 
   const deck = [];
-  for (const c of pool) {
+  const used = {};
+  for (const c of allPool) {
     if (deck.length >= 16) break;
-    deck.push(c.id);
+    const cap = c.isHybrid ? 1 : (c.unique ? Math.min(1, ownedCollection[c.id] || 0) : Math.min(3, ownedCollection[c.id] || 0));
+    if (cap >= 1) {
+      deck.push(c.id);
+      used[c.id] = 1;
+    }
   }
-
-  const troops = pool.filter((c) => !c.unique);
-  let idx = 0;
-  while (deck.length < 16 && pool.length > 0) {
-    const src = troops.length > 0 ? troops[idx % troops.length] : pool[idx % pool.length];
-    deck.push(src.id);
-    idx++;
+  const extraTroops = allPool.filter((c) => !c.unique && (ownedCollection[c.id] || 0) > (used[c.id] || 0));
+  let guard = 0;
+  while (deck.length < 16 && extraTroops.length > 0 && guard < 64) {
+    const c = extraTroops[guard % extraTroops.length];
+    const cap = Math.min(3, ownedCollection[c.id] || 0);
+    if ((used[c.id] || 0) < cap) {
+      deck.push(c.id);
+      used[c.id] = (used[c.id] || 0) + 1;
+    }
+    guard++;
   }
-
   return deck.slice(0, 16);
 }
 
-export function validateDeckForLeader(deckIds = [], leaderId = "arisia", hybrids = []) {
+export function validateDeckForLeader(deckIds = [], leaderId = "arisia", hybrids = [], ownedCollection = null) {
   const leader = resolveCard(leaderId, hybrids) || CARD_BY_ID.arisia;
   const fac = leader.fac;
-  return (deckIds || [])
-    .filter((id) => id !== leader.id)
-    .map((id) => resolveCard(id, hybrids))
-    .filter((c) => c && c.fac === fac)
-    .map((c) => c.id)
-    .slice(0, 16);
+  const used = {};
+  const result = [];
+  for (const id of (deckIds || [])) {
+    if (id === leader.id) continue;
+    const c = resolveCard(id, hybrids);
+    if (!c || c.fac !== fac) continue;
+    const maxAllowed = ownedCollection
+      ? (c.isHybrid ? 1 : (c.unique ? Math.min(1, ownedCollection[id] || 0) : Math.min(3, ownedCollection[id] || 0)))
+      : (c.unique ? 1 : 3);
+    if ((used[id] || 0) >= maxAllowed) continue;
+    used[id] = (used[id] || 0) + 1;
+    result.push(id);
+    if (result.length >= 16) break;
+  }
+  return result;
 }
+
+export function getCardPriceInfo(card) {
+  if (!card) return { credits: 500, dust: 80, dustYield: 30, tierLabel: "Thường" };
+  const cr = card.cr || 350;
+  let credits = 450;
+  let dust = 70;
+  let tierLabel = "Dự Bị";
+  if (!card.unique) {
+    credits = Math.max(220, Math.round((cr * 1.15) / 10) * 10);
+    dust = Math.max(30, Math.round(cr * 0.12));
+    tierLabel = "Quân Dự Bị";
+  } else if (cr >= 900) {
+    credits = 3400;
+    dust = 460;
+    tierLabel = "Huyền Thoại Tối Thượng";
+  } else if (cr >= 780) {
+    credits = 2100;
+    dust = 290;
+    tierLabel = "Sử Thi";
+  } else if (cr >= 600) {
+    credits = 1250;
+    dust = 175;
+    tierLabel = "Tinh Nhuệ";
+  } else {
+    credits = Math.max(480, Math.round(cr * 1.3 / 10) * 10);
+    dust = Math.max(70, Math.round(cr * 0.18));
+    tierLabel = "Chiến Binh";
+  }
+  if (card.row2Effect?.tier === "tamarite" || card.row2Effect?.omniWomb) {
+    credits += 250;
+    dust += 35;
+  }
+  return { credits, dust, dustYield: Math.max(18, Math.round(dust * 0.42)), tierLabel };
+}
+
+export const CARD_PACKS = [
+  {
+    id: "faction_pack",
+    name: "📦 Gói Tân Binh Phe",
+    desc: "3 lá thuộc phe đang chọn (ưu tiên thẻ chưa đủ bản sao). Trùng sẽ hoàn Mảnh Gen.",
+    costCredits: 750,
+    costInfluence: 0,
+    costResearch: 0,
+    count: 3,
+    mode: "faction"
+  },
+  {
+    id: "gene_pack",
+    name: "🧬 Gói Đột Biến Hàng 2",
+    desc: "3 lá toàn thiên hà — ưu tiên thẻ có ĐK Hàng 1/2, Omni-Womb, Tamarite hoặc ♂/♀ phối ghép.",
+    costCredits: 1150,
+    costInfluence: 0,
+    costResearch: 180,
+    count: 3,
+    mode: "gene"
+  },
+  {
+    id: "mythic_vault",
+    name: "👑 Hòm Huyền Thoại Gaiastra",
+    desc: "4 lá toàn thiên hà — cam kết tối thiểu 1 Tướng CR ≥ 700, tỷ lệ cao Mythic CR 850+!",
+    costCredits: 2600,
+    costInfluence: 120,
+    costResearch: 0,
+    count: 4,
+    mode: "mythic"
+  },
+  {
+    id: "influence_scout",
+    name: "🕊️ Tuyển Mộ Ngoại Giao",
+    desc: "2 lá bằng 100% Ảnh Hưởng (không tốn Credits) — mở rộng nhanh nhân sự phe bạn & đồng minh.",
+    costCredits: 0,
+    costInfluence: 80,
+    costResearch: 0,
+    count: 2,
+    mode: "scout"
+  }
+];
