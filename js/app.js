@@ -3082,6 +3082,14 @@ class Cycle12App {
     document.getElementById("duel-e-captives").textContent = `🔒 Bắt: ${eng.enemy.row2.length}/3`;
     const eEnergyBadge = document.getElementById("duel-e-energy-badge");
     if (eEnergyBadge) eEnergyBadge.textContent = `⚡ ${eng.enemy.energy}/${eng.enemy.maxEnergy}`;
+    const eHandCountEl = document.getElementById("duel-e-hand-count");
+    if (eHandCountEl) eHandCountEl.textContent = `🃏 Tay Địch: ${eng.enemy.hand.length} lá`;
+    const eHandEl = document.getElementById("duel-e-hand");
+    if (eHandEl) {
+      eHandEl.innerHTML = eng.enemy.hand.slice(0, 8).map((_, idx) => `<div class="enemy-card-back" title="Bài trên tay Địch #${idx + 1}"><span>✦</span></div>`).join("");
+    }
+    const eDeckCountEl = document.getElementById("duel-e-deck-count");
+    if (eDeckCountEl) eDeckCountEl.textContent = `${eng.enemy.deck.length}`;
 
     document.getElementById("duel-p-img").src = getCardPortrait(pLeader);
     document.getElementById("duel-p-name").innerHTML = `${ESC(pLeader.name)} <span class="gender-pill ${pLeader.gender === "Male" ? "male" : "female"}">${pLeader.gender === "Male" ? "♂" : "♀"}</span>`;
@@ -3089,7 +3097,9 @@ class Cycle12App {
     document.getElementById("duel-p-row3-cr").textContent = `⚔️ CR Hàng 3: ${pRow3Eval.total} (Gốc ${pLeader.cr})`;
     document.getElementById("duel-p-row3-state").textContent = pFrontCount > 0 ? `🛡️ Hàng 1 Bảo Hộ (${pFrontCount} lá)` : "⚠️ HÀNG 1 TRỐNG — Hàng 3 bị uy hiếp!";
     document.getElementById("duel-p-captives").textContent = `🔒 Bắt: ${eng.player.row2.length}/3`;
-    document.getElementById("duel-p-deck-count").textContent = `📚 Bộ bài: ${eng.player.deck.length} (+2/lượt)`;
+    const pDeckNumEl = document.getElementById("duel-p-deck-num");
+    if (pDeckNumEl) pDeckNumEl.textContent = `${eng.player.deck.length}`;
+    document.getElementById("duel-p-deck-count").textContent = `Bộ bài: ${eng.player.deck.length} (+2/lượt)`;
 
     // Energy Orb & Turn Bar
     const energyBadge = document.getElementById("duel-energy-badge");
