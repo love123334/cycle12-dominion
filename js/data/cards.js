@@ -14,6 +14,242 @@
 import { CHARACTERS, CHAR_BY_ID } from "./characters.js";
 import { getPortraitUrl, getHybridPortraitUrl } from "../render/portraits.js";
 
+// ============================================================================
+// DATA-DRIVEN TCG KEYWORD & SKILL TABLES (v12.0)
+// Standardized Row 1 (Combat), Row 2 (Breeding/Capture) & Leader Active Skills
+// ============================================================================
+export const H1_KEYWORDS = {
+  charge: {
+    id: "charge",
+    name: "Xung Phong",
+    icon: "⚡",
+    short: "⚡ Xung Phong (+2 Cấp)",
+    smallBonus: 2,
+    scaledBonus: 120,
+    desc: "Xung Phong: +2 Cấp (+120 CR) ngay trong lượt vừa triển khai ra Hàng 1."
+  },
+  shield: {
+    id: "shield",
+    name: "Khiên",
+    icon: "🛡️",
+    short: "🛡️ Khiên (Chặn 1 thua)",
+    desc: "Khiên: Chặn 1 lần thua giao chiến (vỡ Khiên và trụ lại Hàng 1 thay vì bị bắt sang Hàng 2)."
+  },
+  draw: {
+    id: "draw",
+    name: "Rút Bài",
+    icon: "🃏",
+    short: "🃏 Rút +1 Bài",
+    drawCount: 1,
+    desc: "Rút Bài: Khi triển khai ra Hàng 1, rút ngay +1 lá bài từ Bộ bài."
+  },
+  pierce: {
+    id: "pierce",
+    name: "Xuyên Giáp",
+    icon: "🗡️",
+    short: "🗡️ Xuyên Giáp",
+    smallBonus: 1,
+    scaledBonus: 80,
+    desc: "Xuyên Giáp: Phá Khiên của đối thủ đối diện và +1 Cấp (+80 CR) khi công phá Hàng 3."
+  },
+  recover: {
+    id: "recover",
+    name: "Hồi Phục",
+    icon: "💚",
+    short: "💚 Hồi +1⚡",
+    energyGain: 1,
+    desc: "Hồi Phục: Khi ra bài hoặc thắng giao chiến làn, hồi +1⚡ Năng lượng Gen (tối đa 8⚡)."
+  }
+};
+
+export const H2_KEYWORDS = {
+  spawn_token: {
+    id: "spawn_token",
+    name: "Sinh Token",
+    icon: "🧬",
+    short: "🧬 Sinh Token→H1",
+    desc: "Sinh Token: Khi Nam thắng Nữ đưa vào Hàng 2, cuối mỗi lượt sinh Token lai trực tiếp lên Hàng 1 trống."
+  },
+  bonus_draw: {
+    id: "bonus_draw",
+    name: "Rút Thêm",
+    icon: "📚",
+    short: "📚 Rút +1 Khi Lai",
+    drawCount: 1,
+    desc: "Rút Thêm: Khi kích hoạt Lai Tạo (♂ thắng ♀) hoặc sinh Token ở Hàng 2, chủ nhân rút thêm +1 lá."
+  },
+  purge_capture: {
+    id: "purge_capture",
+    name: "Gỡ 1 Điểm Bắt",
+    icon: "🔓",
+    short: "🔓 Gỡ 1 Điểm Bắt",
+    purgeCount: 1,
+    desc: "Gỡ Điểm Bắt: Khi kích hoạt ở Hàng 2, giải cứu/gỡ 1 thẻ tù binh khỏi Hàng 2 của đối phương (1 lần/trận)."
+  }
+};
+
+export const GENE_SURGE_SKILL = {
+  id: "gene_surge",
+  name: "Gene Surge",
+  icon: "🔥",
+  cost: 4,
+  smallBonus: 3,
+  scaledBonus: 180,
+  desc: "Kỹ năng Chủ Động Chung (4⚡ • 1 lần/ván): Bùng nổ Năng lượng Gen, tăng +3 Cấp (+180 CR) cho toàn bộ thẻ Hàng 1 & Thủ lĩnh Hàng 3 trong lượt này!"
+};
+
+export const LEADER_SKILLS = {
+  sylvarian: {
+    id: "sylvarian_decree",
+    name: "Hoàng Lệnh Astraum",
+    icon: "👑",
+    cost: 3,
+    effectType: "buff_and_draw",
+    smallBonus: 2,
+    scaledBonus: 130,
+    drawCount: 1,
+    grantKeyword: "shield",
+    desc: "Tuyệt Kỹ Sylvarian (3⚡ • 1 lần/ván): Cấp 🛡️ Khiên +2 Cấp (+130 CR) cho toàn bộ Hàng 1 và rút +1 lá bài."
+  },
+  western_nadir: {
+    id: "abyss_overdrive",
+    name: "Áp Chế Vực Thẳm",
+    icon: "🌑",
+    cost: 3,
+    effectType: "debuff_pierce",
+    smallPenalty: 2,
+    scaledPenalty: 150,
+    grantKeyword: "pierce",
+    desc: "Tuyệt Kỹ Western Nadir (3⚡ • 1 lần/ván): Giảm -2 Cấp (-150 CR) toàn bộ Hàng 1 địch & cấp 🗡️ Xuyên Giáp cho Hàng 1 ta."
+  },
+  eris: {
+    id: "outer_reset",
+    name: "Vòng Lặp Ngoại Tầng",
+    icon: "⏳",
+    cost: 3,
+    effectType: "shield_recover",
+    energyGain: 1,
+    drawCount: 1,
+    grantKeyword: "shield",
+    desc: "Tuyệt Kỹ Eris Union (3⚡ • 1 lần/ván): Cấp 🛡️ Khiên cho mọi thẻ Hàng 1 phe ta, rút +1 lá và hồi +1⚡."
+  },
+  nadirius: {
+    id: "citadel_blitz",
+    name: "Thánh Chỉ Citadel",
+    icon: "⚡",
+    cost: 3,
+    effectType: "charge_pierce",
+    smallBonus: 2,
+    scaledBonus: 140,
+    grantKeyword: "pierce",
+    desc: "Tuyệt Kỹ Nadirius (3⚡ • 1 lần/ván): Cấp ⚡ Xung Phong (+2 Cấp / +140 CR) và 🗡️ Xuyên Giáp cho toàn bộ Hàng 1."
+  },
+  collectors: {
+    id: "bio_harvest_net",
+    name: "Lưới Thu Hoạch Gen",
+    icon: "🧪",
+    cost: 3,
+    effectType: "draw_and_breed_boost",
+    drawCount: 2,
+    breedBoostPct: 25,
+    smallBonus: 2,
+    scaledBonus: 110,
+    desc: "Tuyệt Kỹ The Collectors (3⚡ • 1 lần/ván): Rút +2 lá bài, +110 CR Hàng 1 & tăng +25% tỷ lệ sinh Token Hàng 2."
+  },
+  salvic: {
+    id: "predita_bastion",
+    name: "Pháo Đài Predita",
+    icon: "🛡️",
+    cost: 3,
+    effectType: "purge_and_shield",
+    purgeCaptive: 1,
+    grantKeyword: "shield",
+    smallBonus: 2,
+    scaledBonus: 120,
+    desc: "Tuyệt Kỹ Salvic Union (3⚡ • 1 lần/ván): Gỡ 1 tù binh khỏi Hàng 2 địch & cấp 🛡️ Khiên (+120 CR) cho Hàng 1 ta."
+  },
+  tamarite: {
+    id: "pherone_bloom",
+    name: "Bùng Nổ Pherone",
+    icon: "💗",
+    cost: 3,
+    effectType: "instant_breed_or_buff",
+    smallBonus: 2,
+    scaledBonus: 150,
+    desc: "Tuyệt Kỹ Tamarite (3⚡ • 1 lần/ván): Kích hoạt ngay 1 chu kỳ sinh Token từ Hàng 2 lên Hàng 1 (hoặc +150 CR toàn bàn & hồi +1⚡)."
+  },
+  independent: {
+    id: "paradox_surge",
+    name: "Đột Biến Nghịch Lý",
+    icon: "🌀",
+    cost: 3,
+    effectType: "omni_tactic",
+    energyGain: 1,
+    drawCount: 1,
+    smallBonus: 2,
+    scaledBonus: 135,
+    desc: "Tuyệt Kỹ Tự Do (3⚡ • 1 lần/ván): Rút +1 lá, hồi +1⚡ và cộng +2 Cấp (+135 CR) cho toàn bộ Hàng 1."
+  }
+};
+
+export function getCardEnergyCost(cr = 400, isToken = false) {
+  if (isToken) return 1;
+  const val = Number(cr || 0);
+  // Support both small-scale CR (1-25) and Cycle 12 lore CR (26-2000)
+  if (val <= 25) {
+    if (val <= 3) return 1;
+    if (val <= 5) return 2;
+    if (val <= 7) return 3;
+    return 4;
+  }
+  if (val < 420) return 1;
+  if (val < 600) return 2;
+  if (val < 820) return 3;
+  return 4;
+}
+
+export function inferH1Keywords(c, r1) {
+  const kw = [];
+  const sp = (c.species || "").toLowerCase();
+  const r1Id = r1?.id || "";
+  if (r1Id === "solar_blitz" || r1Id === "frontline_valor" || r1Id === "supers_strike" || c.id === "tr_nad_lancer" || c.id === "tr_tam_enforcer" || c.id === "tr_col_drone") {
+    kw.push("charge");
+  }
+  if (r1Id === "knight_bastion" || r1Id === "blue_blood_guard" || r1Id === "eris_reset" || c.id === "tr_eris_sentinel" || c.id === "tr_nad_warden" || c.id === "tr_sal_paladin" || c.id === "tr_tam_guard") {
+    kw.push("shield");
+  }
+  if (r1Id === "gotterfall_tactic" || c.id === "ojamon" || c.id === "tr_eris_keeper" || c.id === "mrmind" || c.id === "mina") {
+    kw.push("draw");
+  }
+  if (r1Id === "abyss_terror" || r1Id === "predita_will" || r1Id === "cr_gap_burst" || r1Id === "immortal_bypass" || sp.includes("krypton") || (c.cr || 0) >= 880) {
+    kw.push("pierce");
+  }
+  if (r1Id === "hyper_photon" || r1Id === "omni_host" || r1Id === "reformist_wave" || c.id === "tr_sal_medic" || c.id === "tr_tam_weaver") {
+    kw.push("recover");
+  }
+  if (kw.length === 0) {
+    kw.push((c.cr || 0) >= 600 ? "charge" : "recover");
+  }
+  return [...new Set(kw)];
+}
+
+export function inferH2Keywords(c, r2) {
+  const kw = ["spawn_token"];
+  const r2Tier = r2?.tier || "";
+  if (r2Tier === "tamarite" || r2?.omniWomb || r2?.doubleIfTokenBred || c.id === "ojamon" || c.id === "mrmind") {
+    kw.push("bonus_draw");
+  }
+  if (c.fac === "salvic" || c.fac === "sylvarian" || c.fac === "eris" || c.id === "dick" || (c.cr || 0) >= 850) {
+    kw.push("purge_capture");
+  }
+  return [...new Set(kw)];
+}
+
+export function getLeaderSkillForCard(leaderCard) {
+  const fac = leaderCard?.fac || "sylvarian";
+  return LEADER_SKILLS[fac] || LEADER_SKILLS.sylvarian;
+}
+
 function inferRow1Effect(c) {
   const sp = (c.species || "").toLowerCase();
   if (c.id === "arisia") return { id: "syl_empress", tag: "Chỉ Huy Tối Cao", bonusFlat: 120, condType: "row1_ally_token", desc: "Hàng 1/3: +120 CR & +80 CR mỗi đồng minh Sylvarian Hàng 1 (tính cả Token từ Hàng 2!)." };
@@ -231,6 +467,12 @@ function inferRow2Effect(c) {
 }
 
 function charToCard(c) {
+  const r1 = inferRow1Effect(c);
+  const r2 = inferRow2Effect(c);
+  const h1Keywords = inferH1Keywords(c, r1);
+  const h2Keywords = inferH2Keywords(c, r2);
+  r1.keywords = h1Keywords;
+  r2.keywords = h2Keywords;
   return {
     id: c.id,
     charId: c.id,
@@ -240,11 +482,15 @@ function charToCard(c) {
     species: c.species,
     race: c.race,
     cr: c.cr,
+    cost: getCardEnergyCost(c.cr, false),
     h: c.h || 1.75,
     gender: c.g === "M" ? "Male" : "Female",
     unique: true,
-    row1Effect: inferRow1Effect(c),
-    row2Effect: inferRow2Effect(c)
+    h1Keywords,
+    h2Keywords,
+    leaderSkill: getLeaderSkillForCard(c),
+    row1Effect: r1,
+    row2Effect: r2
   };
 }
 
@@ -374,21 +620,30 @@ const TROOP_SPECS = [
     r2: { id: "tr2", tier: "alien_buff", breedChance: 74, doubleIfTokenBred: true, crAura: 95, crMult: 0.92, crPenaltyPct: 0, tag: "×2 Aura H2 (74%)", desc: "Hàng 2: 74% sinh Token lên Hàng 1 & ×2 Aura (+190 CR) khi có Token!" } }
 ];
 
-export const FACTION_TROOP_CARDS = TROOP_SPECS.map((t) => ({
-  id: t.id,
-  troopId: t.id,
-  name: t.name,
-  kind: "troop",
-  fac: t.fac,
-  species: t.species,
-  race: t.race,
-  cr: t.cr,
-  h: 1.85,
-  gender: t.gender || "Male",
-  unique: false,
-  row1Effect: t.r1,
-  row2Effect: t.r2
-}));
+export const FACTION_TROOP_CARDS = TROOP_SPECS.map((t) => {
+  const h1Keywords = inferH1Keywords(t, t.r1);
+  const h2Keywords = inferH2Keywords(t, t.r2);
+  t.r1.keywords = h1Keywords;
+  t.r2.keywords = h2Keywords;
+  return {
+    id: t.id,
+    troopId: t.id,
+    name: t.name,
+    kind: "troop",
+    fac: t.fac,
+    species: t.species,
+    race: t.race,
+    cr: t.cr,
+    cost: getCardEnergyCost(t.cr, false),
+    h: 1.85,
+    gender: t.gender || "Male",
+    unique: false,
+    h1Keywords,
+    h2Keywords,
+    row1Effect: t.r1,
+    row2Effect: t.r2
+  };
+});
 
 export const CHARACTER_CARDS = CHARACTERS.map(charToCard);
 export const CARDS = [...CHARACTER_CARDS, ...FACTION_TROOP_CARDS];
@@ -396,6 +651,26 @@ export const CARD_BY_ID = Object.fromEntries(CARDS.map((c) => [c.id, c]));
 
 export function hybridToCard(h) {
   const cr = h.cr || 500;
+  const r1 = h.row1Effect || {
+    id: "hyb_resonance",
+    tag: h.mutated ? "Đột Biến Thống Lĩnh" : "Cộng Hưởng Huyết Thống",
+    bonusFlat: h.mutated ? 150 : 105,
+    desc: `Hàng 1/3: ${h.signatureSkill || "Huyết Thống Hợp Nhất"} — +${h.mutated ? 150 : 105} CR giao chiến!`
+  };
+  const r2 = h.row2Effect || {
+    id: "hyb_lineage",
+    tier: "alien_buff",
+    breedChance: 78,
+    crAura: Math.max(85, Math.round(cr * 0.14)),
+    crMult: 0.95,
+    crPenaltyPct: 0,
+    tag: "Gen Thế Hệ Lai (78%)",
+    desc: `Hàng 2: 78% sinh Token F2 & +${Math.max(85, Math.round(cr * 0.14))} CR Hàng 1.`
+  };
+  const h1Keywords = h.h1Keywords || inferH1Keywords({ ...h, cr }, r1);
+  const h2Keywords = h.h2Keywords || inferH2Keywords({ ...h, cr }, r2);
+  r1.keywords = h1Keywords;
+  r2.keywords = h2Keywords;
   return {
     id: h.id,
     isHybrid: true,
@@ -407,25 +682,15 @@ export function hybridToCard(h) {
     species: h.species || "Hybrid",
     race: h.race || "tamarite",
     cr,
+    cost: getCardEnergyCost(cr, Boolean(h.isToken)),
     h: h.h || 1.9,
     gender: h.gender || (Math.random() < 0.5 ? "Male" : "Female"),
     unique: !h.isToken,
-    row1Effect: h.row1Effect || {
-      id: "hyb_resonance",
-      tag: h.mutated ? "Đột Biến Thống Lĩnh" : "Cộng Hưởng Huyết Thống",
-      bonusFlat: h.mutated ? 150 : 105,
-      desc: `Hàng 1/3: ${h.signatureSkill || "Huyết Thống Hợp Nhất"} — +${h.mutated ? 150 : 105} CR giao chiến!`
-    },
-    row2Effect: h.row2Effect || {
-      id: "hyb_lineage",
-      tier: "alien_buff",
-      breedChance: 78,
-      crAura: Math.max(85, Math.round(cr * 0.14)),
-      crMult: 0.95,
-      crPenaltyPct: 0,
-      tag: "Gen Thế Hệ Lai (78%)",
-      desc: `Hàng 2: 78% sinh Token F2 & +${Math.max(85, Math.round(cr * 0.14))} CR Hàng 1.`
-    }
+    h1Keywords,
+    h2Keywords,
+    leaderSkill: getLeaderSkillForCard(h),
+    row1Effect: r1,
+    row2Effect: r2
   };
 }
 

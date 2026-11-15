@@ -17,7 +17,13 @@ import {
   buildFactionDeck,
   validateDeckForLeader,
   getCardPriceInfo,
-  CARD_PACKS
+  CARD_PACKS,
+  H1_KEYWORDS,
+  H2_KEYWORDS,
+  GENE_SURGE_SKILL,
+  LEADER_SKILLS,
+  getCardEnergyCost,
+  getLeaderSkillForCard
 } from "./data/cards.js";
 import { buildHistoryCutscenes } from "./data/cutscenes.js";
 import { GameState, ACHIEVEMENTS } from "./game/state.js";
@@ -51,6 +57,8 @@ class Cycle12App {
     this.shopFilter = "all"; // 'all' | 'unowned' | 'owned' | 'legend'
     this.shopFaction = "all";
     this.zoomedCard = null;
+    this.isResolvingClash = false;
+    this.draggedHandIdx = null;
     this.codexTab = "roster";  // 'roster' | 'cutscenes' | 'diplomacy' | 'events' | 'achievements' | 'species' | 'relations' | 'system'
 
     this.selectedSectorId = "sylvalon";
@@ -239,12 +247,14 @@ class Cycle12App {
     });
 
     const sfxBtn = document.getElementById("btn-toggle-sfx");
-    sfxBtn.textContent = SFX.muted ? "🔇" : "🔊";
-    sfxBtn.addEventListener("click", () => {
-      const muted = SFX.toggleMute();
-      sfxBtn.textContent = muted ? "🔇" : "🔊";
-      if (!muted) SFX.click();
-    });
+    if (sfxBtn) {
+      sfxBtn.textContent = SFX.muted ? "🔇" : "🔊";
+      sfxBtn.addEventListener("click", () => {
+        const muted = SFX.toggleMute();
+        this.syncDuelSfxButtons(!muted);
+        if (!muted) SFX.click();
+      });
+    }
 
     const bgmBtn = document.getElementById("btn-toggle-bgm");
     const syncBgmBtn = () => {
@@ -1281,33 +1291,38 @@ class Cycle12App {
     });
 
     document.getElementById("btn-resolve-clash").addEventListener("click", () => {
-      if (!this.duelEngine || this.duelEngine.over) return;
-      const res = this.duelEngine.resolveClashTurn();
+      if (!this.duelEngine || this.duelEngine.over || this.isResolvingClash) return;
+      this.playAnimatedClashTurn();
+    });
+
+    document.getElementById("btn-undo-duel")?.addEventListener("click", () => {
+      if (!this.duelEngine || this.duelEngine.over || this.isResolvingClash) return;
+      const res = this.duelEngine.undoLastAction();
       if (!res.ok) {
         SFX.alert();
-        this.showToast("Chưa thể giao chiến", res.reason || "Đặt thẻ ra Hàng 1 trước khi đấu!");
+        this.showToast("↩️ Không thể hoàn tác", res.reason || "Chưa có thao tác trong lượt này.");
         return;
       }
-      if (res.newTokens && res.newTokens.length) {
-        SFX.breed();
-        res.newTokens.forEach((tok) => this.game.recordTokenBred(tok));
-        this.game.saveToSlot("auto");
-        this.checkAndToastAchievements();
-        const tokenNotes = res.newTokens.map((t) =>
-          t.spawnedZone === "row1_boost"
-            ? `${t.boostedAllyName} +${t.boostAmount} CR (H1 đầy)`
-            : `${t.name} (CR ${t.cr}) → Hàng 1 Làn ${(t.spawnedLane ?? 0) + 1}`
-        );
-        this.showToast(
-          "🧬 Hàng 2 Sinh Token Lên Hàng 1!",
-          `${tokenNotes.join(" • ")} • Đã thỏa ĐK hiệu ứng H1/H2!`
-        );
-      } else {
-        SFX.cardHit();
-      }
+      SFX.click();
+      this.duelEngine.selectedHandIdx = null;
       this.renderDuelUI();
-      if (this.duelEngine.over) this.showDuelOutcome();
+      this.showToast("↩️ Đã hoàn tác thao tác", `Hoàn lại ⚡ Năng lượng (${this.duelEngine.player.energy}/${this.duelEngine.player.maxEnergy}⚡) & trạng thái bàn đấu.`);
     });
+
+    document.getElementById("btn-gene-surge")?.addEventListener("click", () => {
+      this.triggerPlayerGeneSurge();
+    });
+
+    document.getElementById("btn-leader-skill")?.addEventListener("click", () => {
+      this.triggerPlayerLeaderSkill();
+    });
+
+    document.getElementById("btn-duel-sfx-toggle")?.addEventListener("click", () => {
+      const muted = SFX.toggleMute();
+      this.syncDuelSfxButtons(!muted);
+      if (!muted) SFX.click();
+    });
+    this.syncDuelSfxButtons(!SFX.muted);
 
     document.getElementById("btn-auto-deck")?.addEventListener("click", () => {
       SFX.choice();
@@ -1544,6 +1559,168 @@ class Cycle12App {
     }
   }
 
+  syncDuelSfxButtons(enabled) {
+    const hudBtn = document.getElementById("btn-toggle-sfx");
+    if (hudBtn) hudBtn.textContent = enabled ? "🔊" : "🔇";
+    const duelBtn = document.getElementById("btn-duel-sfx-toggle");
+    if (duelBtn) {
+      duelBtn.textContent = enabled ? "🔊 Âm Thanh" : "🔇 Đã Tắt Tiếng";
+      duelBtn.classList.toggle("active", enabled);
+    }
+  }
+
+  triggerPlayerGeneSurge() {
+    if (!this.duelEngine || this.duelEngine.over || this.isResolvingClash) return;
+    const res = this.duelEngine.activateGeneSurge("player");
+    if (!res.ok) {
+      SFX.alert();
+      this.showToast("🔥 Gene Surge", res.reason || "Không thể kích hoạt Gene Surge.");
+      return;
+    }
+    SFX.victory();
+    const battleView = document.getElementById("duel-battle-view");
+    if (battleView) {
+      battleView.classList.remove("arena-surge-pulse");
+      void battleView.offsetWidth;
+      battleView.classList.add("arena-surge-pulse");
+    }
+    this.renderDuelUI();
+    this.showToast("🔥 GENE SURGE BÙNG NỔ!", `Tiêu 4⚡ • Toàn bộ Hàng 1 & Hàng 3 được +${res.skill?.scaledBonus || 180} CR (+3 Cấp) trong lượt này!`);
+  }
+
+  triggerPlayerLeaderSkill() {
+    if (!this.duelEngine || this.duelEngine.over || this.isResolvingClash) return;
+    const res = this.duelEngine.activateLeaderSkill("player");
+    if (!res.ok) {
+      SFX.alert();
+      this.showToast("👑 Kỹ Năng Thủ Lĩnh", res.reason || "Không thể kích hoạt kỹ năng Thủ lĩnh.");
+      return;
+    }
+    SFX.choice();
+    const battleView = document.getElementById("duel-battle-view");
+    if (battleView) {
+      battleView.classList.remove("arena-surge-pulse");
+      void battleView.offsetWidth;
+      battleView.classList.add("arena-surge-pulse");
+    }
+    this.renderDuelUI();
+    this.showToast(`👑 ${res.skill?.name || "Tuyệt Kỹ Tướng"}!`, (res.notes && res.notes.length ? res.notes.join(" • ") : res.skill?.desc) || "Đã kích hoạt kỹ năng đặc biệt của Thủ lĩnh!");
+  }
+
+  spawnLaneFloatPop(laneIdx, text, tone = "gold") {
+    const laneChip = document.querySelector(`#duel-lanes-bar .lane-loc-chip[data-lane-chip="${laneIdx}"]`)
+      || document.querySelectorAll("#duel-lanes-bar .lane-loc-chip")[laneIdx];
+    if (!laneChip) return;
+    const pop = document.createElement("div");
+    pop.className = `lane-float-pop ${tone}`;
+    pop.textContent = text;
+    laneChip.appendChild(pop);
+    setTimeout(() => pop.remove(), 1100);
+  }
+
+  async playAnimatedClashTurn() {
+    if (!this.duelEngine || this.duelEngine.over || this.isResolvingClash) return;
+    const eng = this.duelEngine;
+
+    const pHasCard = eng.player.row1.some(Boolean);
+    const eHasCard = eng.enemy.row1.some(Boolean);
+    if (!pHasCard && !eHasCard && eng.player.hand.length > 0) {
+      SFX.alert();
+      this.showToast("Chưa thể giao chiến", "Hãy đặt ít nhất 1 lá bài từ tay lên Hàng 1 (Chiến tuyến) trước khi Giao Chiến!");
+      return;
+    }
+
+    this.isResolvingClash = true;
+    const resolveBtn = document.getElementById("btn-resolve-clash");
+    if (resolveBtn) resolveBtn.disabled = true;
+
+    try {
+      // Execute the turn resolution in the pure engine first, then play sequential lane animations (Lane 1 -> 2 -> 3)
+      const res = eng.resolveClashTurn();
+      if (!res.ok) {
+        SFX.alert();
+        this.showToast("Chưa thể giao chiến", res.reason || "Đặt thẻ ra Hàng 1 trước khi đấu!");
+        this.isResolvingClash = false;
+        if (resolveBtn) resolveBtn.disabled = false;
+        return;
+      }
+
+      const battleView = document.getElementById("duel-battle-view");
+      const laneResList = res.laneResults || [];
+
+      for (let i = 0; i < 3; i++) {
+        const lr = laneResList[i];
+        if (!lr || lr.outcome === "empty") continue;
+
+        const pSlot = document.querySelector(`#duel-p-row1 .board-slot[data-lane="${i}"]`);
+        const eSlot = document.querySelector(`#duel-e-row1 .board-slot[data-lane="${i}"]`);
+        const laneChip = document.querySelectorAll("#duel-lanes-bar .lane-loc-chip")[i];
+
+        pSlot?.classList.add("lane-resolving", "anim-lunge-up");
+        eSlot?.classList.add("lane-resolving", "anim-lunge-down");
+        laneChip?.classList.add("lane-resolving");
+
+        SFX.cardHit();
+        if (battleView) {
+          battleView.classList.remove("arena-shake");
+          void battleView.offsetWidth;
+          battleView.classList.add("arena-shake");
+        }
+
+        // Flash impact + floating CR numbers
+        const flashEl = document.createElement("div");
+        flashEl.className = "lane-impact-flash";
+        laneChip?.appendChild(flashEl);
+
+        if (lr.outcome === "player_win") {
+          this.spawnLaneFloatPop(i, `🏆 THẮNG LÀN ${i + 1} (${lr.pTotal} vs ${lr.eTotal})`, "win");
+        } else if (lr.outcome === "enemy_win") {
+          this.spawnLaneFloatPop(i, `💥 THUA LÀN ${i + 1} (${lr.pTotal} vs ${lr.eTotal})`, "loss");
+        } else if (lr.outcome === "player_shield_block" || lr.outcome === "enemy_shield_block") {
+          this.spawnLaneFloatPop(i, `🛡️ KHIÊN CHẶN! (${lr.pTotal} vs ${lr.eTotal})`, "tie");
+        } else if (lr.outcome === "tie") {
+          this.spawnLaneFloatPop(i, `⚖️ HÒA LÀN ${i + 1} (${lr.pTotal})`, "tie");
+        } else if (lr.outcome === "player_hold") {
+          this.spawnLaneFloatPop(i, `🔥 TRẤN GIỮ LÀN ${i + 1} (${lr.pTotal} CR)`, "win");
+        } else if (lr.outcome === "enemy_hold") {
+          this.spawnLaneFloatPop(i, `⚠️ ĐỊCH TRẤN GIỮ (${lr.eTotal} CR)`, "loss");
+        }
+
+        await new Promise((r) => setTimeout(r, 270));
+        pSlot?.classList.remove("lane-resolving", "anim-lunge-up");
+        eSlot?.classList.remove("lane-resolving", "anim-lunge-down");
+        laneChip?.classList.remove("lane-resolving");
+        flashEl.remove();
+      }
+
+      if (res.newTokens && res.newTokens.length) {
+        SFX.breed();
+        res.newTokens.forEach((tok) => this.game.recordTokenBred(tok));
+        this.game.saveToSlot("auto");
+        this.checkAndToastAchievements();
+        const tokenNotes = res.newTokens.map((t) =>
+          t.spawnedZone === "row1_boost"
+            ? `${t.boostedAllyName} +${t.boostAmount} CR (H1 đầy)`
+            : `${t.name} (CR ${t.cr}) → Hàng 1 Làn ${(t.spawnedLane ?? 0) + 1}`
+        );
+        this.showToast(
+          "🧬 Hàng 2 Sinh Token Lên Hàng 1!",
+          `${tokenNotes.join(" • ")} • Đã thỏa ĐK hiệu ứng H1/H2!`
+        );
+      }
+
+      this.renderDuelUI();
+      if (eng.over) {
+        this.showDuelOutcome();
+      }
+    } finally {
+      this.isResolvingClash = false;
+      if (resolveBtn && this.duelEngine && !this.duelEngine.over) {
+        resolveBtn.disabled = false;
+      }
+    }
+  }
+
   startCardMatch({ kind = "skirmish", playerCharId = null, enemyId = "overlord", buffMult = 1, modeLabel = "Đấu Thẻ 3 Hàng", gauntletFloor = 0, difficulty = 1 } = {}) {
     const activeDeckObj = this.game.getActiveDeck();
     const pId = playerCharId || activeDeckObj?.leaderId || this.game.protagonistId || "arisia";
@@ -1566,28 +1743,42 @@ class Cycle12App {
       enemyLeaderId: enemyId,
       hybrids: this.game.hybrids || [],
       difficulty: effDifficulty,
+      gauntletFloor,
       sectorId: this.pendingInvasionSectorId || null,
       gameStateRef: this.game
     });
     this.duelEngine.modeLabel = modeLabel;
     this.inspectedDuelCard = null;
+    this.isResolvingClash = false;
     document.getElementById("duel-victory-modal").classList.add("hidden");
     this.renderDuelUI();
   }
 
   startGauntletFloor(floor = 1) {
-    const sorted = [...CHARACTERS].sort((a, b) => a.cr - b.cr);
-    const bossIdx = Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * Math.min(1, 0.25 + floor * 0.14)));
-    const boss = sorted[bossIdx] || CHAR_BY_ID.overlord;
+    const isBossFloor = floor > 0 && floor % 5 === 0;
+    const mythicBossIds = ["overlord", "emma", "magnatere", "ovalina", "zarcseid"];
+    let boss = null;
+    if (isBossFloor) {
+      const bossId = mythicBossIds[Math.floor((floor / 5 - 1) % mythicBossIds.length)] || "overlord";
+      boss = CHAR_BY_ID[bossId] || CHAR_BY_ID.overlord;
+    } else {
+      const sorted = [...CHARACTERS].sort((a, b) => a.cr - b.cr);
+      const bossIdx = Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * Math.min(1, 0.22 + floor * 0.12)));
+      boss = sorted[bossIdx] || CHAR_BY_ID.overlord;
+    }
     this.setDuelTab("gauntlet");
-    document.getElementById("gauntlet-floor-badge").textContent = `🗼 Đang ở Tầng ${floor} • Kỷ lục: ${this.game.stats?.gauntletMax || 0}`;
+    const floorTag = isBossFloor ? `👑 BOSS TẦNG ${floor}` : `🗼 Đang ở Tầng ${floor}`;
+    document.getElementById("gauntlet-floor-badge").textContent = `${floorTag} • Kỷ lục: ${this.game.stats?.gauntletMax || 0}`;
     this.startCardMatch({
       kind: "gauntlet",
       enemyId: boss.id,
-      modeLabel: `🗼 Tháp Hư Không Tầng ${floor}`,
+      modeLabel: isBossFloor ? `👑 BOSS THÁP HƯ KHÔNG • TẦNG ${floor}` : `🗼 Tháp Hư Không Tầng ${floor}`,
       gauntletFloor: floor,
-      difficulty: 0.9 + floor * 0.2
+      difficulty: 0.9 + floor * 0.2 + (isBossFloor ? 0.35 : 0)
     });
+    if (isBossFloor) {
+      this.showToast(`👑 BOSS TẦNG ${floor}: ${boss.name}!`, "Thủ lĩnh Boss được cường hóa CR đặc biệt & khởi đầu +1⚡ Năng lượng Gen!");
+    }
   }
 
   initCardZoomModal() {
@@ -2395,11 +2586,15 @@ class Cycle12App {
     const eng = this.duelEngine;
     const sideKey = ctx.side || "player";
     const sCtx = eng ? eng.getSideBreedingContext(sideKey) : null;
+    const cardCost = Number(card.cost || getCardEnergyCost(card.cr, card.isToken));
+    const h1Kws = (card.h1Keywords || []).map((k) => H1_KEYWORDS[k]).filter(Boolean);
+    const h2Kws = (card.h2Keywords || []).map((k) => H2_KEYWORDS[k]).filter(Boolean);
+    const leaderSkill = card.leaderSkill || getLeaderSkillForCard(card);
 
-    document.getElementById("cz-name").innerHTML = `${ESC(card.name)} <span class="gender-pill ${isM ? "male" : "female"}">${isM ? "♂ Nam" : "♀ Nữ"}</span>`;
+    document.getElementById("cz-name").innerHTML = `${ESC(card.name)} <span class="gender-pill ${isM ? "male" : "female"}">${isM ? "♂ Nam" : "♀ Nữ"}</span> <span class="badge energy-orb-pill" style="font-size:11px;">⚡ ${cardCost} Năng Lượng</span>`;
     const tierSuffix = card.unique ? `${priceInfo.tierLabel} • ★ Nhân Vật Độc Nhất` : priceInfo.tierLabel;
     document.getElementById("cz-subtitle").textContent =
-      `${card.species || "Sinh vật"} • Phe ${facLabel} • ${tierSuffix}`;
+      `${card.species || "Sinh vật"} • Phe ${facLabel} • Cost ${cardCost}⚡ • ${tierSuffix}`;
 
     const breakdownLines = [];
     if (evalCR) {
@@ -2436,8 +2631,16 @@ class Cycle12App {
     if (card.fromRow2Breeding) specialStatusNotes.push("🧬 Sinh ra từ Buồng Lai Hàng 2 và tự nhảy lên Hàng 1");
     if (card.isToken) specialStatusNotes.push(`🪙 Thẻ Token Lai${card.motherId ? ` (Mẹ: ${CHAR_BY_ID[card.motherId]?.name || card.motherId})` : ""}${card.fatherId ? ` × (Cha: ${CHAR_BY_ID[card.fatherId]?.name || card.fatherId})` : ""}`);
     if (card.isHybrid) specialStatusNotes.push("✦ Dòng Lai Vĩnh Viễn trong kho gen");
+    if (card.shieldCharges > 0) specialStatusNotes.push("🛡️ Đang có Khiên Bảo Hộ (Chặn 1 lần thua giao chiến tại Hàng 1)");
     if (r2.symbiosisR2Boost) specialStatusNotes.push(`✨ Cộng sinh Hàng 2: Tăng +${r2.symbiosisR2Boost}% tỷ lệ sinh Token cho mọi cặp lai cùng bên`);
     if (r2.doubleIfTokenBred) specialStatusNotes.push(`⚡ Nhân đôi Aura CR Hàng 2 (+${(r2.crAura || 40) * 2} CR) khi Hàng 1 đã có Token lai`);
+
+    const h1KwHtml = h1Kws.length
+      ? `<div class="cz-kw-box">${h1Kws.map((kw) => `<div class="cz-kw-item"><span class="badge" style="color:${kw.color};border-color:${kw.color};">${kw.icon} ${ESC(kw.name)}</span> <span>${ESC(kw.desc)}</span></div>`).join("")}</div>`
+      : "";
+    const h2KwHtml = h2Kws.length
+      ? `<div class="cz-kw-box">${h2Kws.map((kw) => `<div class="cz-kw-item"><span class="badge" style="color:${kw.color};border-color:${kw.color};">${kw.icon} ${ESC(kw.name)}</span> <span>${ESC(kw.desc)}</span></div>`).join("")}</div>`
+      : "";
 
     const skillsHtml = baseChar?.skills?.length
       ? `<div class="cz-skills">${baseChar.skills.map((sk) => `<span class="badge">${ESC(sk)}</span>`).join("")}</div>`
@@ -2450,13 +2653,15 @@ class Cycle12App {
         <div class="cz-portrait-frame ${this.getCardRarityClass(card)}" style="--card-accent:${facColor};">
           <img src="${getCardPortrait(card)}" alt="${ESC(card.name)}" />
           <div class="cz-portrait-overlay">
-            <span class="cz-cr-badge">⚔️ CR ${evalCR ? evalCR.total : card.cr}${evalCR && evalCR.total !== card.cr ? ` <small>(Gốc ${card.cr})</small>` : ""}</span>
+            <span class="cz-cr-badge">⚡${cardCost} • ⚔️ CR ${evalCR ? evalCR.total : card.cr}${evalCR && evalCR.total !== card.cr ? ` <small>(Gốc ${card.cr})</small>` : ""}</span>
             ${card.fromRow2Breeding ? `<span class="token-pill row2-spawn">🧬 H2→H1</span>` : (card.isToken ? `<span class="token-pill">🪙 TOKEN</span>` : (card.isHybrid ? `<span class="token-pill hybrid">✦ LAI</span>` : ""))}
           </div>
         </div>
         <div class="cz-meta-pills">
+          <span class="badge energy-orb-pill">⚡ Cost: ${cardCost}</span>
           <span class="badge" style="color:${facColor};border-color:${facColor};">${ESC(facLabel)}</span>
           <span class="badge">${ESC(card.species || "Khác")}</span>
+          <span class="badge">${isM ? "♂ Ưu thế +2 Cấp (+120 CR) trước ♀" : "♀ Bị ♂ khắc chế tại H1"}</span>
           ${isCollectible ? `<span class="badge" style="color:${owned > 0 ? "#4ade80" : "#fda4af"};">${owned > 0 ? `✓ Sở hữu ${owned}/${maxCap}` : "🔒 Chưa sở hữu"}</span>` : ""}
           ${activeDeck && isCollectible && card.fac === (CHAR_BY_ID[activeDeck.leaderId]?.fac) && card.id !== activeDeck.leaderId ? `<span class="badge">📚 Trong Deck: ${inDeckCount}/${maxCap}</span>` : ""}
           ${baseChar?.h ? `<span class="badge">📏 ${baseChar.h}m</span>` : ""}
@@ -2480,22 +2685,32 @@ class Cycle12App {
 
         <div class="cz-block row1">
           <div class="cz-block-head">
-            <span class="cz-block-title">⚔️ HÀNG 1 — HIỆU ỨNG CHIẾN ĐẤU TRỰC TIẾP</span>
+            <span class="cz-block-title">⚔️ HÀNG 1 — TỪ KHÓA &amp; HIỆU ỨNG CHIẾN ĐẤU</span>
             ${r1CondTag}
           </div>
+          ${h1KwHtml}
           <div class="cz-block-text">${ESC(r1.desc || "Chiến đấu trực diện theo Tổng CR, phe phái và hiệu ứng làn.")}</div>
           ${r1.tag ? `<div class="cz-tag-line">Nhãn hiệu ứng: <code>${ESC(r1.tag)}</code></div>` : ""}
         </div>
 
         <div class="cz-block row2">
           <div class="cz-block-head">
-            <span class="cz-block-title">🧬 HÀNG 2 — HIỆU ỨNG SINH SẢN &amp; HỖ TRỢ</span>
+            <span class="cz-block-title">🧬 HÀNG 2 — TỪ KHÓA SINH SẢN &amp; TÙ BINH</span>
             <span class="badge" style="color:#f472b6;">Hỗ trợ +${r2.crAura || 60} CR</span>
           </div>
+          ${h2KwHtml}
           <div class="cz-block-text">${ESC(r2.desc || "Khi bị bắt giữ hoặc lai cặp Nam×Nữ tại Hàng 2 sẽ kích hoạt hỗ trợ Hàng 1.")}</div>
           <div class="cz-tag-line">🧬 Tỷ lệ lai / cơ chế: <strong>${ESC(breedPctStr)}</strong></div>
           ${debuffNote}
         </div>
+
+        ${leaderSkill ? `
+          <div class="cz-block special">
+            <div class="cz-block-title">👑 Kỹ Năng Chủ Động Khi Làm Thủ Lĩnh Hàng 3</div>
+            <div class="cz-note ok"><strong>🔥 Gene Surge (4⚡ • 1 lần/ván):</strong> +3 Cấp (+180 CR) toàn bàn trong lượt hiện tại.</div>
+            <div class="cz-note ok"><strong>${leaderSkill.icon || "👑"} ${ESC(leaderSkill.name)} (${leaderSkill.cost || 3}⚡ • 1 lần/ván):</strong> ${ESC(leaderSkill.desc)}</div>
+          </div>
+        ` : ""}
 
         ${specialStatusNotes.length ? `
           <div class="cz-block special">
@@ -2517,10 +2732,11 @@ class Cycle12App {
     const btns = [];
 
     if (ctx.source === "duel" && ctx.zone === "hand" && eng && !eng.over) {
-      btns.push(`<button type="button" class="btn-primary btn-compact" id="btn-cz-deploy">📥 Đặt Vào Làn Trống Đầu Tiên</button>`);
+      const canAfford = eng.player.energy >= cardCost;
+      btns.push(`<button type="button" class="btn-primary btn-compact" id="btn-cz-deploy" ${canAfford ? "" : "disabled"}>📥 Đặt Vào Làn Trống (${cardCost}⚡)</button>`);
       [0, 1, 2].forEach((laneIdx) => {
         const occupied = Boolean(eng.player.row1[laneIdx]);
-        btns.push(`<button type="button" class="btn-glass btn-compact" data-cz-deploy-lane="${laneIdx}" ${occupied ? "disabled" : ""}>${occupied ? `🔒 Làn ${laneIdx + 1} Đầy` : `⚔️ Đặt Làn ${laneIdx + 1}`}</button>`);
+        btns.push(`<button type="button" class="btn-glass btn-compact" data-cz-deploy-lane="${laneIdx}" ${(occupied || !canAfford) ? "disabled" : ""}>${occupied ? `🔒 Làn ${laneIdx + 1} Đầy` : `⚔️ Đặt Làn ${laneIdx + 1} (${cardCost}⚡)`}</button>`);
       });
     }
 
@@ -2572,6 +2788,7 @@ class Cycle12App {
       const res = this.duelEngine.deployCardToRow1(ctx.idx, firstEmpty);
       if (res.ok) {
         SFX.cardPlay();
+        this.lastDeployedLane = firstEmpty;
         this.closeCardZoomModal();
         this.renderDuelUI();
       } else {
@@ -2586,6 +2803,7 @@ class Cycle12App {
         const res = this.duelEngine?.deployCardToRow1(ctx.idx, laneIdx);
         if (res?.ok) {
           SFX.cardPlay();
+          this.lastDeployedLane = laneIdx;
           this.closeCardZoomModal();
           this.renderDuelUI();
         } else if (res) {
@@ -2702,6 +2920,13 @@ class Cycle12App {
     const r2 = c.row2Effect || {};
     const rarity = this.getCardRarityClass(c);
     const condLit = Boolean(opts.condMet);
+    const cardCost = Number(c.cost || getCardEnergyCost(c.cr, c.isToken));
+    const h1Kws = (c.h1Keywords || []).map((k) => H1_KEYWORDS[k]).filter(Boolean);
+    const h2Kws = (c.h2Keywords || []).map((k) => H2_KEYWORDS[k]).filter(Boolean);
+    const kwBadges = [
+      ...h1Kws.slice(0, 2).map((kw) => `<span class="kw-mini-pill h1" style="--kw-color:${kw.color};" title="${ESC(kw.name)}: ${ESC(kw.desc)}">${kw.icon} ${ESC(kw.shortLabel || kw.name)}</span>`),
+      ...h2Kws.slice(0, 1).map((kw) => `<span class="kw-mini-pill h2" style="--kw-color:${kw.color};" title="H2 ${ESC(kw.name)}: ${ESC(kw.desc)}">${kw.icon}</span>`)
+    ].join("");
     const h2Mod = r2.crPenaltyPct ? "debuff" : (r2.tier === "tamarite" ? "tamarite" : "");
     const extraCls = [
       opts.className || "hand-card",
@@ -2711,11 +2936,12 @@ class Cycle12App {
       opts.locked ? "card-locked" : "",
       condLit ? "cond-lit" : ""
     ].filter(Boolean).join(" ");
-    const attrs = opts.attrs || "";
+    const dragAttr = opts.draggable ? 'draggable="true"' : "";
+    const attrs = `${dragAttr} ${opts.attrs || ""}`.trim();
     const zoomAttrs = opts.zoomAttrs || `data-zoom-host="1" data-zoom-card="${ESC(c.id)}"`;
     const ownBadge = opts.ownText ? `<span class="own-pill ${opts.locked ? "locked" : ""}">${ESC(opts.ownText)}</span>` : "";
     const customStyle = `--card-accent:${accent};${opts.style || ""}`;
-    const titleStr = opts.title || `H1: ${r1.desc || ""} | H2: ${r2.desc || ""}`;
+    const titleStr = opts.title || `Cost ${cardCost}⚡ | H1: ${r1.desc || ""} | H2: ${r2.desc || ""}`;
     const badgeTop = c.fromRow2Breeding
       ? `<span class="token-pill row2-spawn">🧬 H2→H1</span>`
       : (c.isToken
@@ -2727,7 +2953,8 @@ class Cycle12App {
     return `
       <button type="button" class="${extraCls}" style="${customStyle}" ${attrs} ${zoomAttrs} title="${ESC(titleStr)}">
         <span class="card-foil-sweep"></span>
-        <span class="card-zoom-trigger" data-zoom-trigger="1" role="button" tabindex="0" title="Phóng to đọc toàn bộ thông số &amp; hiệu ứng">🔍</span>
+        <span class="card-zoom-trigger" data-zoom-trigger="1" role="button" tabindex="0" title="Phóng to hoặc nhấn giữ để đọc toàn bộ thông số &amp; hiệu ứng">🔍</span>
+        <span class="card-cost-gem" title="Chi phí Năng lượng Gen: ${cardCost}⚡">${cardCost}⚡</span>
         <span class="card-cr-gem">${c.cr}</span>
         <div class="card-top-badges">
           <span class="gender-pill ${isM ? "male" : "female"}">${isM ? "♂" : "♀"}</span>
@@ -2735,8 +2962,9 @@ class Cycle12App {
           ${badgeTop}
         </div>
         <div class="card-art-stage">
-          <img class="hand-card-thumb" src="${getCardPortrait(c)}" alt="${ESC(c.name)}" ${opts.lazy ? 'loading="lazy"' : ""} />
+          <img class="hand-card-thumb" src="${getCardPortrait(c)}" alt="${ESC(c.name)}" draggable="false" ${opts.lazy ? 'loading="lazy"' : ""} />
           <div class="card-art-vignette"></div>
+          ${kwBadges ? `<div class="card-kw-strip">${kwBadges}</div>` : ""}
           <div class="card-nameplate">
             <div class="card-name-title">${ESC(c.name)}</div>
             <div class="card-subline">${ESC(c.species)} • ${ESC(facShort)}</div>
@@ -2754,16 +2982,23 @@ class Cycle12App {
     const bar = document.getElementById("duel-card-inspector");
     if (!bar) return;
     if (!card) {
-      bar.innerHTML = `<span class="muted">🔍 Chạm hoặc di chuột vào bất kỳ thẻ bài nào để xem rõ CR, Loài, Phe, ♂/♀, Nội tại Hàng 1 (Chiến đấu) &amp; Hàng 2 (Sinh sản).</span>`;
+      bar.innerHTML = `<span class="muted">🔍 Chạm, kéo-thả hoặc nhấn giữ vào bất kỳ thẻ bài nào để xem rõ ⚡Cost, CR, Loài, Phe, ♂/♀, Từ khóa H1 &amp; H2.</span>`;
       return;
     }
     this.inspectedDuelCard = card;
     const isM = card.gender === "Male";
     const accent = FACTIONS[card.fac]?.color || "#38bdf8";
     const facLabel = FACTIONS[card.fac]?.name || card.fac;
+    const cardCost = Number(card.cost || getCardEnergyCost(card.cr, card.isToken));
     const crStr = evalCR ? `Tổng CR ${evalCR.total} (Gốc ${card.cr})` : `CR ${card.cr}`;
     const r1 = card.row1Effect || {};
     const r2 = card.row2Effect || {};
+    const h1Kws = (card.h1Keywords || []).map((k) => H1_KEYWORDS[k]).filter(Boolean);
+    const h2Kws = (card.h2Keywords || []).map((k) => H2_KEYWORDS[k]).filter(Boolean);
+    const kwSummary = [
+      ...h1Kws.map((kw) => `<span class="badge" style="color:${kw.color};border-color:${kw.color};">${kw.icon} ${ESC(kw.name)}</span>`),
+      ...h2Kws.map((kw) => `<span class="badge" style="color:${kw.color};border-color:${kw.color};">${kw.icon} ${ESC(kw.name)}</span>`)
+    ].join(" ");
     const eng = this.duelEngine;
     const pCtx = eng ? eng.getSideBreedingContext("player") : null;
     const condActiveList = evalCR?.triggeredConditionals?.length
@@ -2795,9 +3030,11 @@ class Cycle12App {
       <div class="inspector-body">
         <div class="inspector-head">
           <strong style="color:#fff;">${ESC(card.name)}</strong>
+          <span class="badge energy-orb-pill" style="font-size:10.5px;">⚡ ${cardCost}</span>
           <span class="gender-pill ${isM ? "male" : "female"}">${isM ? "♂ Nam" : "♀ Nữ"}</span>
           <span class="inspector-cr-text">⚔️ ${crStr}</span>
           <span class="muted">${ESC(card.species)} • ${ESC(facLabel)}</span>
+          ${kwSummary}
           ${card.fromRow2Breeding ? `<span class="badge" style="color:#a7f3d0;border-color:rgba(52,211,153,0.6);">🧬 TOKEN TỪ HÀNG 2</span>` : (card.isToken ? `<span class="badge" style="color:#f472b6;border-color:rgba(244,114,182,0.5);">🪙 TOKEN LAI</span>` : "")}
           ${condHtml}
           <button type="button" class="btn-primary btn-compact insp-zoom-btn" id="btn-inspect-zoom">🔍 Phóng To / Đọc Đủ Eff</button>
@@ -2838,11 +3075,13 @@ class Cycle12App {
     if (pWingBar) pWingBar.style.setProperty("--card-accent", FACTIONS[pLeader.fac]?.color || "#38bdf8");
 
     document.getElementById("duel-e-img").src = getCardPortrait(eLeader);
-    document.getElementById("duel-e-name").innerHTML = `${ESC(eLeader.name)} <span class="gender-pill ${eLeader.gender === "Male" ? "male" : "female"}">${eLeader.gender === "Male" ? "♂" : "♀"}</span>`;
+    document.getElementById("duel-e-name").innerHTML = `${ESC(eLeader.name)} <span class="gender-pill ${eLeader.gender === "Male" ? "male" : "female"}">${eLeader.gender === "Male" ? "♂" : "♀"}</span>${eng.isBossFloor ? ` <span class="badge" style="color:#fbbf24;border-color:#fbbf24;">👑 BOSS</span>` : ""}`;
     document.getElementById("duel-e-meta").textContent = `${eLeader.species} • Phe ${eFacName} • H1: ${eLeader.row1Effect?.tag || ""}`;
     document.getElementById("duel-e-row3-cr").textContent = `⚔️ CR Hàng 3: ${eRow3Eval.total} (Gốc ${eLeader.cr})`;
     document.getElementById("duel-e-row3-state").textContent = eFrontCount > 0 ? `🛡️ Hàng 1 Bảo Hộ (${eFrontCount} lá)` : "⚡ LỘ DIỆN — Tổng CR H1 đánh thẳng Hàng 3!";
     document.getElementById("duel-e-captives").textContent = `🔒 Bắt: ${eng.enemy.row2.length}/3`;
+    const eEnergyBadge = document.getElementById("duel-e-energy-badge");
+    if (eEnergyBadge) eEnergyBadge.textContent = `⚡ ${eng.enemy.energy}/${eng.enemy.maxEnergy}`;
 
     document.getElementById("duel-p-img").src = getCardPortrait(pLeader);
     document.getElementById("duel-p-name").innerHTML = `${ESC(pLeader.name)} <span class="gender-pill ${pLeader.gender === "Male" ? "male" : "female"}">${pLeader.gender === "Male" ? "♂" : "♀"}</span>`;
@@ -2851,6 +3090,44 @@ class Cycle12App {
     document.getElementById("duel-p-row3-state").textContent = pFrontCount > 0 ? `🛡️ Hàng 1 Bảo Hộ (${pFrontCount} lá)` : "⚠️ HÀNG 1 TRỐNG — Hàng 3 bị uy hiếp!";
     document.getElementById("duel-p-captives").textContent = `🔒 Bắt: ${eng.player.row2.length}/3`;
     document.getElementById("duel-p-deck-count").textContent = `📚 Bộ bài: ${eng.player.deck.length} (+2/lượt)`;
+
+    // Energy Orb & Turn Bar
+    const energyBadge = document.getElementById("duel-energy-badge");
+    if (energyBadge) {
+      energyBadge.innerHTML = `⚡ <strong>${eng.player.energy}/${eng.player.maxEnergy}</strong> Năng Lượng Gen`;
+    }
+    const undoBtn = document.getElementById("btn-undo-duel");
+    if (undoBtn) {
+      undoBtn.disabled = !eng.canUndo() || this.isResolvingClash;
+    }
+
+    // Active Leader Skills Bar (Gene Surge 4⚡ + Faction/Leader Skill 3⚡)
+    const surgeBtn = document.getElementById("btn-gene-surge");
+    if (surgeBtn) {
+      const surgeCost = GENE_SURGE_SKILL.cost || 4;
+      surgeBtn.disabled = Boolean(eng.over || this.isResolvingClash || eng.player.geneSurgeUsed || eng.player.energy < surgeCost);
+      surgeBtn.classList.toggle("skill-active", Boolean(eng.player.geneSurgeActiveThisTurn));
+      surgeBtn.textContent = eng.player.geneSurgeActiveThisTurn
+        ? "🔥 Gene Surge Đang Bật!"
+        : eng.player.geneSurgeUsed
+          ? "✓ Gene Surge (Đã dùng)"
+          : `🔥 Gene Surge (${surgeCost}⚡)`;
+    }
+
+    const lSkillBtn = document.getElementById("btn-leader-skill");
+    if (lSkillBtn) {
+      const lSkill = pLeader.leaderSkill || getLeaderSkillForCard(pLeader);
+      const lCost = lSkill?.cost || 3;
+      const lActive = Boolean(eng.player.leaderSkillBuffCR || eng.player.leaderSkillEnemyPenaltyCR);
+      lSkillBtn.disabled = Boolean(eng.over || this.isResolvingClash || eng.player.leaderSkillUsed || eng.player.energy < lCost);
+      lSkillBtn.classList.toggle("skill-active", lActive);
+      lSkillBtn.title = `${lSkill?.name || "Tuyệt Kỹ Tướng"} (${lCost}⚡ • 1 lần/ván): ${lSkill?.desc || ""}`;
+      lSkillBtn.textContent = lActive
+        ? `${lSkill?.icon || "👑"} ${lSkill?.name || "Kỹ Năng"} Đang Bật!`
+        : eng.player.leaderSkillUsed
+          ? `✓ ${lSkill?.name || "Kỹ Năng"} (Đã dùng)`
+          : `${lSkill?.icon || "👑"} ${lSkill?.name || "Kỹ Năng Tướng"} (${lCost}⚡)`;
+    }
 
     document.getElementById("duel-turn-badge").textContent = `${eng.modeLabel || "Snap × YGO"} • Lượt ${eng.turn}`;
     const lastLog = eng.log[eng.log.length - 1];
@@ -2868,6 +3145,8 @@ class Cycle12App {
         <span class="synergy-pill ${pCtx.activeBreedCount > 0 ? "breed" : ""}">🔥 Buồng Lai H2: ${pCtx.activeBreedCount}/3</span>
         <span class="synergy-pill ${pCtx.row1TokenCount > 0 || pCtx.totalTokensBred > 0 ? "lit" : ""}">🧬 Token H1: ${pCtx.row1TokenCount} (Tổng sinh: ${pCtx.totalTokensBred})</span>
         <span class="synergy-pill ${pLitCount > 0 ? "lit" : ""}">⚡ ĐK Đã Kích Hoạt: ${pLitCount}</span>
+        ${eng.player.geneSurgeActiveThisTurn ? `<span class="synergy-pill lit">🔥 Gene Surge: +180 CR</span>` : ""}
+        ${eng.player.leaderSkillUsed ? `<span class="synergy-pill lit">👑 ${ESC(pLeader.leaderSkill?.name || "Tuyệt Kỹ Phe")}</span>` : ""}
         ${pCtx.r2SymbiosisBonus > 0 ? `<span class="synergy-pill breed">✨ Cộng Sinh H2: +${pCtx.r2SymbiosisBonus}%</span>` : ""}
         ${pCtx.hasDick ? `<span class="synergy-pill lit">💖 Dick: Phá Debuff Human</span>` : ""}
         ${eCtx.row1TokenCount > 0 ? `<span class="synergy-pill">👁️ Token Địch H1: ${eCtx.row1TokenCount}</span>` : ""}
@@ -2918,7 +3197,11 @@ class Cycle12App {
     const pRow2El = document.getElementById("duel-p-row2");
     pRow2El.innerHTML = renderRow2Chips("player", eng.player.row2, "Trống — Thẻ Nam thắng Nữ sẽ đưa vào đây lai & sinh Token lên HÀNG 1!", false);
 
-    // Marvel Snap 3 Cosmic Lane Locations + Live Power Comparison
+    const activeHandCard = (this.draggedHandIdx !== null && eng.player.hand[this.draggedHandIdx])
+      ? eng.player.hand[this.draggedHandIdx]
+      : (eng.selectedHandIdx !== null ? eng.player.hand[eng.selectedHandIdx] : null);
+
+    // Marvel Snap 3 Cosmic Lane Locations + Live Power Comparison + Outcome Forecast
     const lanesEl = document.getElementById("duel-lanes-bar");
     if (lanesEl) {
       lanesEl.innerHTML = (eng.lanes || []).map((loc, i) => {
@@ -2926,27 +3209,54 @@ class Cycle12App {
         const eUnit = eng.enemy.row1[i];
         const pCR = pUnit ? eng.evalCardCombatCR(pUnit, eUnit, "player", { laneIdx: i }).total : 0;
         const eCR = eUnit ? eng.evalCardCombatCR(eUnit, pUnit, "enemy", { laneIdx: i }).total : 0;
-        const statusCls = pCR > eCR ? "win" : (eCR > pCR ? "lose" : "");
+        const forecast = eng.getLaneForecast(i, !pUnit ? activeHandCard : null);
+        const statusCls = forecast.outcome === "player_win" || forecast.outcome === "player_hold"
+          ? "win"
+          : (forecast.outcome === "enemy_win" || forecast.outcome === "enemy_hold" ? "lose" : "");
+        const fPillCls = forecast.outcome === "player_win" || forecast.outcome === "player_hold"
+          ? "win"
+          : forecast.outcome === "enemy_win" || forecast.outcome === "enemy_hold"
+            ? "loss"
+            : (forecast.outcome === "tie" || forecast.outcome === "player_shield_block" || forecast.outcome === "enemy_shield_block")
+              ? "tie"
+              : "empty";
         return `
-          <div class="lane-loc-card ${statusCls}" title="${ESC(loc.desc)}">
+          <div class="lane-loc-card lane-loc-chip ${statusCls}" data-lane-chip="${i}" title="${ESC(loc.desc)}">
             <div class="lane-loc-head">
               <span>${ESC(loc.name)}</span>
               <span>Làn ${i + 1}</span>
             </div>
             <div class="lane-loc-desc">${ESC(loc.desc)}</div>
             <div class="lane-cr-meter">
-              <span style="color:#7dd3fc;">Ta ${pCR}</span>
+              <span style="color:#7dd3fc;">Ta ${forecast.pTotal ?? pCR}</span>
               <span style="color:#fbbf24;">VS</span>
-              <span style="color:#fda4af;">Địch ${eCR}</span>
+              <span style="color:#fda4af;">Địch ${forecast.eTotal ?? eCR}</span>
             </div>
+            <div class="lane-forecast-pill ${fPillCls}">${ESC(forecast.label)}</div>
           </div>
         `;
       }).join("");
     }
 
+    // Helper for Row 1 unit active keyword pills
+    const renderUnitActiveKws = (u, opp) => {
+      const pills = [];
+      if (u.shieldCharges > 0) pills.push(`<span class="unit-kw-tag shield" title="Khiên: Chặn 1 lần thua giao chiến">🛡️ Khiên</span>`);
+      if (u.deployedTurn === eng.turn && (u.h1Keywords || []).includes("charge")) {
+        pills.push(`<span class="unit-kw-tag charge" title="Xung Phong: +2 Cấp (+120 CR) lượt ra bài">⚡ Xung Phong</span>`);
+      }
+      if ((u.h1Keywords || []).includes("pierce")) {
+        pills.push(`<span class="unit-kw-tag pierce" title="Xuyên Giáp: Phá Khiên địch &amp; tăng sát thương H3">🗡️ Xuyên Giáp</span>`);
+      }
+      if (u.gender === "Male" && opp && opp.gender === "Female") {
+        pills.push(`<span class="unit-kw-tag gender-adv" title="Ưu thế giới tính: Nam đấu Nữ +2 Cấp (+120 CR)">♂&gt;♀ +120</span>`);
+      }
+      return pills.join("");
+    };
+
     // Enemy Row 1 (3 Vertical Lanes)
     document.getElementById("duel-e-row1").innerHTML = eng.enemy.row1.map((u, i) => {
-      if (!u) return `<div class="board-slot">Địch Làn ${i + 1} (Trống)</div>`;
+      if (!u) return `<div class="board-slot" data-lane="${i}">Địch Làn ${i + 1} (Trống)</div>`;
       const pOpp = eng.player.row1[i];
       const evalCR = eng.evalCardCombatCR(u, pOpp, "enemy", { laneIdx: i });
       const isM = u.gender === "Male";
@@ -2959,25 +3269,27 @@ class Cycle12App {
       const tokBadge = u.fromRow2Breeding
         ? `<span class="token-pill row2-spawn">🧬 TỪ H2</span>`
         : (u.isToken ? `<span class="token-pill">🪙 TOKEN</span>` : "");
+      const uCost = Number(u.cost || getCardEnergyCost(u.cr, u.isToken));
       return `
-        <div class="board-slot">
+        <div class="board-slot" data-lane="${i}">
           <div class="tcg-unit-card enemy-unit ${this.getCardRarityClass(u)} ${u.isToken ? "is-token" : ""} ${condLit ? "cond-lit" : ""}"
                style="--card-accent:${accent};"
                data-zoom-host="1" data-inspect-side="enemy" data-inspect-zone="row1" data-inspect-idx="${i}"
                title="${ESC(u.row1Effect?.desc || "")}">
             <span class="card-foil-sweep"></span>
-            <span class="card-zoom-trigger" data-zoom-trigger="1" role="button" tabindex="0" title="Phóng to đọc toàn bộ thông số &amp; hiệu ứng">🔍</span>
+            <span class="card-zoom-trigger" data-zoom-trigger="1" role="button" tabindex="0" title="Phóng to hoặc nhấn giữ để đọc toàn bộ thông số &amp; hiệu ứng">🔍</span>
+            <span class="card-cost-gem">${uCost}⚡</span>
             <span class="card-cr-gem">${evalCR.total}</span>
             ${tokBadge}
             <div class="unit-thumb-frame">
-              <img src="${getCardPortrait(u)}" alt="${ESC(u.name)}" />
+              <img src="${getCardPortrait(u)}" alt="${ESC(u.name)}" draggable="false" />
             </div>
             <div class="unit-info-col">
               <div class="unit-name-row">
                 <span class="gender-pill ${isM ? "male" : "female"}">${isM ? "♂" : "♀"}</span>
                 <span class="unit-name-text">${ESC(u.name)}</span>
               </div>
-              <div class="unit-meta-line">${ESC(u.species)} • ${ESC(facShort)}</div>
+              <div class="unit-meta-line">${ESC(u.species)} • ${ESC(facShort)} ${renderUnitActiveKws(u, pOpp)}</div>
               <div class="unit-cr-delta enemy">Gốc ${u.cr} → ${evalCR.total} ${breedRisk}</div>
               <div class="unit-eff-tag ${condLit ? "cond-active" : ""}">${condLit ? "✅ " : "⚔️ "}${ESC(u.row1Effect?.tag || "Trực chiến")}</div>
             </div>
@@ -2988,14 +3300,22 @@ class Cycle12App {
 
     // Player Row 1 (3 Vertical Lanes)
     const pRow1El = document.getElementById("duel-p-row1");
-    const hasSelectedHand = eng.selectedHandIdx !== null && eng.player.hand[eng.selectedHandIdx];
+    const hasSelectedHand = activeHandCard;
+    const justDeployedLane = this.lastDeployedLane;
+    this.lastDeployedLane = null;
+
     pRow1El.innerHTML = eng.player.row1.map((u, i) => {
       if (!u) {
         const oppE = eng.enemy.row1[i];
         const canHunt = hasSelectedHand && hasSelectedHand.gender === "Male" && oppE && oppE.gender === "Female";
+        const fCast = hasSelectedHand ? eng.getLaneForecast(i, hasSelectedHand) : null;
+        const previewTag = fCast
+          ? `<div class="slot-preview-outcome ${fCast.outcome}">${ESC(fCast.label)}</div>`
+          : "";
         return `
-          <button class="board-slot ${hasSelectedHand ? "droppable" : ""}" data-deploy-lane="${i}">
-            ${hasSelectedHand ? (canHunt ? `💘 Đặt ♂ Bắt Nữ Làn ${i + 1}` : `📥 Đặt vào Làn ${i + 1}`) : `Hàng 1 — Làn ${i + 1}`}
+          <button type="button" class="board-slot ${hasSelectedHand ? "droppable" : ""}" data-lane="${i}" data-deploy-lane="${i}">
+            <div>${hasSelectedHand ? (canHunt ? `💘 Thả/Đặt ♂ Bắt Nữ Làn ${i + 1}` : `📥 Thả hoặc Bấm Đặt Làn ${i + 1}`) : `Hàng 1 — Làn ${i + 1} (Kéo thả thẻ vào đây)`}</div>
+            ${previewTag}
           </button>
         `;
       }
@@ -3012,48 +3332,81 @@ class Cycle12App {
       const tokBadge = u.fromRow2Breeding
         ? `<span class="token-pill row2-spawn">🧬 TỪ H2</span>`
         : (u.isToken ? `<span class="token-pill">🪙 TOKEN</span>` : "");
+      const uCost = Number(u.cost || getCardEnergyCost(u.cr, u.isToken));
+      const deployAnimCls = justDeployedLane === i ? "anim-card-deploy" : "";
       return `
-        <div class="board-slot">
-          <button type="button" class="tcg-unit-card ${this.getCardRarityClass(u)} ${canRecall ? "ready" : ""} ${u.isToken ? "is-token" : ""} ${condLit ? "cond-lit" : ""}"
+        <div class="board-slot" data-lane="${i}">
+          <button type="button" class="tcg-unit-card ${this.getCardRarityClass(u)} ${canRecall ? "ready" : ""} ${u.isToken ? "is-token" : ""} ${condLit ? "cond-lit" : ""} ${deployAnimCls}"
                   style="--card-accent:${accent};"
                   data-recall-lane="${i}"
                   data-zoom-host="1" data-inspect-side="player" data-inspect-zone="row1" data-inspect-idx="${i}"
-                  title="${canRecall ? "Bấm để thu hồi về tay trước khi Giao Chiến" : ESC(u.row1Effect?.desc || "")}">
+                  title="${canRecall ? "Bấm để thu hồi về tay (hoàn lại ⚡) trước khi Giao Chiến" : ESC(u.row1Effect?.desc || "")}">
             <span class="card-foil-sweep"></span>
-            <span class="card-zoom-trigger" data-zoom-trigger="1" role="button" tabindex="0" title="Phóng to đọc toàn bộ thông số &amp; hiệu ứng">🔍</span>
+            <span class="card-zoom-trigger" data-zoom-trigger="1" role="button" tabindex="0" title="Phóng to hoặc nhấn giữ để đọc toàn bộ thông số &amp; hiệu ứng">🔍</span>
+            <span class="card-cost-gem">${uCost}⚡</span>
             <span class="card-cr-gem">${evalCR.total}</span>
             ${tokBadge}
             <div class="unit-thumb-frame">
-              <img src="${getCardPortrait(u)}" alt="${ESC(u.name)}" />
+              <img src="${getCardPortrait(u)}" alt="${ESC(u.name)}" draggable="false" />
             </div>
             <div class="unit-info-col">
               <div class="unit-name-row">
                 <span class="gender-pill ${isM ? "male" : "female"}">${isM ? "♂" : "♀"}</span>
                 <span class="unit-name-text">${ESC(u.name)}</span>
               </div>
-              <div class="unit-meta-line">${ESC(u.species)} • ${ESC(facShort)}</div>
+              <div class="unit-meta-line">${ESC(u.species)} • ${ESC(facShort)} ${renderUnitActiveKws(u, eOpp)}</div>
               <div class="unit-cr-delta player">Gốc ${u.cr} → ${evalCR.total} ${dangerTag}</div>
-              <div class="unit-eff-tag ${condLit ? "cond-active" : ""}">${canRecall ? "↩️ Thu • " : ""}${condLit ? "✅ " : "⚔️ "}${ESC(u.row1Effect?.tag || "Trực chiến")}</div>
+              <div class="unit-eff-tag ${condLit ? "cond-active" : ""}">${canRecall ? `↩️ Thu (+${uCost}⚡) • ` : ""}${condLit ? "✅ " : "⚔️ "}${ESC(u.row1Effect?.tag || "Trực chiến")}</div>
             </div>
           </button>
         </div>
       `;
     }).join("");
 
+    const deployHandCardToLane = (handIdx, laneIdx) => {
+      if (this.isResolvingClash) return;
+      const res = eng.deployCardToRow1(handIdx, laneIdx);
+      if (res.ok) {
+        SFX.cardPlay();
+        this.lastDeployedLane = laneIdx;
+        this.draggedHandIdx = null;
+        this.renderDuelUI();
+        if (res.notes && res.notes.length) {
+          this.showToast(`⚡ Ra Bài Làn ${laneIdx + 1}`, res.notes.join(" • "));
+        }
+      } else {
+        SFX.alert();
+        this.draggedHandIdx = null;
+        this.showToast("Không thể đặt bài", res.reason);
+      }
+    };
+
     pRow1El.querySelectorAll("[data-deploy-lane]").forEach((btn) => {
+      const lane = Number(btn.dataset.deployLane);
       btn.addEventListener("click", () => {
-        const lane = Number(btn.dataset.deployLane);
         if (eng.selectedHandIdx === null) {
-          this.showToast("Chọn thẻ trên tay", "Hãy bấm chọn 1 thẻ phe bạn ở dưới tay trước khi chọn Làn Hàng 1!");
+          this.showToast("Chọn hoặc kéo thẻ trên tay", "Hãy kéo-thả thẻ vào làn này hoặc bấm chọn 1 thẻ dưới tay trước!");
           return;
         }
-        const res = eng.deployCardToRow1(eng.selectedHandIdx, lane);
-        if (res.ok) {
-          SFX.cardPlay();
-          this.renderDuelUI();
-        } else {
-          SFX.alert();
-          this.showToast("Không thể đặt bài", res.reason);
+        deployHandCardToLane(eng.selectedHandIdx, lane);
+      });
+
+      // HTML5 Drag & Drop target on open lane slots
+      btn.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+        btn.classList.add("drag-over");
+      });
+      btn.addEventListener("dragleave", () => {
+        btn.classList.remove("drag-over");
+      });
+      btn.addEventListener("drop", (e) => {
+        e.preventDefault();
+        btn.classList.remove("drag-over");
+        const rawIdx = e.dataTransfer?.getData("text/plain") ?? this.draggedHandIdx;
+        const hIdx = Number(rawIdx);
+        if (!Number.isNaN(hIdx) && eng.player.hand[hIdx]) {
+          deployHandCardToLane(hIdx, lane);
         }
       });
     });
@@ -3061,6 +3414,7 @@ class Cycle12App {
     pRow1El.querySelectorAll("[data-recall-lane]").forEach((btn) => {
       btn.addEventListener("click", (e) => {
         if (e.target.closest("[data-zoom-trigger]")) return;
+        if (this.isResolvingClash) return;
         const res = eng.recallFromRow1(Number(btn.dataset.recallLane));
         if (res.ok) {
           SFX.click();
@@ -3071,24 +3425,101 @@ class Cycle12App {
       });
     });
 
-    // Player Hand (TCG Upright Cards with Gender, Species, Faction, H1 & H2 Passives)
+    // Player Hand (TCG Upright Cards with Energy Cost, Keywords, Drag & Drop + Touch Drag + Click)
     const handEl = document.getElementById("duel-p-hand");
     const openLane = eng.player.row1.findIndex((s) => s === null);
-    const canDeploy = !eng.over && openLane >= 0;
     const previewOpp = openLane >= 0 ? eng.enemy.row1[openLane] : eng.enemy.row1[0];
-    handEl.innerHTML = eng.player.hand.map((c, idx) => this.renderTCGCardHTML(c, {
-      playable: canDeploy,
-      selected: eng.selectedHandIdx === idx,
-      condMet: eng.isConditionMet(c, previewOpp, "player"),
-      zoomAttrs: `data-zoom-host="1" data-zoom-card="${ESC(c.id)}"`,
-      attrs: `data-hand-idx="${idx}" data-inspect-side="player" data-inspect-zone="hand" data-inspect-idx="${idx}"`
-    })).join("");
+    handEl.innerHTML = eng.player.hand.map((c, idx) => {
+      const cardCost = Number(c.cost || getCardEnergyCost(c.cr, c.isToken));
+      const canAfford = !eng.over && openLane >= 0 && eng.player.energy >= cardCost;
+      return this.renderTCGCardHTML(c, {
+        playable: canAfford,
+        draggable: !eng.over && eng.player.energy >= cardCost,
+        selected: eng.selectedHandIdx === idx,
+        condMet: eng.isConditionMet(c, previewOpp, "player"),
+        zoomAttrs: `data-zoom-host="1" data-zoom-card="${ESC(c.id)}"`,
+        attrs: `data-hand-idx="${idx}" data-inspect-side="player" data-inspect-zone="hand" data-inspect-idx="${idx}"`
+      });
+    }).join("");
 
     handEl.querySelectorAll("[data-hand-idx]").forEach((btn) => {
+      const idx = Number(btn.dataset.handIdx);
+      const card = eng.player.hand[idx];
+
+      // HTML5 Drag start / end
+      btn.addEventListener("dragstart", (e) => {
+        if (!card || eng.over || this.isResolvingClash) {
+          e.preventDefault();
+          return;
+        }
+        this.draggedHandIdx = idx;
+        eng.selectedHandIdx = idx;
+        btn.classList.add("dragging");
+        if (e.dataTransfer) {
+          e.dataTransfer.effectAllowed = "move";
+          e.dataTransfer.setData("text/plain", String(idx));
+        }
+        this.inspectDuelCard(card);
+        pRow1El.querySelectorAll("[data-deploy-lane]").forEach((slot) => slot.classList.add("droppable"));
+      });
+
+      btn.addEventListener("dragend", () => {
+        btn.classList.remove("dragging");
+        this.draggedHandIdx = null;
+        pRow1El.querySelectorAll("[data-deploy-lane]").forEach((slot) => slot.classList.remove("drag-over"));
+      });
+
+      // Touch drag-to-lane for mobile / tablet touchscreens
+      let touchDragActive = false;
+      let touchStartX = 0;
+      let touchStartY = 0;
+      btn.addEventListener("touchstart", (e) => {
+        if (!card || eng.over || this.isResolvingClash || e.touches.length !== 1) return;
+        touchStartX = e.touches[0].clientX;
+        touchStartY = e.touches[0].clientY;
+        touchDragActive = false;
+      }, { passive: true });
+
+      btn.addEventListener("touchmove", (e) => {
+        if (!card || eng.over || e.touches.length !== 1) return;
+        const dx = e.touches[0].clientX - touchStartX;
+        const dy = e.touches[0].clientY - touchStartY;
+        if (!touchDragActive && Math.hypot(dx, dy) > 18 && dy < -10) {
+          touchDragActive = true;
+          this.draggedHandIdx = idx;
+          eng.selectedHandIdx = idx;
+          btn.classList.add("dragging");
+        }
+        if (touchDragActive) {
+          const targetEl = document.elementFromPoint(e.touches[0].clientX, e.touches[0].clientY);
+          const slotBtn = targetEl?.closest?.("[data-deploy-lane]");
+          pRow1El.querySelectorAll("[data-deploy-lane]").forEach((s) => s.classList.toggle("drag-over", s === slotBtn));
+        }
+      }, { passive: true });
+
+      btn.addEventListener("touchend", (e) => {
+        if (!touchDragActive) return;
+        touchDragActive = false;
+        btn.classList.remove("dragging");
+        const touch = e.changedTouches?.[0];
+        pRow1El.querySelectorAll("[data-deploy-lane]").forEach((s) => s.classList.remove("drag-over"));
+        if (touch) {
+          const targetEl = document.elementFromPoint(touch.clientX, touch.clientY);
+          const slotBtn = targetEl?.closest?.("[data-deploy-lane]");
+          if (slotBtn) {
+            deployHandCardToLane(idx, Number(slotBtn.dataset.deployLane));
+            return;
+          }
+        }
+        this.draggedHandIdx = null;
+      });
+
       btn.addEventListener("click", (e) => {
         if (e.target.closest("[data-zoom-trigger]")) return;
-        const idx = Number(btn.dataset.handIdx);
-        const card = eng.player.hand[idx];
+        if (btn.dataset.longPressFired === "1") {
+          btn.dataset.longPressFired = "0";
+          return;
+        }
         if (card) this.inspectDuelCard(card);
         const firstEmpty = eng.player.row1.findIndex((s) => s === null);
         if (firstEmpty < 0) {
@@ -3097,16 +3528,9 @@ class Cycle12App {
           return;
         }
         // Second click on already-selected card auto-deploys into first open Row 1 lane;
-        // First click highlights open lanes so player can place into an exact vertical lane!
+        // First click highlights open lanes + shows Lane Forecast so player can choose exact lane!
         if (eng.selectedHandIdx === idx) {
-          const res = eng.deployCardToRow1(idx, firstEmpty);
-          if (res.ok) {
-            SFX.cardPlay();
-            this.renderDuelUI();
-          } else {
-            SFX.alert();
-            this.showToast("Không thể ra bài", res.reason);
-          }
+          deployHandCardToLane(idx, firstEmpty);
         } else {
           SFX.click();
           eng.selectedHandIdx = idx;
@@ -3115,25 +3539,9 @@ class Cycle12App {
       });
     });
 
-    // Attach hover/click card inspection & Zoom Modal triggers across Board, Hand & Row 2
+    // Attach hover/click card inspection, Zoom Modal triggers & Long-Press (420ms) Zoom across Board, Hand & Row 2
     const battleViewEl = document.getElementById("duel-battle-view");
-    document.querySelectorAll("#duel-battle-view [data-inspect-zone]").forEach((el) => {
-      const resolveSubject = () => {
-        const side = eng[el.dataset.inspectSide];
-        const zone = el.dataset.inspectZone;
-        const idx = Number(el.dataset.inspectIdx);
-        const card = side?.[zone]?.[idx];
-        if (!card) return;
-        const evalCR = zone === "row1"
-          ? eng.evalCardCombatCR(card, eng[el.dataset.inspectSide === "player" ? "enemy" : "player"].row1[idx], el.dataset.inspectSide, { laneIdx: idx })
-          : null;
-        this.inspectDuelCard(card, evalCR);
-      };
-      el.addEventListener("pointerenter", resolveSubject);
-      if (el.dataset.inspectZone !== "hand") el.addEventListener("click", resolveSubject);
-    });
-
-    this.bindZoomTriggers(battleViewEl, (host) => {
+    const resolveDuelZoomCtx = (host) => {
       const sideKey = host.dataset.inspectSide;
       const zone = host.dataset.inspectZone;
       const idx = Number(host.dataset.inspectIdx);
@@ -3144,7 +3552,52 @@ class Cycle12App {
         ? eng.evalCardCombatCR(card, eng[oppSide]?.row1?.[idx], sideKey, { laneIdx: idx })
         : null;
       return { card, ctx: { source: "duel", side: sideKey, zone, idx, evalCR } };
+    };
+
+    document.querySelectorAll("#duel-battle-view [data-inspect-zone]").forEach((el) => {
+      const resolveSubject = () => {
+        const resolved = resolveDuelZoomCtx(el);
+        if (resolved?.card) this.inspectDuelCard(resolved.card, resolved.ctx.evalCR);
+      };
+      el.addEventListener("pointerenter", resolveSubject);
+      if (el.dataset.inspectZone !== "hand") el.addEventListener("click", resolveSubject);
+
+      // Long-press (~420ms) on any card in the duel arena opens full Card Zoom Modal
+      let pressTimer = null;
+      let startX = 0;
+      let startY = 0;
+      const clearPress = () => {
+        if (pressTimer) {
+          clearTimeout(pressTimer);
+          pressTimer = null;
+        }
+      };
+      el.addEventListener("pointerdown", (e) => {
+        if (e.target.closest("[data-zoom-trigger]")) return;
+        startX = e.clientX;
+        startY = e.clientY;
+        clearPress();
+        pressTimer = setTimeout(() => {
+          pressTimer = null;
+          const resolved = resolveDuelZoomCtx(el);
+          if (resolved?.card) {
+            el.dataset.longPressFired = "1";
+            SFX.click();
+            this.openCardZoomModal(resolved.card, resolved.ctx);
+          }
+        }, 420);
+      });
+      el.addEventListener("pointermove", (e) => {
+        if (pressTimer && Math.hypot(e.clientX - startX, e.clientY - startY) > 12) {
+          clearPress();
+        }
+      });
+      el.addEventListener("pointerup", clearPress);
+      el.addEventListener("pointercancel", clearPress);
+      el.addEventListener("pointerleave", clearPress);
     });
+
+    this.bindZoomTriggers(battleViewEl, resolveDuelZoomCtx);
 
     if (hasSelectedHand) this.inspectDuelCard(hasSelectedHand);
     else if (!this.inspectedDuelCard) this.inspectDuelCard(pLeader, pRow3Eval);
@@ -3155,37 +3608,48 @@ class Cycle12App {
     const won = eng.winner === "player";
     won ? SFX.victory() : SFX.alert();
 
+    const isGauntlet = this.duelContext.kind === "gauntlet";
+    const floor = Number(this.duelContext.floor || 1);
+    const isBossFloor = isGauntlet && floor % 5 === 0;
+    const creditReward = isGauntlet ? (600 + floor * 150 + (isBossFloor ? 600 : 0)) : 600;
     let spoil = null;
     if (won) {
       this.game.recordBattleWin();
-      this.game.addRes(this.game.playerFaction, "credits", 600);
-      this.game.addRes(this.game.playerFaction, "influence", 25);
-      spoil = this.game.grantBattleSpoil(eng.enemy.leader.id, 0.48);
-      if (this.duelContext.kind === "gauntlet") {
-        this.game.recordGauntletFloor(this.duelContext.floor || 1);
+      this.game.addRes(this.game.playerFaction, "credits", creditReward);
+      this.game.addRes(this.game.playerFaction, "influence", isBossFloor ? 50 : 25);
+      // Void Tower guarantees a random card or Gene Shards drop (100%), skirmish has 48% card drop + guaranteed dust
+      spoil = this.game.grantBattleSpoil(eng.enemy.leader.id, isGauntlet ? 1.0 : 0.48);
+      if (isGauntlet) {
+        this.game.recordGauntletFloor(floor);
+        const fBadge = document.getElementById("gauntlet-floor-badge");
+        if (fBadge) {
+          fBadge.textContent = `🗼 Đã vượt Tầng ${floor} • Kỷ lục: ${this.game.stats?.gauntletMax || floor}`;
+        }
       }
       this.refreshTopResources();
       this.checkAndToastAchievements();
     }
 
     const reasonMap = {
-      capture_3: won ? "Bắt đủ 3 lá bài địch vào Hàng 2!" : "Để đối phương bắt đủ 3 lá vào Hàng 2!",
-      leader_breach: won ? "Đánh bại Thủ lĩnh Hàng 3 khi Hàng 1 địch trống!" : "Thủ lĩnh Hàng 3 của bạn bị Tổng CR Hàng 1 địch khuất phục!",
+      capture_3: won ? "Bắt đủ 3/3 lá bài địch vào Hàng 2!" : "Để đối phương bắt đủ 3/3 lá vào Hàng 2!",
+      leader_breach: won ? "Đột kích đánh bại Thủ lĩnh Hàng 3 khi Hàng 1 địch trống!" : "Thủ lĩnh Hàng 3 của bạn bị Tổng CR Hàng 1 địch khuất phục!",
       tiebreak: "Phân định thắng bại cuối trận!"
     };
 
     const spoilMsg = won && spoil
       ? (spoil.card
-        ? ` • 🎁 Rớt thẻ mới: ${spoil.card.name} (+${spoil.dust} Mảnh Gen)!`
+        ? ` • 🎁 Thưởng Thẻ: ${spoil.card.name} (+${spoil.dust} Mảnh Gen)!`
         : ` • ⚒️ +${spoil.dust} Mảnh Gen!`)
       : "";
 
     const modal = document.getElementById("duel-victory-modal");
-    document.getElementById("victory-title").textContent = won ? "🏆 CHIẾN THẮNG VÁN BÀI!" : "💀 THẤT BẠI!";
+    document.getElementById("victory-title").textContent = won
+      ? (isBossFloor ? `👑 ĐẠI THẮNG BOSS TẦNG ${floor}!` : "🏆 CHIẾN THẮNG VÁN BÀI!")
+      : "💀 THẤT BẠI!";
     document.getElementById("victory-title").style.color = won ? "var(--gold)" : "var(--danger)";
     document.getElementById("victory-desc").textContent = won
-      ? `${eng.player.leader.name} thắng ${eng.enemy.leader.name} (${reasonMap[eng.winReason] || ""}) (+600 Credits, +25 Ảnh hưởng${spoilMsg})`
-      : `${eng.enemy.leader.name} thắng trận (${reasonMap[eng.winReason] || ""}). Hãy chỉnh Bộ Bài Phe, mua thêm thẻ ở Chợ hoặc dùng Hàng 2 Lai Tạo!`;
+      ? `${eng.player.leader.name} thắng ${eng.enemy.leader.name} (${reasonMap[eng.winReason] || ""}) (+${creditReward} Credits, +${isBossFloor ? 50 : 25} Ảnh hưởng${spoilMsg})`
+      : `${eng.enemy.leader.name} thắng trận (${reasonMap[eng.winReason] || ""}). Hãy tận dụng Năng lượng Gen ⚡, Gene Surge, Từ khóa H1/H2 hoặc nâng cấp Bộ Bài!`;
 
     document.getElementById("btn-victory-story").classList.toggle("hidden", !this.pendingStoryBattle);
     document.getElementById("btn-victory-conquer").classList.toggle("hidden", !(won && this.pendingInvasionSectorId));
