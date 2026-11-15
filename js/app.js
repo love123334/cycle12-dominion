@@ -56,6 +56,15 @@ class Cycle12App {
     this.selectedSectorId = "sylvalon";
     this.selectedBodyId = null;
     this.inspectedRosterId = this.game.protagonistId || "arisia";
+    this.rosterFilterFac = "ALL";
+    this.rosterFilterGender = "all";
+    this.rosterFilterOwned = "all";
+    this.rosterSort = "cr";
+    this.rosterSearch = "";
+    this.dossierCharId = null;
+    this.dossierTab = "overview";
+    this.lastMatchParams = null;
+    this.galaxySheetMode = "left";
 
     // Visual Novel runtime
     this.activeEncounterScript = null;
@@ -99,6 +108,8 @@ class Cycle12App {
     this.initVNUI();
     this.initDuelUI();
     this.initCardZoomModal();
+    this.initCharDossierModal();
+    this.initDuelLogModal();
     this.initGalaxyUI();
     this.initCodexUI();
 
@@ -363,19 +374,29 @@ class Cycle12App {
       const facCol = FACTIONS[c.fac]?.color || "#38bdf8";
       const img = c.isHybrid ? getHybridPortraitUrl(c) : getPortraitUrl(c);
       return `
-        <button class="protag-card ${active}" data-pick-protag="${ESC(c.id)}">
+        <div class="protag-card ${active}" data-pick-protag="${ESC(c.id)}">
           <img src="${img}" alt="${ESC(c.name)}" loading="lazy" />
-          <div style="min-width:0;">
+          <div style="min-width:0;flex:1;">
             <div style="font-weight:800;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ESC(c.name)}</div>
             <div style="font-size:11px;color:${facCol};font-weight:700;">${ESC(this.game.facName(c.fac))}</div>
             <div class="muted" style="font-size:10.5px;">CR ${c.cr} • ${ESC(c.species)}</div>
           </div>
-        </button>
+          <button type="button" class="protag-inspect-btn" data-inspect-protag="${ESC(c.id)}" title="Xem Hồ Sơ &amp; Thẻ Bài">🔍 Hồ Sơ</button>
+        </div>
       `;
     }).join("");
 
+    grid.querySelectorAll("[data-inspect-protag]").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        SFX.click();
+        this.openCharDossierModal(btn.dataset.inspectProtag, "overview");
+      });
+    });
+
     grid.querySelectorAll("[data-pick-protag]").forEach((btn) => {
-      btn.addEventListener("click", () => {
+      btn.addEventListener("click", (e) => {
+        if (e.target.closest("[data-inspect-protag]")) return;
         const id = btn.dataset.pickProtag;
         const watchCut = document.getElementById("chk-watch-intro-cutscene")?.checked;
         SFX.choice();
@@ -530,6 +551,27 @@ class Cycle12App {
       this.advanceVN();
     });
 
+    ["left", "right"].forEach((side) => {
+      const slot = document.getElementById(`vn-${side}-slot`);
+      slot?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const cid = slot.dataset.charId;
+        if (cid && (CHAR_BY_ID[cid] || this.game.hybrids?.some((h) => h.id === cid))) {
+          SFX.click();
+          this.openCharDossierModal(cid, "overview");
+        }
+      });
+    });
+
+    document.getElementById("vn-speaker-badge")?.addEventListener("click", (e) => {
+      const cid = e.currentTarget.dataset.charId;
+      if (cid && (CHAR_BY_ID[cid] || this.game.hybrids?.some((h) => h.id === cid))) {
+        e.stopPropagation();
+        SFX.click();
+        this.openCharDossierModal(cid, "overview");
+      }
+    });
+
     document.getElementById("btn-vn-ai-expand")?.addEventListener("click", () => {
       SFX.choice();
       this.triggerAIStoryExpand();
@@ -681,13 +723,17 @@ class Cycle12App {
     const titleEl = document.getElementById("vn-speaker-title");
     let speakerLabel = "NGƯỜI DẪN CHUYỆN";
     if (speakerId === "narrator") {
+      badge.dataset.charId = "";
+      badge.title = "";
       badge.textContent = speakerLabel;
       badge.classList.add("narrator");
       titleEl.textContent = `${script.num}: ${script.title}`;
     } else {
       const c = CHAR_BY_ID[speakerId] || this.game.hybrids?.find((h) => h.id === speakerId);
       speakerLabel = c ? c.name : speakerId;
-      badge.textContent = speakerLabel;
+      badge.dataset.charId = c ? c.id : "";
+      badge.title = c ? `Ấn để mở Mini-Tab Hồ Sơ: ${c.name}` : "";
+      badge.textContent = c ? `${speakerLabel} 🔍` : speakerLabel;
       badge.classList.remove("narrator");
       const fac = c ? FACTIONS[c.fac] : null;
       titleEl.textContent = c ? `${c.title || "Hậu Duệ"} • ${fac?.name || ""}` : "";
@@ -734,14 +780,18 @@ class Cycle12App {
     const moodEl = document.getElementById(`vn-${side}-mood`);
 
     if (!charId) {
+      slot.dataset.charId = "";
       slot.classList.add("hidden");
       return;
     }
     const c = CHAR_BY_ID[charId] || this.game.hybrids?.find((h) => h.id === charId);
     if (!c) {
+      slot.dataset.charId = "";
       slot.classList.add("hidden");
       return;
     }
+    slot.dataset.charId = charId;
+    slot.title = `Ấn để mở Mini-Tab Hồ Sơ: ${c.name}`;
     slot.classList.remove("hidden");
     img.src = this.resolvePortrait(charId);
     nameEl.textContent = c.name;
@@ -1445,10 +1495,27 @@ class Cycle12App {
       SFX.click();
       vModal.classList.add("hidden");
       if (this.duelContext.kind === "gauntlet") {
-        this.startGauntletFloor(1);
+        this.startGauntletFloor(this.duelEngine?.winner === "player" ? (this.duelContext.floor || 1) + 1 : 1);
+      } else if (this.lastMatchParams) {
+        this.startCardMatch({ ...this.lastMatchParams });
       } else {
-        this.startCardMatch({ kind: "skirmish", enemyId: document.getElementById("duel-enemy-select").value });
+        this.startCardMatch({ kind: "skirmish", enemyId: document.getElementById("duel-enemy-select")?.value || "overlord" });
       }
+    });
+
+    document.getElementById("btn-victory-dismiss")?.addEventListener("click", () => {
+      SFX.click();
+      vModal.classList.add("hidden");
+    });
+
+    document.getElementById("btn-open-duel-log")?.addEventListener("click", () => {
+      SFX.click();
+      this.openDuelLogModal();
+    });
+
+    document.getElementById("duel-log-latest")?.addEventListener("click", () => {
+      SFX.click();
+      this.openDuelLogModal();
     });
   }
 
@@ -1491,6 +1558,7 @@ class Cycle12App {
       : (ownedPoolDeck.length >= 6 ? ownedPoolDeck : buildFactionDeck(pId, this.game.hybrids || [], null));
 
     const effDifficulty = buffMult > 1 ? Math.min(difficulty, 0.85) : difficulty;
+    this.lastMatchParams = { kind, playerCharId, enemyId, buffMult, modeLabel, gauntletFloor, difficulty };
     this.duelContext = { kind, enemyId, floor: gauntletFloor, buffMult };
     this.duelEngine = new CardBattleEngine({
       playerLeaderId: pId,
@@ -1547,6 +1615,740 @@ class Cycle12App {
     this.zoomedCard = null;
   }
 
+  initDuelLogModal() {
+    const modal = document.getElementById("duel-log-modal");
+    if (!modal) return;
+    document.getElementById("btn-close-duel-log")?.addEventListener("click", () => {
+      SFX.click();
+      modal.classList.add("hidden");
+    });
+    modal.addEventListener("click", (e) => {
+      if (e.target === modal) {
+        SFX.click();
+        modal.classList.add("hidden");
+      }
+    });
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && !modal.classList.contains("hidden")) {
+        modal.classList.add("hidden");
+      }
+    });
+  }
+
+  openDuelLogModal() {
+    const modal = document.getElementById("duel-log-modal");
+    const listEl = document.getElementById("duel-log-list");
+    if (!modal || !listEl) return;
+    const eng = this.duelEngine;
+    const logs = eng?.log || [];
+    const subEl = document.getElementById("duel-log-subtitle");
+    if (subEl && eng) {
+      subEl.textContent = `${eng.modeLabel || "Đấu Thẻ 3 Hàng"} • Hiệp ${eng.turn} • Hàng 2 Ta: ${eng.player.row2.length}/3 • Hàng 2 Địch: ${eng.enemy.row2.length}/3`;
+    }
+    if (!logs.length) {
+      listEl.innerHTML = `<div class="muted" style="padding:14px;">Chưa có nhật ký giao chiến nào trong ván này.</div>`;
+    } else {
+      listEl.innerHTML = logs.map((line, i) => {
+        const isBreed = line.includes("🧬") || line.includes("Token") || line.includes("Hàng 2");
+        const isClash = line.includes("⚔️") || line.includes("Hiệp") || line.includes("thắng");
+        const isWarn = line.includes("⚠️") || line.includes("💥") || line.includes("khuất phục");
+        const cls = isBreed ? "breed" : (isWarn ? "warn" : (isClash ? "clash" : ""));
+        return `
+          <div class="duel-log-entry ${cls}">
+            <span class="duel-log-idx">#${i + 1}</span>
+            <div class="duel-log-text">${ESC(line)}</div>
+          </div>
+        `;
+      }).join("");
+    }
+    modal.classList.remove("hidden");
+    listEl.scrollTop = listEl.scrollHeight;
+  }
+
+  initCharDossierModal() {
+    const modal = document.getElementById("char-dossier-modal");
+    if (!modal) return;
+    document.getElementById("btn-close-char-dossier")?.addEventListener("click", () => {
+      SFX.click();
+      this.closeCharDossierModal();
+    });
+    modal.addEventListener("click", (e) => {
+      if (e.target === modal) {
+        SFX.click();
+        this.closeCharDossierModal();
+      }
+    });
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && !modal.classList.contains("hidden")) {
+        this.closeCharDossierModal();
+      }
+    });
+
+    document.getElementById("btn-cd-prev")?.addEventListener("click", () => {
+      SFX.click();
+      this.stepCharDossier(-1);
+    });
+    document.getElementById("btn-cd-next")?.addEventListener("click", () => {
+      SFX.click();
+      this.stepCharDossier(1);
+    });
+
+    document.querySelectorAll("#cd-subtabs [data-cdtab]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        SFX.click();
+        this.dossierTab = btn.dataset.cdtab;
+        document.querySelectorAll("#cd-subtabs [data-cdtab]").forEach((b) => b.classList.toggle("active", b === btn));
+        this.renderCharDossierContent();
+      });
+    });
+  }
+
+  closeCharDossierModal() {
+    document.getElementById("char-dossier-modal")?.classList.add("hidden");
+  }
+
+  getFilteredRosterList() {
+    const all = [...(this.game.hybrids || []).map((h) => ({ ...h, isHybrid: true })), ...CHARACTERS];
+    const q = (this.rosterSearch || "").trim().toLowerCase();
+    const facF = this.rosterFilterFac || "ALL";
+    const genF = this.rosterFilterGender || "all";
+    const ownF = this.rosterFilterOwned || "all";
+    const sortMode = this.rosterSort || "cr";
+
+    const filtered = all.filter((c) => {
+      if (facF !== "ALL" && c.fac !== facF) return false;
+      const isMale = c.g === "M" || c.gender === "Male";
+      if (genF === "male" && !isMale) return false;
+      if (genF === "female" && isMale) return false;
+      const owned = this.game.getOwnedCount(c.id);
+      if (ownF === "owned" && owned <= 0) return false;
+      if (ownF === "unowned" && owned > 0) return false;
+      if (!q) return true;
+      const hay = `${c.name} ${c.species || ""} ${c.title || ""} ${this.game.facName(c.fac)} ${(c.skills || []).join(" ")}`.toLowerCase();
+      return hay.includes(q);
+    });
+
+    filtered.sort((a, b) => {
+      if (sortMode === "aff") return this.game.getAffinity(b.id) - this.game.getAffinity(a.id) || (b.cr - a.cr);
+      if (sortMode === "name") return String(a.name).localeCompare(String(b.name), "vi");
+      return (b.cr || 0) - (a.cr || 0);
+    });
+
+    return filtered;
+  }
+
+  stepCharDossier(delta) {
+    const pool = this.getFilteredRosterList();
+    const list = pool.length > 0 ? pool : [...(this.game.hybrids || []).map((h) => ({ ...h, isHybrid: true })), ...CHARACTERS];
+    if (!list.length) return;
+    const curIdx = list.findIndex((c) => c.id === this.dossierCharId);
+    const nextIdx = curIdx >= 0 ? (curIdx + delta + list.length) % list.length : 0;
+    this.openCharDossierModal(list[nextIdx].id, this.dossierTab);
+  }
+
+  openCharDossierModal(charId, tab = null) {
+    if (!charId) return;
+    const selected = this.resolveCharacterSubject(charId);
+    if (!selected) return;
+    this.dossierCharId = selected.id;
+    this.inspectedRosterId = selected.id;
+    if (tab) this.dossierTab = tab;
+    if (!this.dossierTab) this.dossierTab = "overview";
+
+    document.querySelectorAll("#cd-subtabs [data-cdtab]").forEach((b) => {
+      b.classList.toggle("active", b.dataset.cdtab === this.dossierTab);
+    });
+
+    this.renderCharDossierContent();
+    document.getElementById("char-dossier-modal")?.classList.remove("hidden");
+
+    // Highlight active card in roster grid if open, without re-rendering or scrolling
+    document.querySelectorAll("[data-pick-roster]").forEach((el) => {
+      el.classList.toggle("active", el.dataset.pickRoster === selected.id);
+    });
+  }
+
+  renderCharDossierContent() {
+    const selected = this.resolveCharacterSubject(this.dossierCharId || this.inspectedRosterId);
+    if (!selected) return;
+    const card = resolveCard(selected.id, this.game.hybrids);
+    const fac = FACTIONS[selected.fac] || FACTIONS.independent;
+    const loc = selected.loc ? findLocation(selected.loc) : null;
+    const aff = this.game.getAffinity(selected.id);
+    const imgUrl = this.resolvePortrait(selected.id);
+    const isMale = card?.gender === "Male" || selected.g === "M" || selected.gender === "Male";
+    const owned = this.game.getOwnedCount(selected.id);
+    const maxCap = card ? this.game.getMaxCopies(card) : 1;
+    const priceInfo = card ? getCardPriceInfo(card) : { credits: 600, dust: 90, dustYield: 25, tierLabel: "★ Nhân Vật Độc Nhất" };
+    const activeDeck = this.game.getActiveDeck();
+    const inDeckCount = activeDeck ? activeDeck.cards.filter((id) => id === selected.id).length : 0;
+
+    const facPill = document.getElementById("cd-faction-pill");
+    if (facPill) {
+      facPill.textContent = `${fac.name} • CR ${selected.cr}`;
+      facPill.style.borderColor = fac.color;
+      facPill.style.color = fac.color;
+    }
+    const nameEl = document.getElementById("cd-name");
+    if (nameEl) {
+      nameEl.innerHTML = `${ESC(selected.name)} <span class="gender-pill ${isMale ? "male" : "female"}">${isMale ? "♂ Nam" : "♀ Nữ"}</span>`;
+    }
+    const subEl = document.getElementById("cd-subtitle");
+    if (subEl) {
+      subEl.textContent = `${selected.title || "Chiến Binh Gaiastra"} • ${selected.species || "Sinh vật"} • Độ tin cậy ${aff}/100`;
+    }
+
+    const bodyEl = document.getElementById("cd-body");
+    if (!bodyEl) return;
+
+    if (this.dossierTab === "overview") {
+      const spEntry = SPECIES.find((s) => s.id === selected.race || selected.species?.toLowerCase().includes(s.name.toLowerCase()));
+      bodyEl.innerHTML = `
+        <div class="cd-overview-grid">
+          <div class="cd-portrait-col">
+            <div class="cd-portrait-frame" style="--card-accent:${fac.color};">
+              <img src="${imgUrl}" alt="${ESC(selected.name)}" />
+              <div class="cd-portrait-badges">
+                <span class="badge" style="background:rgba(2,6,23,0.88);color:var(--gold);border-color:var(--gold);">⚔️ CR ${selected.cr}</span>
+                <span class="badge" style="background:rgba(2,6,23,0.88);color:${owned > 0 ? "#4ade80" : "#fda4af"};">${owned > 0 ? `✓ Đã sở hữu (${owned}/${maxCap})` : "🔒 Chưa sở hữu thẻ"}</span>
+              </div>
+            </div>
+            <div class="cd-aff-box">
+              <div style="display:flex;justify-content:space-between;font-size:11.5px;margin-bottom:4px;">
+                <span>💞 Độ tin cậy</span>
+                <strong style="color:#f472b6;">${aff}/100 ${aff >= 35 ? "(Đủ ĐK Chiêu mộ 0 Inf)" : "(Cần 35 để Chiêu mộ 0 Inf)"}</strong>
+              </div>
+              <div class="cd-aff-bar"><div class="cd-aff-fill" style="width:${Math.min(100, Math.max(0, aff))}%;"></div></div>
+            </div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;">
+              <button type="button" class="btn-glass btn-compact" id="btn-cd-upload-portrait">🖼️ Gắn Ảnh Grok / Tự Chọn</button>
+              ${getCustomPortrait(selected.id) ? `<button type="button" class="btn-glass btn-compact" id="btn-cd-reset-portrait">↩️ Ảnh Mặc Định</button>` : ""}
+              <input type="file" id="cd-portrait-file" accept="image/*" class="hidden" />
+            </div>
+          </div>
+
+          <div class="cd-info-col">
+            <div class="cd-section-card">
+              <div class="cd-section-title">📜 Tiểu Sử &amp; Nguồn Gốc Vũ Trụ</div>
+              <p class="cd-bio-p">${ESC(selected.bio || "Hậu duệ dòng gen mới kiến tạo trong Chu Kỳ 12.")}</p>
+              <div class="planet-meta-grid" style="margin-top:10px;">
+                <div><strong>Chủng tộc:</strong> ${ESC(selected.species || "Khác")}</div>
+                <div><strong>Phe phái:</strong> <span style="color:${fac.color};font-weight:700;">${ESC(fac.name)}</span></div>
+                <div><strong>Chiều cao:</strong> ${selected.h || 1.8}m</div>
+                <div>
+                  <strong>Căn cứ:</strong> ${ESC(loc ? loc.label : (selected.loc || "Gaiastra"))}
+                  ${loc?.sector ? `<button type="button" class="btn-glass btn-compact" id="btn-cd-goto-sector" style="margin-left:6px;padding:2px 7px;font-size:10.5px;">🪐 Mở Hệ Sao</button>` : ""}
+                </div>
+              </div>
+            </div>
+
+            ${(selected.skills && selected.skills.length) ? `
+              <div class="cd-section-card">
+                <div class="cd-section-title">⚡ Tuyệt Kỹ &amp; Năng Lực Đặc Trưng</div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                  ${selected.skills.map((sk) => `<span class="badge" style="color:#7dd3fc;border-color:rgba(56,189,248,0.45);">✦ ${ESC(sk)}</span>`).join("")}
+                </div>
+              </div>
+            ` : ""}
+
+            <div class="cd-section-card">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+                <div class="cd-section-title" style="margin:0;">🃏 Tóm Tắt Thẻ Bài Chiến Thuật</div>
+                <button type="button" class="btn-accent btn-compact" data-cd-switch-tab="card">🃏 Xem Chi Tiết Thẻ &amp; H1/H2 ▶</button>
+              </div>
+              <div style="font-size:12.5px;line-height:1.55;color:#e2e8f0;">
+                <div><strong style="color:#38bdf8;">⚔️ Hàng 1 (Chiến Đấu):</strong> ${ESC(card?.row1Effect?.desc || "Đấu theo Tổng CR & Phe")}</div>
+                <div style="margin-top:4px;"><strong style="color:#f472b6;">🧬 Hàng 2 (Sinh Sản):</strong> ${ESC(card?.row2Effect?.desc || "Hỗ trợ Hàng 1 & Lai Tạo")}</div>
+              </div>
+            </div>
+
+            ${spEntry ? `
+              <div class="cd-section-card">
+                <div class="cd-section-title">🧬 Đặc Tính Sinh Học Chủng Tộc (${ESC(spEntry.name)})</div>
+                <div class="muted" style="font-size:12px;line-height:1.5;">${ESC(spEntry.traits)} • Thể chất: ${ESC(spEntry.physic)} • Công nghệ: ${ESC(spEntry.tech)}</div>
+              </div>
+            ` : ""}
+          </div>
+        </div>
+      `;
+
+      const fileInput = document.getElementById("cd-portrait-file");
+      document.getElementById("btn-cd-upload-portrait")?.addEventListener("click", () => {
+        SFX.click();
+        fileInput?.click();
+      });
+      fileInput?.addEventListener("change", () => {
+        const file = fileInput.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          const img = new Image();
+          img.onload = () => {
+            const canvas = document.createElement("canvas");
+            const maxW = 380;
+            const maxH = 440;
+            const scale = Math.min(maxW / img.width, maxH / img.height, 1);
+            canvas.width = Math.max(120, Math.round(img.width * scale));
+            canvas.height = Math.max(140, Math.round(img.height * scale));
+            canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+            const ok = setCustomPortrait(selected.id, canvas.toDataURL("image/jpeg", 0.86));
+            clearPortraitCache(selected.id);
+            if (ok) {
+              SFX.victory();
+              this.refreshTopResources();
+              if (this.duelEngine) this.renderDuelUI();
+              if (this.currentMode === "codex" && this.codexTab === "roster") this.renderRosterGridItems();
+              this.renderCharDossierContent();
+              this.showToast("🖼️ Đã gắn ảnh chân dung mới!", `Ảnh cho ${selected.name} đã được lưu trên thiết bị.`);
+            } else {
+              SFX.alert();
+              this.showToast("Bộ nhớ trình duyệt đầy", "Không thể lưu thêm ảnh vào localStorage.");
+            }
+          };
+          img.src = reader.result;
+        };
+        reader.readAsDataURL(file);
+      });
+
+      document.getElementById("btn-cd-reset-portrait")?.addEventListener("click", () => {
+        SFX.click();
+        setCustomPortrait(selected.id, null);
+        clearPortraitCache(selected.id);
+        this.refreshTopResources();
+        if (this.duelEngine) this.renderDuelUI();
+        if (this.currentMode === "codex" && this.codexTab === "roster") this.renderRosterGridItems();
+        this.renderCharDossierContent();
+        this.showToast("↩️ Đã khôi phục ảnh", `${selected.name} dùng lại ảnh mặc định.`);
+      });
+
+      document.getElementById("btn-cd-goto-sector")?.addEventListener("click", () => {
+        if (!loc?.sector) return;
+        SFX.click();
+        this.closeCharDossierModal();
+        this.selectedSectorId = loc.sector.id;
+        this.switchMode("galaxy");
+        this.selectSector(loc.sector.id, true);
+      });
+    } else if (this.dossierTab === "card") {
+      const r1 = card?.row1Effect || {};
+      const r2 = card?.row2Effect || {};
+      const breedPctStr = r2.tier === "tamarite"
+        ? "100% Mặc định sinh Token lên Hàng 1"
+        : (r2.omniWomb ? `Omni-Womb (${r2.breedChance || 85}% sinh dị biến/lượt)` : `${r2.breedChance || 50}% sinh Token lên Hàng 1 (0–99%)`);
+      const deckFac = CHAR_BY_ID[activeDeck?.leaderId]?.fac;
+      const canAddToActiveDeck = card && activeDeck && card.fac === deckFac && card.id !== activeDeck.leaderId;
+
+      bodyEl.innerHTML = `
+        <div class="cd-overview-grid">
+          <div class="cd-portrait-col" style="align-items:center;">
+            ${card ? this.renderTCGCardHTML(card, {
+              playable: owned > 0,
+              locked: owned <= 0,
+              ownText: owned > 0 ? `✓ Sở hữu ${owned}/${maxCap}` : `🔒 Chưa sở hữu`,
+              condMet: Boolean(r1.condType),
+              style: "width:176px;height:248px;",
+              zoomAttrs: `data-cd-full-zoom="1"`
+            }) : ""}
+            <button type="button" class="btn-glass btn-compact" id="btn-cd-open-cardzoom" style="width:100%;">🔍 Phóng To Thẻ Toàn Màn Hình</button>
+          </div>
+          <div class="cd-info-col">
+            <div class="cd-section-card" style="border-color:rgba(56,189,248,0.45);">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap;">
+                <div class="cd-section-title" style="color:#7dd3fc;margin:0;">⚔️ HÀNG 1 — HIỆU ỨNG CHIẾN ĐẤU TRỰC TIẾP</div>
+                ${r1.condType ? `<span class="badge" style="color:#fde047;">⚡ ĐK +${r1.condBonus || 0} CR</span>` : `<span class="badge">Trực Chiến</span>`}
+              </div>
+              <p class="cd-bio-p" style="margin-top:6px;">${ESC(r1.desc || "Chiến đấu trực diện theo Tổng CR, phe phái và hiệu ứng làn.")}</p>
+              ${r1.tag ? `<div class="muted" style="font-size:11.5px;margin-top:4px;">Nhãn chiến thuật: <code>${ESC(r1.tag)}</code></div>` : ""}
+            </div>
+
+            <div class="cd-section-card" style="border-color:rgba(244,114,182,0.45);">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap;">
+                <div class="cd-section-title" style="color:#f9a8d4;margin:0;">🧬 HÀNG 2 — HIỆU ỨNG SINH SẢN &amp; HỖ TRỢ</div>
+                <span class="badge" style="color:#f472b6;">Aura +${r2.crAura || 60} CR</span>
+              </div>
+              <p class="cd-bio-p" style="margin-top:6px;">${ESC(r2.desc || "Khi bị bắt giữ hoặc lai cặp Nam×Nữ tại Hàng 2 sẽ kích hoạt hỗ trợ Hàng 1.")}</p>
+              <div class="muted" style="font-size:12px;margin-top:6px;">🧬 Tỷ lệ sinh Token lên Hàng 1: <strong style="color:#fff;">${ESC(breedPctStr)}</strong></div>
+              ${r2.crPenaltyPct ? `<div class="cz-note warn" style="margin-top:6px;">⚠️ Debuff Người Thuần: Token sinh ra bị giảm -${r2.crPenaltyPct}% CR (hóa giải nếu có Dick hỗ trợ).</div>` : ""}
+            </div>
+
+            <div class="cd-section-card">
+              <div class="cd-section-title">📚 Quản Lý Kho Thẻ &amp; Bộ Bài (${ESC(activeDeck?.name || "Deck")})</div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:12px;margin-bottom:8px;">
+                <span class="badge" style="color:${owned > 0 ? "#4ade80" : "#fda4af"};">${owned > 0 ? `✓ Sở hữu: ${owned}/${maxCap}` : "🔒 Chưa mở khóa"}</span>
+                ${canAddToActiveDeck ? `<span class="badge">📚 Trong ${ESC(activeDeck.name)}: ${inDeckCount}/${maxCap}</span>` : `<span class="badge">Khác phe Chủ Tướng Deck hiện tại (${ESC(this.game.facName(deckFac))})</span>`}
+              </div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                ${canAddToActiveDeck && owned > inDeckCount && activeDeck.cards.length < 16 ? `<button type="button" class="btn-primary btn-compact" id="btn-cd-deck-add">➕ Thêm Vào ${ESC(activeDeck.name)}</button>` : ""}
+                ${canAddToActiveDeck && inDeckCount > 0 ? `<button type="button" class="btn-glass btn-compact" id="btn-cd-deck-rem">➖ Gỡ 1 Khỏi Deck (${inDeckCount})</button>` : ""}
+                ${!selected.isHybrid && owned < maxCap ? `<button type="button" class="btn-gold btn-compact" id="btn-cd-buy-card">🪙 Mua (${priceInfo.credits.toLocaleString()} Cr)</button>` : ""}
+                ${!selected.isHybrid && owned < maxCap ? `<button type="button" class="btn-accent btn-compact" id="btn-cd-craft-card">⚒️ Chế Tạo (${priceInfo.dust} Mảnh)</button>` : ""}
+                ${!selected.isHybrid && owned > 0 && selected.id !== this.game.protagonistId ? `<button type="button" class="btn-glass btn-compact" id="btn-cd-dismantle-card">♻️ Phân Giải (+${priceInfo.dustYield} Mảnh)</button>` : ""}
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+
+      document.getElementById("btn-cd-open-cardzoom")?.addEventListener("click", () => {
+        if (!card) return;
+        SFX.click();
+        this.openCardZoomModal(card, { source: "codex" });
+      });
+      bodyEl.querySelector("[data-cd-full-zoom]")?.addEventListener("click", () => {
+        if (!card) return;
+        SFX.click();
+        this.openCardZoomModal(card, { source: "codex" });
+      });
+      document.getElementById("btn-cd-deck-add")?.addEventListener("click", () => {
+        const r = this.game.addCardToActiveDeck(selected.id);
+        if (r.ok) {
+          SFX.cardPlay();
+          this.renderCharDossierContent();
+          this.showToast("➕ Đã thêm vào Deck!", `${selected.name} đã vào ${activeDeck.name}.`);
+        } else {
+          SFX.alert();
+          this.showToast("Không thể thêm", r.msg);
+        }
+      });
+      document.getElementById("btn-cd-deck-rem")?.addEventListener("click", () => {
+        const idx = activeDeck?.cards.indexOf(selected.id) ?? -1;
+        if (idx >= 0) {
+          SFX.click();
+          this.game.removeCardFromActiveDeck(idx);
+          this.renderCharDossierContent();
+        }
+      });
+      document.getElementById("btn-cd-buy-card")?.addEventListener("click", () => {
+        const r = this.game.buyCardWithCredits(selected.id);
+        if (r.ok) {
+          SFX.victory();
+          this.refreshTopResources();
+          if (this.currentMode === "codex" && this.codexTab === "roster") this.renderRosterGridItems();
+          this.renderCharDossierContent();
+          this.showToast("🪙 Mua Thẻ Thành Công!", `Đã mở khóa ${selected.name}.`);
+        } else {
+          SFX.alert();
+          this.showToast("Chưa thể mua", r.msg);
+        }
+      });
+      document.getElementById("btn-cd-craft-card")?.addEventListener("click", () => {
+        const r = this.game.craftCardWithDust(selected.id);
+        if (r.ok) {
+          SFX.breed();
+          this.refreshTopResources();
+          if (this.currentMode === "codex" && this.codexTab === "roster") this.renderRosterGridItems();
+          this.renderCharDossierContent();
+          this.showToast("⚒️ Chế Tạo Thành Công!", `Đã chế tạo ${selected.name}.`);
+        } else {
+          SFX.alert();
+          this.showToast("Chưa đủ Mảnh Gen", r.msg);
+        }
+      });
+      document.getElementById("btn-cd-dismantle-card")?.addEventListener("click", () => {
+        const r = this.game.dismantleCard(selected.id);
+        if (r.ok) {
+          SFX.click();
+          this.refreshTopResources();
+          if (this.currentMode === "codex" && this.codexTab === "roster") this.renderRosterGridItems();
+          this.renderCharDossierContent();
+          this.showToast("♻️ Đã Phân Giải", `+${r.dustGained} Mảnh Gen.`);
+        } else {
+          SFX.alert();
+          this.showToast("Không thể phân giải", r.msg);
+        }
+      });
+    } else if (this.dossierTab === "relations") {
+      const firstName = selected.name.split(" ")[0].toLowerCase();
+      const matchedRelLines = [];
+      RELATIONS.forEach((group) => {
+        group.items.forEach((line) => {
+          if (line.toLowerCase().includes(selected.name.toLowerCase()) || (firstName.length >= 4 && line.toLowerCase().includes(firstName))) {
+            const linkedChars = CHARACTERS.filter((c) => c.id !== selected.id && (line.includes(c.name) || (c.name.split(" ")[0].length >= 4 && line.includes(c.name.split(" ")[0]))));
+            matchedRelLines.push({ type: group.type, line, linkedChars });
+          }
+        });
+      });
+
+      const factionPeers = CHARACTERS.filter((c) => c.fac === selected.fac && c.id !== selected.id).sort((a, b) => b.cr - a.cr);
+      const childrenHybrids = (this.game.hybrids || []).filter((h) => h.motherId === selected.id || h.fatherId === selected.id);
+      const motherObj = selected.motherId ? CHAR_BY_ID[selected.motherId] : null;
+      const fatherObj = selected.fatherId ? CHAR_BY_ID[selected.fatherId] : null;
+
+      bodyEl.innerHTML = `
+        <div style="display:flex;flex-direction:column;gap:12px;">
+          <div class="cd-section-card">
+            <div class="cd-section-title">🔗 Mối Quan Hệ Lore &amp; Định Mệnh Vũ Trụ</div>
+            ${matchedRelLines.length ? matchedRelLines.map((m) => `
+              <div class="cd-rel-row">
+                <div style="font-size:11px;color:var(--gold);font-weight:700;">${ESC(m.type)}</div>
+                <div style="font-size:12.5px;color:#e2e8f0;margin:3px 0;">• ${ESC(m.line)}</div>
+                ${m.linkedChars.length ? `
+                  <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;">
+                    ${m.linkedChars.map((lc) => `
+                      <button type="button" class="cd-rel-chip" data-cd-jump-char="${ESC(lc.id)}">
+                        <img src="${this.resolvePortrait(lc.id)}" alt="${ESC(lc.name)}" />
+                        <span>${ESC(lc.name)} (CR ${lc.cr})</span>
+                      </button>
+                    `).join("")}
+                  </div>
+                ` : ""}
+              </div>
+            `).join("") : `<div class="muted" style="font-size:12.5px;">Chưa có ghi chép xung đột cá nhân trực tiếp — nhân vật hoạt động theo chiến lược của ${ESC(fac.name)}.</div>`}
+          </div>
+
+          ${(motherObj || fatherObj || childrenHybrids.length) ? `
+            <div class="cd-section-card">
+              <div class="cd-section-title">🧬 Gia Phả &amp; Phả Hệ Lai Tạo</div>
+              ${(motherObj || fatherObj) ? `
+                <div style="margin-bottom:8px;">
+                  <div class="muted" style="font-size:11.5px;margin-bottom:4px;">Cha Mẹ Khởi Nguyên:</div>
+                  <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                    ${motherObj ? `<button type="button" class="cd-rel-chip" data-cd-jump-char="${ESC(motherObj.id)}"><img src="${this.resolvePortrait(motherObj.id)}" alt="" /><span>♀ Mẹ: ${ESC(motherObj.name)}</span></button>` : ""}
+                    ${fatherObj ? `<button type="button" class="cd-rel-chip" data-cd-jump-char="${ESC(fatherObj.id)}"><img src="${this.resolvePortrait(fatherObj.id)}" alt="" /><span>♂ Cha: ${ESC(fatherObj.name)}</span></button>` : ""}
+                  </div>
+                </div>
+              ` : ""}
+              ${childrenHybrids.length ? `
+                <div>
+                  <div class="muted" style="font-size:11.5px;margin-bottom:4px;">Hậu Duệ Đã Lai Tạo (${childrenHybrids.length}):</div>
+                  <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                    ${childrenHybrids.map((ch) => `<button type="button" class="cd-rel-chip" data-cd-jump-char="${ESC(ch.id)}"><img src="${this.resolvePortrait(ch.id)}" alt="" /><span>✦ ${ESC(ch.name)} (CR ${ch.cr})</span></button>`).join("")}
+                  </div>
+                </div>
+              ` : ""}
+            </div>
+          ` : ""}
+
+          <div class="cd-section-card">
+            <div class="cd-section-title">🛡️ Đồng Minh Cùng Phe ${ESC(fac.name)} (${factionPeers.length}) — Ấn Để Chuyển Nhanh Hồ Sơ</div>
+            <div style="display:flex;gap:7px;flex-wrap:wrap;">
+              ${factionPeers.map((p) => `
+                <button type="button" class="cd-rel-chip" data-cd-jump-char="${ESC(p.id)}">
+                  <img src="${this.resolvePortrait(p.id)}" alt="${ESC(p.name)}" loading="lazy" />
+                  <span>${ESC(p.name)} <small style="color:var(--gold);">CR ${p.cr}</small></span>
+                </button>
+              `).join("")}
+            </div>
+          </div>
+        </div>
+      `;
+    } else if (this.dossierTab === "interact") {
+      const pRes = this.game.resources[this.game.playerFaction] || { credits: 0, influence: 0, research: 0 };
+      bodyEl.innerHTML = `
+        <div style="display:flex;flex-direction:column;gap:12px;">
+          <div class="cd-section-card">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+              <div class="cd-section-title" style="margin:0;">🎁 Tăng Độ Tin Cậy &amp; Viện Trợ Trực Tiếp</div>
+              <span class="badge" style="color:#f472b6;">Độ tin cậy hiện tại: ${aff}/100</span>
+            </div>
+            <div class="muted" style="font-size:12px;margin-bottom:10px;">
+              Đạt <strong>Độ tin cậy ≥ 35</strong> giúp <strong>Chiêu Mộ Thẻ Bài Miễn Phí (0 Ảnh hưởng)</strong>. Kho dự trữ phe bạn: 🪙 ${(pRes.credits || 0).toLocaleString()} Cr • 🤝 ${pRes.influence || 0} Inf • 🔬 ${pRes.research || 0} Res.
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <button type="button" class="btn-glass btn-compact" id="btn-cd-gift-talk">💬 Tâm Sự Chiến Thuật (+10 Tin cậy • 10 Inf)</button>
+              <button type="button" class="btn-gold btn-compact" id="btn-cd-gift-credit">🎁 Viện Trợ Vũ Khí (+18 Tin cậy &amp; +15 Inf • 200 Cr)</button>
+              <button type="button" class="btn-accent btn-compact" id="btn-cd-gift-research">🔬 Trao Đổi Cổ Ngữ (+25 Tin cậy • 40 Res)</button>
+            </div>
+          </div>
+
+          <div class="cd-section-card" style="border-color:rgba(168,85,247,0.45);">
+            <div class="cd-section-title" style="color:#d8b4fe;">🤖 Đối Thoại AI Trực Tiếp Cùng ${ESC(selected.name)} (Chuẩn Lore Chu Kỳ 12)</div>
+            <div id="cd-ai-chat-log" class="cd-ai-chat-log">
+              <div class="cd-ai-msg char">
+                <strong>${ESC(selected.name)}:</strong> Ta đang lắng nghe đây, ${ESC(this.game.getProtagonist().name)}. Ngươi muốn bàn về cục diện ${ESC(fac.name)}, chiến thuật Hàng 1/Hàng 2 hay bí mật của Chu Kỳ 12?
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:8px;">
+              <input type="text" id="cd-ai-input" placeholder="Nhập câu hỏi hoặc lời thoại gửi tới ${ESC(selected.name)}..." style="flex:1;" />
+              <button type="button" class="btn-primary btn-compact" id="btn-cd-ai-send">Gửi ▶</button>
+            </div>
+          </div>
+        </div>
+      `;
+
+      document.getElementById("btn-cd-gift-talk")?.addEventListener("click", () => {
+        if ((pRes.influence || 0) < 10) {
+          SFX.alert();
+          this.showToast("Thiếu Ảnh hưởng", "Cần 10 Ảnh hưởng (Inf) để tổ chức buổi đàm đạo riêng.");
+          return;
+        }
+        pRes.influence -= 10;
+        this.game.addAffinity(selected.id, 10);
+        const nextAff = this.game.getAffinity(selected.id);
+        this.game.saveToSlot("auto");
+        SFX.choice();
+        this.refreshTopResources();
+        if (this.currentMode === "codex" && this.codexTab === "roster") this.renderRosterGridItems();
+        this.renderCharDossierContent();
+        this.showToast(`💞 +10 Độ tin cậy với ${selected.name}`, `Độ tin cậy hiện tại: ${nextAff}/100.`);
+      });
+
+      document.getElementById("btn-cd-gift-credit")?.addEventListener("click", () => {
+        if ((pRes.credits || 0) < 200) {
+          SFX.alert();
+          this.showToast("Thiếu Credits", "Cần 200 Credits để gửi viện trợ trang bị.");
+          return;
+        }
+        pRes.credits -= 200;
+        pRes.influence = (pRes.influence || 0) + 15;
+        this.game.addAffinity(selected.id, 18);
+        const nextAff = this.game.getAffinity(selected.id);
+        this.game.saveToSlot("auto");
+        SFX.victory();
+        this.refreshTopResources();
+        if (this.currentMode === "codex" && this.codexTab === "roster") this.renderRosterGridItems();
+        this.renderCharDossierContent();
+        this.showToast(`🎁 Viện trợ cho ${selected.name}!`, `+18 Độ tin cậy (${nextAff}/100) & +15 Ảnh hưởng!`);
+      });
+
+      document.getElementById("btn-cd-gift-research")?.addEventListener("click", () => {
+        if ((pRes.research || 0) < 40) {
+          SFX.alert();
+          this.showToast("Thiếu Nghiên cứu", "Cần 40 điểm Nghiên cứu (Res) để chia sẻ dữ liệu cổ ngữ.");
+          return;
+        }
+        pRes.research -= 40;
+        this.game.addAffinity(selected.id, 25);
+        const nextAff = this.game.getAffinity(selected.id);
+        this.game.saveToSlot("auto");
+        SFX.breed();
+        this.refreshTopResources();
+        if (this.currentMode === "codex" && this.codexTab === "roster") this.renderRosterGridItems();
+        this.renderCharDossierContent();
+        this.showToast(`🔬 Đã chia sẻ dữ liệu với ${selected.name}!`, `+25 Độ tin cậy (${nextAff}/100)!`);
+      });
+
+      const sendDossierAIChat = async () => {
+        const inp = document.getElementById("cd-ai-input");
+        const logBox = document.getElementById("cd-ai-chat-log");
+        const msg = (inp?.value || "").trim();
+        if (!msg || !logBox || this.aiBusy) return;
+        inp.value = "";
+        this.aiBusy = true;
+        logBox.insertAdjacentHTML("beforeend", `<div class="cd-ai-msg user"><strong>Bạn:</strong> ${ESC(msg)}</div>`);
+        const waitEl = document.createElement("div");
+        waitEl.className = "cd-ai-msg char muted";
+        waitEl.textContent = `⏳ ${selected.name} đang suy nghĩ...`;
+        logBox.appendChild(waitEl);
+        logBox.scrollTop = logBox.scrollHeight;
+        try {
+          const reply = await askAICharacterReply({
+            gameState: this.game,
+            npcId: selected.id,
+            userMessage: msg,
+            history: this.aiChatHistory || []
+          });
+          this.aiChatHistory.push({ role: "user", text: msg }, { role: "assistant", text: reply.reply });
+          waitEl.remove();
+          logBox.insertAdjacentHTML("beforeend", `<div class="cd-ai-msg char"><strong>${ESC(selected.name)}:</strong> ${ESC(reply.reply)}</div>`);
+          if (reply.affinityDelta) {
+            this.game.addAffinity(selected.id, reply.affinityDelta);
+          }
+          if (reply.memoryNote) {
+            this.game.recordAIMemory(reply.memoryNote, selected.name);
+          }
+          this.game.recordStoryBeat({
+            kind: "ai_chat",
+            chapterId: this.game.vn.currentChapterId,
+            chapter: `Hồ Sơ: ${selected.name}`,
+            speaker: selected.name,
+            speakerId: selected.id,
+            userPrompt: msg,
+            text: reply.reply
+          });
+          this.game.saveToSlot("auto");
+        } catch (err) {
+          waitEl.textContent = `⚠️ Không thể kết nối AI: ${err.message || "Lỗi mạng"}`;
+        } finally {
+          this.aiBusy = false;
+          logBox.scrollTop = logBox.scrollHeight;
+        }
+      };
+
+      document.getElementById("btn-cd-ai-send")?.addEventListener("click", sendDossierAIChat);
+      document.getElementById("cd-ai-input")?.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          sendDossierAIChat();
+        }
+      });
+    }
+
+    bodyEl.querySelectorAll("[data-cd-switch-tab]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        SFX.click();
+        this.openCharDossierModal(selected.id, btn.dataset.cdSwitchTab);
+      });
+    });
+
+    bodyEl.querySelectorAll("[data-cd-jump-char]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        SFX.click();
+        this.openCharDossierModal(btn.dataset.cdJumpChar, "overview");
+      });
+    });
+
+    // Render Persistent Footer Actions
+    const actionsEl = document.getElementById("cd-actions");
+    if (actionsEl) {
+      const infCost = aff >= 35 ? 0 : (selected.cr >= 750 ? 90 : 45);
+      actionsEl.innerHTML = `
+        <button type="button" class="btn-gold btn-compact" id="btn-cd-make-protag">⭐ Chọn Làm Nhân Vật Chính</button>
+        <button type="button" class="btn-primary btn-compact" id="btn-cd-talk-vn">💬 Mở Cảnh Đối Thoại VN</button>
+        <button type="button" class="btn-glass btn-compact" id="btn-cd-duel">⚔️ Đấu Thử Thẻ Bài</button>
+        ${owned > 0
+          ? `<span class="badge" style="color:#4ade80;border-color:rgba(74,222,128,0.55);">✓ Đã Sở Hữu Thẻ (${owned}/${maxCap})</span>`
+          : `<button type="button" class="btn-accent btn-compact" id="btn-cd-recruit">${infCost === 0 ? "🤝 Chiêu Mộ Miễn Phí (Thân ≥35)" : `🤝 Chiêu Mộ Thẻ (${infCost} Inf)`}</button>`}
+        <button type="button" class="btn-glass btn-compact" id="btn-cd-close-footer">Đóng</button>
+      `;
+
+      document.getElementById("btn-cd-make-protag")?.addEventListener("click", () => {
+        SFX.choice();
+        this.game.selectProtagonist(selected.id, true);
+        this.duelEngine = null;
+        this.refreshTopResources();
+        this.closeCharDossierModal();
+        this.switchMode("vn");
+        this.showToast(`⭐ Chủ Tướng Mới: ${selected.name}`, "Cốt truyện đã chuyển sang Khởi Nguyên theo góc nhìn của nhân vật này!");
+      });
+
+      document.getElementById("btn-cd-talk-vn")?.addEventListener("click", () => {
+        SFX.click();
+        this.closeCharDossierModal();
+        this.startEncounter(selected.id);
+      });
+
+      document.getElementById("btn-cd-duel")?.addEventListener("click", () => {
+        SFX.alert();
+        this.closeCharDossierModal();
+        this.pendingStoryBattle = null;
+        this.pendingInvasionSectorId = null;
+        this.switchMode("duel");
+        this.setDuelTab("skirmish");
+        this.startCardMatch({ kind: "skirmish", enemyId: selected.id, modeLabel: `🃏 Đấu Thử vs ${selected.name}` });
+      });
+
+      document.getElementById("btn-cd-recruit")?.addEventListener("click", () => {
+        const r = this.game.recruitCharacterCard(selected.id);
+        if (r.ok) {
+          SFX.victory();
+          this.refreshTopResources();
+          if (this.currentMode === "codex" && this.codexTab === "roster") this.renderRosterGridItems();
+          this.renderCharDossierContent();
+          this.showToast("🤝 Chiêu Mộ Thành Công!", `Đã mở khóa thẻ bài ${selected.name} vào Kho Thẻ!`);
+        } else {
+          SFX.alert();
+          this.showToast("Chưa đủ điều kiện chiêu mộ", r.msg);
+        }
+      });
+
+      document.getElementById("btn-cd-close-footer")?.addEventListener("click", () => {
+        SFX.click();
+        this.closeCharDossierModal();
+      });
+    }
+  }
+
   bindZoomTriggers(rootEl, resolveCtxFn) {
     if (!rootEl) return;
     rootEl.querySelectorAll("[data-zoom-trigger]").forEach((trg) => {
@@ -1595,8 +2397,9 @@ class Cycle12App {
     const sCtx = eng ? eng.getSideBreedingContext(sideKey) : null;
 
     document.getElementById("cz-name").innerHTML = `${ESC(card.name)} <span class="gender-pill ${isM ? "male" : "female"}">${isM ? "♂ Nam" : "♀ Nữ"}</span>`;
+    const tierSuffix = card.unique ? `${priceInfo.tierLabel} • ★ Nhân Vật Độc Nhất` : priceInfo.tierLabel;
     document.getElementById("cz-subtitle").textContent =
-      `${card.species || "Sinh vật"} • Phe ${facLabel} • ${card.unique ? "★ Nhân Vật Độc Nhất" : "🛡️ Quân Dự Bị"} • ${priceInfo.tierLabel}`;
+      `${card.species || "Sinh vật"} • Phe ${facLabel} • ${tierSuffix}`;
 
     const breakdownLines = [];
     if (evalCR) {
@@ -1714,7 +2517,16 @@ class Cycle12App {
     const btns = [];
 
     if (ctx.source === "duel" && ctx.zone === "hand" && eng && !eng.over) {
-      btns.push(`<button type="button" class="btn-primary btn-compact" id="btn-cz-deploy">📥 Triển Khai Ra Hàng 1</button>`);
+      btns.push(`<button type="button" class="btn-primary btn-compact" id="btn-cz-deploy">📥 Đặt Vào Làn Trống Đầu Tiên</button>`);
+      [0, 1, 2].forEach((laneIdx) => {
+        const occupied = Boolean(eng.player.row1[laneIdx]);
+        btns.push(`<button type="button" class="btn-glass btn-compact" data-cz-deploy-lane="${laneIdx}" ${occupied ? "disabled" : ""}>${occupied ? `🔒 Làn ${laneIdx + 1} Đầy` : `⚔️ Đặt Làn ${laneIdx + 1}`}</button>`);
+      });
+    }
+
+    const dossierTargetId = baseChar?.id || (CHAR_BY_ID[card.id] ? card.id : null);
+    if (dossierTargetId) {
+      btns.push(`<button type="button" class="btn-accent btn-compact" id="btn-cz-open-dossier">👤 Mở Mini-Tab Hồ Sơ Nhân Vật</button>`);
     }
 
     const deckFac = CHAR_BY_ID[activeDeck?.leaderId]?.fac;
@@ -1766,6 +2578,27 @@ class Cycle12App {
         SFX.alert();
         this.showToast("Không thể ra bài", res.reason);
       }
+    });
+
+    actionsEl.querySelectorAll("[data-cz-deploy-lane]").forEach((laneBtn) => {
+      laneBtn.addEventListener("click", () => {
+        const laneIdx = Number(laneBtn.dataset.czDeployLane);
+        const res = this.duelEngine?.deployCardToRow1(ctx.idx, laneIdx);
+        if (res?.ok) {
+          SFX.cardPlay();
+          this.closeCardZoomModal();
+          this.renderDuelUI();
+        } else if (res) {
+          SFX.alert();
+          this.showToast("Không thể ra bài", res.reason || res.msg || "Làn đã có thẻ");
+        }
+      });
+    });
+
+    document.getElementById("btn-cz-open-dossier")?.addEventListener("click", () => {
+      SFX.click();
+      this.closeCardZoomModal();
+      if (dossierTargetId) this.openCharDossierModal(dossierTargetId, "overview");
     });
 
     document.getElementById("btn-cz-add-deck")?.addEventListener("click", () => {
@@ -2389,6 +3222,9 @@ class Cycle12App {
   }
 
   renderDeckBuilder() {
+    const deckViewEl = document.getElementById("duel-deck-view");
+    const prevPoolScroll = document.getElementById("deck-pool-grid")?.scrollTop || 0;
+    const prevViewScroll = deckViewEl?.scrollTop || 0;
     const decks = this.game.ensureDecksInitialized() || this.game.decks || [];
     const activeDeck = this.game.getActiveDeck();
     const hybrids = this.game.hybrids || [];
@@ -2553,11 +3389,14 @@ class Cycle12App {
       card: resolveCard(host.dataset.zoomCard, hybrids),
       ctx: { source: "deck" }
     }));
+    if (prevPoolScroll > 0) poolEl.scrollTop = prevPoolScroll;
+    if (deckViewEl && prevViewScroll > 0) deckViewEl.scrollTop = prevViewScroll;
   }
 
   renderShopView() {
     const view = document.getElementById("duel-shop-view");
     if (!view) return;
+    const prevShopScroll = view.scrollTop || 0;
     const facRes = this.game.resources[this.game.playerFaction] || { credits: 0, influence: 0, research: 0 };
     const totalOwnedKinds = CARDS.filter((c) => this.game.getOwnedCount(c.id) > 0).length;
     const totalOwnedCopies = CARDS.reduce((sum, c) => sum + this.game.getOwnedCount(c.id), 0);
@@ -2656,6 +3495,7 @@ class Cycle12App {
       const maxCap = this.game.getMaxCopies(c);
       if (sf === "unowned" && owned >= maxCap) return false;
       if (sf === "owned" && owned <= 0) return false;
+      if (sf === "cond" && !(c.row1Effect?.condType || c.row2Effect?.symbiosisR2Boost || c.row2Effect?.doubleIfTokenBred || c.row2Effect?.omniWomb || c.row2Effect?.tier === "tamarite")) return false;
       if (sf === "legend" && !c.unique && (c.cr || 0) < 650) return false;
       if (!q) return true;
       return `${c.name} ${c.species || ""} ${FACTIONS[c.fac]?.name || ""} ${c.row1Effect?.desc || ""} ${c.row2Effect?.desc || ""}`.toLowerCase().includes(q);
@@ -2745,11 +3585,19 @@ class Cycle12App {
         }
       });
     });
+    if (prevShopScroll > 0) view.scrollTop = prevShopScroll;
   }
 
   // ==========================================================================
   // MODE 3: 3D GALAXY CONQUEST & SECTOR HIERARCHY
   // ==========================================================================
+  setGalaxySheet(mode) {
+    this.galaxySheetMode = mode;
+    document.querySelectorAll("[data-gsheet]").forEach((b) => b.classList.toggle("active", b.dataset.gsheet === mode));
+    document.getElementById("galaxy-left-sidebar")?.classList.toggle("mobile-sheet-active", mode === "left");
+    document.getElementById("galaxy-right-sidebar")?.classList.toggle("mobile-sheet-active", mode === "right");
+  }
+
   initGalaxyUI() {
     const facSel = document.getElementById("active-faction-select");
     facSel.innerHTML = Object.keys(FACTIONS).map(id => {
@@ -2783,11 +3631,13 @@ class Cycle12App {
     document.querySelectorAll("[data-gsheet]").forEach((btn) => {
       btn.addEventListener("click", () => {
         SFX.click();
-        const mode = btn.dataset.gsheet;
-        document.querySelectorAll("[data-gsheet]").forEach(b => b.classList.toggle("active", b === btn));
-        document.getElementById("galaxy-left-sidebar").classList.toggle("mobile-sheet-active", mode === "left");
-        document.getElementById("galaxy-right-sidebar").classList.toggle("mobile-sheet-active", mode === "right");
+        this.setGalaxySheet(btn.dataset.gsheet);
       });
+    });
+
+    document.getElementById("btn-galaxy-back-list")?.addEventListener("click", () => {
+      SFX.click();
+      this.setGalaxySheet("left");
     });
 
     document.getElementById("btn-invade-sector").addEventListener("click", () => {
@@ -2931,6 +3781,7 @@ class Cycle12App {
     if (zoom) this.engine.zoomToSector(secId);
     this.renderSectorList();
     this.renderSectorDetails();
+    if (secId) this.setGalaxySheet("right");
   }
 
   selectBody(secId, bodyId) {
@@ -2938,6 +3789,7 @@ class Cycle12App {
     this.selectedBodyId = bodyId;
     this.engine.zoomToBody(secId, bodyId);
     this.renderSectorDetails();
+    if (secId) this.setGalaxySheet("right");
   }
 
   renderSectorDetails() {
@@ -2972,8 +3824,13 @@ class Cycle12App {
 
     const garrisonChars = (dyn.garrison || []).map(id => CHAR_BY_ID[id]).filter(Boolean);
     const garrisonHtml = garrisonChars.length > 0
-      ? `<div style="margin-top:8px;"><strong style="font-size:11.5px;color:var(--gold);">Nhân vật đóng quân (bấm để đối thoại):</strong><div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:5px;">` +
-        garrisonChars.slice(0, 12).map(c => `<button class="btn-glass btn-compact" data-garrison-char="${c.id}">💬 ${ESC(c.name)}</button>`).join("") +
+      ? `<div style="margin-top:8px;"><strong style="font-size:11.5px;color:var(--gold);">Nhân vật đóng quân (Đối thoại / Mở Hồ Sơ):</strong><div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;">` +
+        garrisonChars.slice(0, 12).map(c => `
+          <div style="display:inline-flex;align-items:center;gap:3px;background:rgba(15,23,42,0.75);border:1px solid var(--panel-border);border-radius:8px;padding:2px;">
+            <button type="button" class="btn-glass btn-compact" data-garrison-char="${c.id}" title="Bắt đầu hội thoại VN với ${ESC(c.name)}">💬 ${ESC(c.name)}</button>
+            <button type="button" class="btn-accent btn-compact" data-garrison-dossier="${c.id}" title="Mở Mini-Tab Hồ Sơ ${ESC(c.name)}">👤</button>
+          </div>
+        `).join("") +
         `</div></div>`
       : "";
 
@@ -3006,6 +3863,12 @@ class Cycle12App {
       el.addEventListener("click", () => {
         SFX.click();
         this.startEncounter(el.dataset.garrisonChar);
+      });
+    });
+    box.querySelectorAll("[data-garrison-dossier]").forEach((el) => {
+      el.addEventListener("click", () => {
+        SFX.click();
+        this.openCharDossierModal(el.dataset.garrisonDossier, "overview");
       });
     });
   }
@@ -3101,182 +3964,164 @@ class Cycle12App {
     });
   }
 
+  renderRosterGridItems() {
+    const gridEl = document.getElementById("roster-grid-box");
+    const countEl = document.getElementById("roster-count-badge");
+    if (!gridEl) return;
+    const prevScroll = gridEl.scrollTop || 0;
+    const filtered = this.getFilteredRosterList();
+    const totalAll = (this.game.hybrids?.length || 0) + CHARACTERS.length;
+
+    if (countEl) {
+      countEl.textContent = `Hiển thị ${filtered.length}/${totalAll} nhân vật`;
+    }
+
+    if (!filtered.length) {
+      gridEl.innerHTML = `<div class="muted" style="grid-column:1 / -1;padding:24px;text-align:center;">Không có nhân vật nào khớp bộ lọc hiện tại. Hãy thử xóa từ khóa hoặc chọn "Mọi Phe".</div>`;
+      return;
+    }
+
+    gridEl.innerHTML = filtered.map((c) => {
+      const fc = FACTIONS[c.fac]?.color || "#38bdf8";
+      const facShort = FACTIONS[c.fac]?.short || this.game.facName(c.fac);
+      const act = c.id === this.inspectedRosterId ? "active" : "";
+      const isProtag = c.id === this.game.protagonistId;
+      const portrait = this.resolvePortrait(c.id);
+      const card = resolveCard(c.id, this.game.hybrids);
+      const isMale = card?.gender === "Male" || c.g === "M" || c.gender === "Male";
+      const owned = this.game.getOwnedCount(c.id);
+      const aff = this.game.getAffinity(c.id);
+      return `
+        <div class="roster-card-tile ${act}" style="--card-accent:${fc};" data-pick-roster="${ESC(c.id)}">
+          <div class="roster-tile-top">
+            <div class="roster-tile-avatar">
+              <img src="${portrait}" alt="${ESC(c.name)}" loading="lazy" />
+              <span class="roster-tile-cr">CR ${c.cr}</span>
+              ${isProtag ? `<span class="roster-tile-protag" title="Nhân vật chính đang điều khiển">⭐</span>` : ""}
+            </div>
+            <div class="roster-tile-info">
+              <div class="roster-tile-name">
+                <span>${ESC(c.name)}</span>
+                <span class="gender-pill ${isMale ? "male" : "female"}">${isMale ? "♂" : "♀"}</span>
+              </div>
+              <div class="roster-tile-fac" style="color:${fc};">${ESC(c.title || "Chiến Binh")} • ${ESC(facShort)}</div>
+              <div class="roster-tile-meta">
+                <span>${ESC(c.species)}</span>
+                <span style="color:#f472b6;">💞 ${aff}</span>
+                <span style="color:${owned > 0 ? "#4ade80" : "#94a3b8"};">${owned > 0 ? `✓ Thẻ x${owned}` : "🔒 Chưa có thẻ"}</span>
+              </div>
+              <div class="roster-tile-eff">
+                <span>⚔️ ${ESC(card?.row1Effect?.tag || "Trực chiến")}</span>
+                <span>🧬 ${ESC(card?.row2Effect?.tag || `+${card?.row2Effect?.crAura || 60} CR`)}</span>
+              </div>
+            </div>
+          </div>
+          <div class="roster-tile-actions">
+            <button type="button" class="btn-primary btn-compact" data-roster-open-tab="overview" data-roster-char="${ESC(c.id)}">📋 Mở Hồ Sơ Mini-Tab</button>
+            <button type="button" class="btn-glass btn-compact" data-roster-open-tab="card" data-roster-char="${ESC(c.id)}" title="Xem Thẻ Bài &amp; H1/H2">🃏 H1/H2</button>
+            <button type="button" class="btn-accent btn-compact" data-roster-open-tab="interact" data-roster-char="${ESC(c.id)}" title="Tặng Quà &amp; Chat AI">🎁 Tương Tác</button>
+          </div>
+        </div>
+      `;
+    }).join("");
+
+    gridEl.querySelectorAll("[data-pick-roster]").forEach((tile) => {
+      tile.addEventListener("click", (e) => {
+        const tabBtn = e.target.closest("[data-roster-open-tab]");
+        const targetTab = tabBtn ? tabBtn.dataset.rosterOpenTab : "overview";
+        SFX.click();
+        this.openCharDossierModal(tile.dataset.pickRoster, targetTab);
+      });
+    });
+
+    if (prevScroll > 0) gridEl.scrollTop = prevScroll;
+  }
+
   renderCodexTab() {
     const body = document.getElementById("codex-main-content");
     const t = this.codexTab;
 
     if (t === "roster") {
-      const all = [...(this.game.hybrids || []).map(h => ({ ...h, isHybrid: true })), ...CHARACTERS].sort((a, b) => b.cr - a.cr);
-      const selected = this.resolveCharacterSubject(this.inspectedRosterId);
-      const card = resolveCard(selected.id, this.game.hybrids);
-      const fac = FACTIONS[selected.fac] || FACTIONS.independent;
-      const loc = selected.loc ? findLocation(selected.loc) : null;
-      const aff = this.game.getAffinity(selected.id);
-      const imgUrl = this.resolvePortrait(selected.id);
+      const facOptions = [`<option value="ALL">🌌 Mọi Phe Phái (72+ Nhân Vật)</option>`]
+        .concat(Object.entries(FACTIONS).map(([id, f]) => `<option value="${ESC(id)}" ${this.rosterFilterFac === id ? "selected" : ""}>${ESC(f.name)}</option>`))
+        .join("");
 
       body.innerHTML = `
-        <div class="roster-split-layout">
-          <div>
-            <input type="text" id="roster-filter-q" placeholder="Tìm nhanh trong 72+ nhân vật..." style="margin-bottom:8px;" />
-            <div id="roster-items-box" class="roster-list" style="max-height:520px;">
-              ${all.map(c => {
-                const fc = FACTIONS[c.fac]?.color || "#38bdf8";
-                const act = c.id === selected.id ? "active" : "";
-                const portrait = this.resolvePortrait(c.id);
-                return `
-                  <div class="roster-item ${act}" data-pick-roster="${ESC(c.id)}">
-                    <img class="roster-thumb" src="${portrait}" alt="${ESC(c.name)}" loading="lazy" />
-                    <div style="flex:1;min-width:0;">
-                      <div style="font-weight:700;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ESC(c.name)}</div>
-                      <div style="font-size:10.5px;color:${fc};">CR ${c.cr} • ${ESC(c.species)}</div>
-                    </div>
-                  </div>
-                `;
-              }).join("")}
+        <div class="roster-Explorer-wrap">
+          <div class="roster-toolbar">
+            <div class="roster-toolbar-row">
+              <input type="text" id="roster-filter-q" value="${ESC(this.rosterSearch || "")}" placeholder="🔍 Tìm tên, chủng tộc, phe phái, kỹ năng..." style="flex:1;min-width:190px;" />
+              <select id="roster-fac-select" style="min-width:165px;">${facOptions}</select>
+              <select id="roster-sort-select" style="min-width:150px;">
+                <option value="cr" ${this.rosterSort === "cr" ? "selected" : ""}>⬇️ Sắp xếp: CR Cao → Thấp</option>
+                <option value="aff" ${this.rosterSort === "aff" ? "selected" : ""}>💞 Sắp xếp: Độ Tin Cậy</option>
+                <option value="name" ${this.rosterSort === "name" ? "selected" : ""}>🔤 Sắp xếp: Tên A → Z</option>
+              </select>
             </div>
-          </div>
-
-          <div class="codex-card" style="padding:18px; gap:12px;">
-            <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;">
-              <img src="${imgUrl}" style="width:106px;height:132px;border-radius:14px;object-fit:cover;object-position:top center;border:2px solid ${fac.color};" alt="${ESC(selected.name)}" />
-              <div style="flex:1;min-width:200px;">
-                <h2 style="margin:0;color:#fff;font-size:20px;">${ESC(selected.name)}</h2>
-                <div style="color:${fac.color};font-weight:700;font-size:13px;margin:2px 0;">${ESC(selected.title || "Chiến Binh Gaiastra")} • ${ESC(fac.name)}</div>
-                <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">
-                  <span class="badge">CR ${selected.cr}</span>
-                  <span class="badge">${ESC(selected.species)}</span>
-                  <span class="badge">${card?.gender === "Male" || selected.g === "M" ? "♂ Nam" : "♀ Nữ"}</span>
-                  <span class="badge" style="color:#f472b6;">Độ tin cậy: ${aff}/100</span>
-                </div>
-                <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
-                  <button class="btn-glass btn-compact" id="btn-roster-upload-portrait">🖼️ Gắn Ảnh Grok / Tự Chọn</button>
-                  ${getCustomPortrait(selected.id) ? `<button class="btn-glass btn-compact" id="btn-roster-reset-portrait">↩️ Về Ảnh Mặc Định</button>` : ""}
-                  <input type="file" id="roster-portrait-file" accept="image/*" class="hidden" />
-                </div>
+            <div class="roster-toolbar-row" style="justify-content:space-between;">
+              <div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;">
+                <button type="button" class="btn-glass btn-compact ${this.rosterFilterGender === "all" ? "active" : ""}" data-rgender="all">Tất cả</button>
+                <button type="button" class="btn-glass btn-compact ${this.rosterFilterGender === "female" ? "active" : ""}" data-rgender="female">♀ Nữ</button>
+                <button type="button" class="btn-glass btn-compact ${this.rosterFilterGender === "male" ? "active" : ""}" data-rgender="male">♂ Nam</button>
+                <span class="muted" style="margin:0 3px;">|</span>
+                <button type="button" class="btn-glass btn-compact ${this.rosterFilterOwned === "all" ? "active" : ""}" data-rowned="all">Mọi Thẻ</button>
+                <button type="button" class="btn-glass btn-compact ${this.rosterFilterOwned === "owned" ? "active" : ""}" data-rowned="owned">✓ Đã Sở Hữu Thẻ</button>
+                <button type="button" class="btn-glass btn-compact ${this.rosterFilterOwned === "unowned" ? "active" : ""}" data-rowned="unowned">🔒 Chưa Có Thẻ</button>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                <span class="badge" id="roster-count-badge" style="color:var(--gold);">72 nhân vật</span>
+                <button type="button" class="btn-gold btn-compact" id="btn-roster-open-current" title="Mở ngay Mini-Tab nhân vật đang chọn">👤 Mở Hồ Sơ: ${ESC(this.resolveActorName(this.inspectedRosterId))}</button>
               </div>
             </div>
-
-            <div class="planet-meta-grid">
-              <div><strong>Căn cứ:</strong> ${ESC(loc ? loc.label : (selected.loc || "Gaiastra"))}</div>
-              <div><strong>Chiều cao:</strong> ${selected.h || 1.8}m</div>
-              <div><strong>Hàng 1 (Chiến Đấu):</strong> ${ESC(card?.row1Effect?.desc || "Đấu theo Tổng CR & Phe")}</div>
-              <div><strong>Hàng 2 (Sinh Sản):</strong> ${ESC(card?.row2Effect?.desc || "Hỗ trợ Hàng 1 & Lai Tạo")}</div>
-              <div style="grid-column:1 / -1;"><strong>Chiêu thức đặc trưng:</strong> ${ESC((selected.skills || []).join(", "))}</div>
-            </div>
-
-            <p class="muted" style="line-height:1.6;">${ESC(selected.bio || "Hậu duệ dòng gen mới kiến tạo trong Chu Kỳ 12.")}</p>
-
-            <div style="display:flex;gap:8px;flex-wrap:wrap;">
-              <button class="btn-gold" id="btn-roster-make-protag">⭐ Chọn Làm Nhân Vật Chính (Chơi Góc Nhìn NV Này)</button>
-              <button class="btn-primary" id="btn-roster-talk">💬 Đối Thoại Tương Tác</button>
-              <button class="btn-glass" id="btn-roster-duel">🃏 Đấu Thử Thẻ Bài (Bắt &amp; Lai H2)</button>
-              <button class="btn-glass" id="btn-roster-zoom-card">🔍 Phóng To Thẻ Bài</button>
-              ${this.game.getOwnedCount(selected.id) > 0
-                ? `<span class="badge" style="color:#4ade80;border-color:rgba(74,222,128,0.55);">✓ Đã Sở Hữu Thẻ Bài</span>`
-                : `<button class="btn-accent" id="btn-roster-recruit-card">🤝 Chiêu Mộ Thẻ (${aff >= 35 ? "Miễn Phí" : `${selected.cr >= 750 ? 90 : 45} Ảnh Hưởng`})</button>`}
-            </div>
           </div>
+
+          <div id="roster-grid-box" class="roster-card-grid"></div>
         </div>
       `;
 
-      body.querySelectorAll("[data-pick-roster]").forEach(el => {
-        el.addEventListener("click", () => {
-          SFX.click();
-          this.inspectedRosterId = el.dataset.pickRoster;
-          this.renderCodexTab();
-        });
-      });
+      this.renderRosterGridItems();
 
       const qInput = document.getElementById("roster-filter-q");
       qInput?.addEventListener("input", () => {
-        const needle = qInput.value.trim().toLowerCase();
-        body.querySelectorAll("[data-pick-roster]").forEach(item => {
-          item.style.display = item.textContent.toLowerCase().includes(needle) ? "flex" : "none";
+        this.rosterSearch = qInput.value;
+        this.renderRosterGridItems();
+      });
+
+      const facSel = document.getElementById("roster-fac-select");
+      facSel?.addEventListener("change", () => {
+        SFX.click();
+        this.rosterFilterFac = facSel.value;
+        this.renderRosterGridItems();
+      });
+
+      const sortSel = document.getElementById("roster-sort-select");
+      sortSel?.addEventListener("change", () => {
+        SFX.click();
+        this.rosterSort = sortSel.value;
+        this.renderRosterGridItems();
+      });
+
+      body.querySelectorAll("[data-rgender]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          SFX.click();
+          this.rosterFilterGender = btn.dataset.rgender;
+          body.querySelectorAll("[data-rgender]").forEach((b) => b.classList.toggle("active", b === btn));
+          this.renderRosterGridItems();
         });
       });
 
-      const fileInput = document.getElementById("roster-portrait-file");
-      document.getElementById("btn-roster-upload-portrait")?.addEventListener("click", () => {
-        SFX.click();
-        fileInput?.click();
-      });
-      fileInput?.addEventListener("change", () => {
-        const file = fileInput.files?.[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = () => {
-          const img = new Image();
-          img.onload = () => {
-            const canvas = document.createElement("canvas");
-            const maxW = 380;
-            const maxH = 440;
-            const scale = Math.min(maxW / img.width, maxH / img.height, 1);
-            canvas.width = Math.max(120, Math.round(img.width * scale));
-            canvas.height = Math.max(140, Math.round(img.height * scale));
-            canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
-            const ok = setCustomPortrait(selected.id, canvas.toDataURL("image/jpeg", 0.86));
-            clearPortraitCache(selected.id);
-            if (ok) {
-              SFX.victory();
-              this.refreshTopResources();
-              if (this.duelEngine) this.renderDuelUI();
-              this.renderCodexTab();
-              this.showToast("🖼️ Đã gắn ảnh chân dung mới!", `Ảnh Grok/tự chọn cho ${selected.name} đã được lưu trên thiết bị.`);
-            } else {
-              SFX.alert();
-              this.showToast("Bộ nhớ trình duyệt đầy", "Không thể lưu thêm ảnh vào localStorage.");
-            }
-          };
-          img.src = reader.result;
-        };
-        reader.readAsDataURL(file);
+      body.querySelectorAll("[data-rowned]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          SFX.click();
+          this.rosterFilterOwned = btn.dataset.rowned;
+          body.querySelectorAll("[data-rowned]").forEach((b) => b.classList.toggle("active", b === btn));
+          this.renderRosterGridItems();
+        });
       });
 
-      document.getElementById("btn-roster-reset-portrait")?.addEventListener("click", () => {
+      document.getElementById("btn-roster-open-current")?.addEventListener("click", () => {
         SFX.click();
-        setCustomPortrait(selected.id, null);
-        clearPortraitCache(selected.id);
-        this.refreshTopResources();
-        if (this.duelEngine) this.renderDuelUI();
-        this.renderCodexTab();
-        this.showToast("↩️ Đã khôi phục ảnh", `${selected.name} dùng lại ảnh mặc định.`);
-      });
-
-      document.getElementById("btn-roster-make-protag")?.addEventListener("click", () => {
-        SFX.choice();
-        this.game.selectProtagonist(selected.id, true);
-        this.duelEngine = null;
-        this.refreshTopResources();
-        this.switchMode("vn");
-        this.showToast(`⭐ Chủ Tướng Mới: ${selected.name}`, "Cốt truyện đã chuyển sang Khởi Nguyên theo góc nhìn của nhân vật này!");
-      });
-      document.getElementById("btn-roster-talk")?.addEventListener("click", () => {
-        SFX.click();
-        this.startEncounter(selected.id);
-      });
-      document.getElementById("btn-roster-duel")?.addEventListener("click", () => {
-        SFX.alert();
-        this.pendingStoryBattle = null;
-        this.pendingInvasionSectorId = null;
-        this.switchMode("duel");
-        this.setDuelTab("skirmish");
-        this.startCardMatch({ kind: "skirmish", enemyId: selected.id, modeLabel: `🃏 Đấu Thử vs ${selected.name}` });
-      });
-      document.getElementById("btn-roster-zoom-card")?.addEventListener("click", () => {
-        SFX.click();
-        this.openCardZoomModal(resolveCard(selected.id, this.game.hybrids), { source: "codex" });
-      });
-      document.getElementById("btn-roster-recruit-card")?.addEventListener("click", () => {
-        const r = this.game.recruitCharacterCard(selected.id);
-        if (r.ok) {
-          SFX.victory();
-          this.refreshTopResources();
-          this.renderCodexTab();
-          this.showToast("🤝 Chiêu Mộ Thành Công!", `Đã mở khóa thẻ bài ${selected.name} vào Kho Thẻ!`);
-        } else {
-          SFX.alert();
-          this.showToast("Chưa đủ điều kiện chiêu mộ", r.msg);
-        }
+        this.openCharDossierModal(this.inspectedRosterId || this.game.protagonistId || "arisia", "overview");
       });
       return;
     }
@@ -3318,17 +4163,31 @@ class Cycle12App {
         const f = FACTIONS[id];
         const rel = this.game.getRelation(this.game.playerFaction, id);
         const relCol = rel >= 20 ? "#4ade80" : rel <= -30 ? "#fb7185" : "#fde68a";
+        const keyHeroes = CHARACTERS.filter((c) => c.fac === id).sort((a, b) => b.cr - a.cr).slice(0, 4);
         return `
-          <div class="diplo-row">
-            <div>
-              <strong style="color:${f.color};font-size:14px;">${ESC(f.name)}</strong>
-              <div class="muted">Thủ đô: ${ESC(f.capital)} • Lãnh thổ: ${this.game.getFactionTerritoryPct(id)}%</div>
+          <div class="diplo-row" style="flex-direction:column;align-items:stretch;gap:8px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+              <div>
+                <strong style="color:${f.color};font-size:14px;">${ESC(f.name)}</strong>
+                <div class="muted">Thủ đô: ${ESC(f.capital)} • Lãnh thổ: ${this.game.getFactionTerritoryPct(id)}%</div>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <span class="badge" style="color:${relCol};">Quan hệ: ${rel > 0 ? "+" : ""}${rel}</span>
+                <button class="btn-primary btn-compact" data-diplo-good="${id}">🕊️ Thân thiện (300 Cr)</button>
+                <button class="btn-danger btn-compact" data-diplo-bad="${id}">⚔️ Lên án (25 Inf)</button>
+              </div>
             </div>
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-              <span class="badge" style="color:${relCol};">Quan hệ: ${rel > 0 ? "+" : ""}${rel}</span>
-              <button class="btn-primary btn-compact" data-diplo-good="${id}">🕊️ Thân thiện (300 Cr)</button>
-              <button class="btn-danger btn-compact" data-diplo-bad="${id}">⚔️ Lên án (25 Inf)</button>
-            </div>
+            ${keyHeroes.length ? `
+              <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+                <span class="muted" style="font-size:11px;">Thủ lĩnh &amp; Tướng chủ lực:</span>
+                ${keyHeroes.map((hc) => `
+                  <button type="button" class="cd-rel-chip" data-open-dossier="${ESC(hc.id)}">
+                    <img src="${this.resolvePortrait(hc.id)}" alt="${ESC(hc.name)}" loading="lazy" />
+                    <span>${ESC(hc.name)} <small style="color:var(--gold);">CR ${hc.cr}</small></span>
+                  </button>
+                `).join("")}
+              </div>
+            ` : ""}
           </div>
         `;
       }).join("");
@@ -3372,6 +4231,12 @@ class Cycle12App {
         this.renderCodexTab();
         this.showToast("Cảnh Báo Ngoại Giao", res.msg);
       }));
+      body.querySelectorAll("[data-open-dossier]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          SFX.click();
+          this.openCharDossierModal(btn.dataset.openDossier, "overview");
+        });
+      });
       return;
     }
 
@@ -3425,29 +4290,71 @@ class Cycle12App {
 
     if (t === "species") {
       body.innerHTML = `<div class="codex-grid">${
-        SPECIES.map(sp => `
-          <div class="codex-card">
-            <div style="display:flex;justify-content:space-between;align-items:center;">
-              <strong style="color:${sp.color};font-size:14px;">${ESC(sp.name)}</strong>
-              <span class="badge">Dân số: ${ESC(sp.pop)}</span>
+        SPECIES.map((sp) => {
+          const reps = CHARACTERS.filter((c) => c.race === sp.id || c.species?.toLowerCase().includes(sp.name.toLowerCase())).sort((a, b) => b.cr - a.cr).slice(0, 6);
+          return `
+            <div class="codex-card">
+              <div style="display:flex;justify-content:space-between;align-items:center;">
+                <strong style="color:${sp.color};font-size:14px;">${ESC(sp.name)}</strong>
+                <span class="badge">Dân số: ${ESC(sp.pop)}</span>
+              </div>
+              <div class="muted"><strong>Thể chất:</strong> ${ESC(sp.physic)} • <strong>Công nghệ:</strong> ${ESC(sp.tech)}</div>
+              <div style="font-size:12px;color:#cbd5e1;">${ESC(sp.traits)}</div>
+              ${reps.length ? `
+                <div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:6px;">
+                  ${reps.map((rc) => `
+                    <button type="button" class="cd-rel-chip" data-open-dossier="${ESC(rc.id)}">
+                      <img src="${this.resolvePortrait(rc.id)}" alt="${ESC(rc.name)}" loading="lazy" />
+                      <span>${ESC(rc.name)}</span>
+                    </button>
+                  `).join("")}
+                </div>
+              ` : ""}
             </div>
-            <div class="muted"><strong>Thể chất:</strong> ${ESC(sp.physic)} • <strong>Công nghệ:</strong> ${ESC(sp.tech)}</div>
-            <div style="font-size:12px;color:#cbd5e1;">${ESC(sp.traits)}</div>
-          </div>
-        `).join("")
+          `;
+        }).join("")
       }</div>`;
+      body.querySelectorAll("[data-open-dossier]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          SFX.click();
+          this.openCharDossierModal(btn.dataset.openDossier, "overview");
+        });
+      });
       return;
     }
 
     if (t === "relations") {
       body.innerHTML = `<div class="codex-grid">${
-        RELATIONS.map(r => `
+        RELATIONS.map((r) => `
           <div class="codex-card">
             <strong style="color:var(--accent);font-size:14px;">🔗 ${ESC(r.type)}</strong>
-            ${r.items.map(it => `<div class="muted">• ${ESC(it)}</div>`).join("")}
+            ${r.items.map((it) => {
+              const mentioned = CHARACTERS.filter((c) => it.includes(c.name) || (c.name.split(" ")[0].length >= 4 && it.includes(c.name.split(" ")[0])));
+              return `
+                <div style="padding:5px 0;border-bottom:1px dashed rgba(148,163,184,0.14);">
+                  <div class="muted">• ${ESC(it)}</div>
+                  ${mentioned.length ? `
+                    <div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:4px;">
+                      ${mentioned.map((mc) => `
+                        <button type="button" class="cd-rel-chip" data-open-dossier="${ESC(mc.id)}">
+                          <img src="${this.resolvePortrait(mc.id)}" alt="${ESC(mc.name)}" loading="lazy" />
+                          <span>${ESC(mc.name)}</span>
+                        </button>
+                      `).join("")}
+                    </div>
+                  ` : ""}
+                </div>
+              `;
+            }).join("")}
           </div>
         `).join("")
       }</div>`;
+      body.querySelectorAll("[data-open-dossier]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          SFX.click();
+          this.openCharDossierModal(btn.dataset.openDossier, "overview");
+        });
+      });
       return;
     }
 

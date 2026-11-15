@@ -177,7 +177,8 @@
         <!-- CENTER RESOLVE & LOG BAR -->
         <div class="duel-mid-strip">
           <span class="badge" id="duel-turn-badge" style="color:var(--gold);">Lượt 1 • Rút +2/lượt</span>
-          <div id="duel-log-latest" class="duel-log-ticker">Chọn thẻ bài ở tay rồi đặt vào 1–3 làn (Nam thắng Nữ → đưa sang Hàng 2, sinh Token lên Hàng 1 &amp; kích hoạt điều kiện H1/H2 + rút 2 lá)!</div>
+          <div id="duel-log-latest" class="duel-log-ticker" title="Ấn để mở toàn bộ Nhật Ký Giao Chiến &amp; Lai Tạo">Chọn thẻ bài ở tay rồi đặt vào 1–3 làn (Nam thắng Nữ → đưa sang Hàng 2, sinh Token lên Hàng 1 &amp; kích hoạt điều kiện H1/H2 + rút 2 lá)!</div>
+          <button type="button" class="btn-glass btn-compact" id="btn-open-duel-log" title="Xem toàn bộ nhật ký giao chiến &amp; lai tạo">📜 Nhật Ký</button>
           <button class="btn-gold btn-compact" id="btn-resolve-clash">⚔️ Giao Chiến Chiều Dọc</button>
         </div>
 
@@ -282,6 +283,7 @@
             <button type="button" class="btn-glass btn-compact" data-sfilter="unowned">Có Thể Mua</button>
             <button type="button" class="btn-glass btn-compact" data-sfilter="owned">Đã Sở Hữu</button>
             <button type="button" class="btn-glass btn-compact" data-sfilter="cond">⚡ ĐK H1/H2</button>
+            <button type="button" class="btn-glass btn-compact" data-sfilter="legend">👑 Tướng / Độc Nhất</button>
             <input type="text" id="shop-search-input" placeholder="Tìm tên thẻ, loài, hiệu ứng..." style="max-width:195px;" />
           </div>
         </div>
@@ -313,7 +315,10 @@
     </aside>
 
     <aside class="hud-sidebar wide" id="galaxy-right-sidebar">
-      <div class="panel-section-title">🔍 Hồ Sơ Phân Khu & Thiên Thể</div>
+      <div class="panel-section-title" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+        <span>🔍 Hồ Sơ Phân Khu &amp; Thiên Thể</span>
+        <button type="button" class="btn-glass btn-compact" id="btn-galaxy-back-list" title="Quay lại danh sách 20 hệ sao">◀ DS 20 Hệ Sao</button>
+      </div>
       <div id="planet-detail-box"></div>
 
       <div class="panel-section-title">☄️ Hành Động Chiến Lược & Siêu Vũ Khí</div>
@@ -409,7 +414,8 @@
         <button class="btn-accent hidden" id="btn-victory-story">📖 Tiếp Tục Cốt Truyện</button>
         <button class="btn-gold hidden" id="btn-victory-conquer">🚩 Tiếp Quản Khu Vực</button>
         <button class="btn-gold hidden" id="btn-victory-next-floor">🗼 Lên Tầng Kế Tiếp</button>
-        <button class="btn-primary" id="btn-victory-close">🃏 Đấu Lại / Đóng</button>
+        <button class="btn-primary" id="btn-victory-close">🔄 Đấu Lại Ván Này</button>
+        <button type="button" class="btn-glass" id="btn-victory-dismiss">👁️ Xem Bàn Đấu</button>
       </div>
     </div>
   </div>
@@ -437,6 +443,46 @@
       </div>
       <div id="cz-body" class="card-zoom-body"></div>
       <div id="cz-actions" class="card-zoom-actions"></div>
+    </div>
+  </div>
+
+  <!-- CHARACTER PROFILE MINI-TAB DOSSIER MODAL -->
+  <div id="char-dossier-modal" class="modal-overlay hidden">
+    <div class="modal-card char-dossier-modal-card">
+      <div class="cd-topbar">
+        <div class="cd-title-wrap">
+          <div id="cd-faction-pill" class="cd-faction-pill"></div>
+          <h2 id="cd-name" style="margin:0; font-size:20px; color:#fff;"></h2>
+          <div id="cd-subtitle" class="muted" style="font-size:12px;"></div>
+        </div>
+        <div class="cd-nav-btns">
+          <button type="button" class="btn-glass btn-compact" id="btn-cd-prev" title="Nhân vật trước">◀ Trước</button>
+          <button type="button" class="btn-glass btn-compact" id="btn-cd-next" title="Nhân vật tiếp theo">Tiếp ▶</button>
+          <button type="button" class="btn-danger btn-compact" id="btn-close-char-dossier">✕ Đóng</button>
+        </div>
+      </div>
+      <div class="cd-subtabs" id="cd-subtabs">
+        <button type="button" class="cd-subtab-btn active" data-cdtab="overview">📋 Hồ Sơ &amp; Tiểu Sử</button>
+        <button type="button" class="cd-subtab-btn" data-cdtab="card">🃏 Thẻ Bài &amp; H1/H2</button>
+        <button type="button" class="cd-subtab-btn" data-cdtab="relations">💞 Quan Hệ &amp; Gia Phả</button>
+        <button type="button" class="cd-subtab-btn" data-cdtab="interact">🎁 Tương Tác &amp; Chat AI</button>
+      </div>
+      <div id="cd-body" class="cd-body"></div>
+      <div id="cd-actions" class="cd-actions"></div>
+    </div>
+  </div>
+
+  <!-- DUEL COMBAT & BREEDING LOG MODAL -->
+  <div id="duel-log-modal" class="modal-overlay hidden">
+    <div class="modal-card duel-log-modal-card">
+      <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--panel-border); padding-bottom:10px; gap:8px;">
+        <div>
+          <h3 style="color:var(--gold); margin:0;">📜 Nhật Ký Giao Chiến &amp; Lai Tạo</h3>
+          <div id="duel-log-subtitle" class="muted" style="font-size:11px;">Theo dõi toàn bộ diễn biến Hàng 1, Hàng 2 &amp; Token qua từng lượt</div>
+        </div>
+        <button type="button" class="btn-danger btn-compact" id="btn-close-duel-log">✕ Đóng</button>
+      </div>
+      <div id="duel-log-list" class="duel-log-list"></div>
     </div>
   </div>
 
