@@ -1481,20 +1481,583 @@ export const CHAPTERS = [
         sector: "outer_layer",
         leftChar: "__PROTAGONIST__", rightChar: "overlord", leftMood: "smug", rightMood: "tense",
         speaker: "__PROTAGONIST__",
-        text: (g) => `"Overlord cũng đã quỳ gối trước chiến thuật Hàng 1 — Hàng 2 — Hàng 3 của ${g.getProtagonist().name}! Từ Sylvalon tới tận cùng Hư Không, kỷ nguyên mới mang tên ngươi chính thức bất tử!"`,
+        text: (g) => `"Overlord cũng đã quỳ gối trước chiến thuật Hàng 1 — Hàng 2 — Hàng 3 của ${g.getProtagonist().name}! Nhưng khoan đã... từ tầng sâu nhất của Eris Core, phong ấn về 11 Chu Kỳ Đã Chết vừa phát tín hiệu cảnh báo!"`,
         end: {
-          title: "HUYỀN THOẠI ĐỘC TÔN: BÁ CHỦ CHU KỲ 12–13",
-          summary: "Đã hoàn thành 13/13 Chương Sử Thi! Hãy thử '✨ Mở Rộng AI' hoặc chọn Nhân Vật Chính mới để viết tiếp lịch sử riêng!"
+          title: "CHƯƠNG XII HOÀN TẤT: BÁ CHỦ VỰC THẲM",
+          summary: "Đã mở khóa Kỷ Nguyên Hậu Chiến (Chương XIII → XVIII): Hồ Sơ 11 Chu Kỳ Trước & Giải Đấu Tuyệt Đỉnh Gaiastra!",
+          nextChapter: "ch13_dead_cycles"
         }
       },
       ch12_crown_pact: {
         sector: "sylvalon",
-        leftChar: "__PROTAGONIST__", rightChar: "emma", leftMood: "happy", rightMood: "happy",
+        leftChar: "__PROTAGONIST__", rightChar: "emma", leftMood: "happy", rightMood: "secret",
         speaker: "emma",
-        text: (g) => `"Hội đồng Eris Union xác nhận bình minh hòa bình dưới sự bảo chứng của ${g.getProtagonist().name}. Hãy tiếp tục khám phá 72 nhân vật hoặc dùng Trí Tuệ Nhân Tạo để viết tiếp vô số ngoại truyện mới!"`,
+        text: (g) => `"Hội đồng Eris Union xác nhận bình minh hòa bình dưới sự bảo chứng của ${g.getProtagonist().name}. Chính vì ngươi đã vượt qua phép thử Chu Kỳ 12, ta sẽ mở quyền truy cập Hầm Lưu Trữ Tuyệt Mật về 11 Chu Kỳ Trước..."`,
         end: {
-          title: "HOÀN TẤT SỬ THI: BÌNH MINH VĨNH CỬU GAIASTRA",
-          summary: "Bạn đã hoàn thành trọn vẹn 13 Chương Cốt Truyện Cycle 12: Age of Dominion!"
+          title: "CHƯƠNG XII HOÀN TẤT: HIẾN CHƯƠNG GAIASTRA",
+          summary: "Mở khóa Chương XIII: Hồ Sơ Tuyệt Mật 11 Chu Kỳ Trước!",
+          nextChapter: "ch13_dead_cycles"
+        }
+      }
+    }
+  },
+  {
+    id: "ch13_dead_cycles",
+    num: "CHƯƠNG XIII",
+    title: "Hồ Sơ Tuyệt Mật 11 Chu Kỳ Trước & Ký Ức Trái Đất Cũ",
+    subtitle: "Hầm Lưu Trữ Eris Core → Viện Sử Học Berlidona",
+    sector: "outer_layer",
+    leadChar: "yulia",
+    summary: "Lần đầu tiên trong lịch sử Gaiastra, cánh cổng dẫn vào Hầm Lưu Trữ Ký Ức của Eris Union hé mở. Yulia Makarova, Emma và Cipheron đối mặt với bí mật tại sao 11 vũ trụ trước đều bị Reset — và nguồn gốc thật sự của những mảnh ký ức Trái Đất Cũ.",
+    nodes: {
+      start: {
+        sector: "outer_layer",
+        leftChar: "yulia", rightChar: "emma", leftMood: "tense", rightMood: "secret",
+        speaker: "narrator",
+        text: "Tại trung tâm khối đa diện Outer Layer, mười một cột tinh thể đen tượng trưng cho 11 Chu Kỳ đã bị xóa sổ lơ lửng giữa hư không. Nhà sử học lai Yulia Makarova chạm tay vào cột tinh thể thứ 11 — và hàng triệu hình ảnh cổ xưa lập tức ùa về.",
+        next: "ch13_yulia_memory"
+      },
+      ch13_yulia_memory: {
+        sector: "outer_layer",
+        leftChar: "yulia", rightChar: "emma", leftMood: "angry", rightMood: "neutral",
+        speaker: "yulia",
+        text: "\"Giờ thì tôi đã hiểu vì sao ở phòng họp Berlidona, chỉ mình tôi biết tới cái tên 'Molotov–Ribbentrop'! Trái Đất hiện tại ở Hệ Sol chỉ là bản tái tạo thứ 12. Trong Chu Kỳ 1, nhân loại từng tự hủy diệt trước khi các chủng tộc Sylvarian và Nadir xuất hiện!\"",
+        next: "ch13_emma_truth"
+      },
+      ch13_emma_truth: {
+        sector: "outer_layer",
+        leftChar: "emma", rightChar: "yulia", leftMood: "secret", rightMood: "tense",
+        speaker: "emma",
+        text: "\"Đúng vậy, Yulia. Mỗi khi một đế chế nuốt trọn hơn 85% vũ trụ hoặc khi chiến tranh huyết thống vượt ngưỡng kiểm soát, Thực Tại sẽ tự sụp đổ thành Điểm Kỳ Dị. Eris Union không Reset vũ trụ vì tàn nhẫn — chúng tôi Reset để cứu lấy mầm sống trước khi hư vô nuốt chửng tất cả.\"",
+        next: "ch13_cipheron_intrude"
+      },
+      ch13_cipheron_intrude: {
+        sector: "outer_layer",
+        leftChar: "__PROTAGONIST__", rightChar: "cipheron", leftMood: "combat", rightMood: "smug",
+        speaker: "cipheron",
+        text: (g) => `"Hahaha! Một bí mật quá đỗi ngọt ngào! ${g.getProtagonist().name}, nếu thần trí Nadir của ta chiếm được Mã Nguồn Chu Kỳ 1–11 ngay tại đây, Western Nadir sẽ viết lại quy luật nhân quả của toàn bộ 15 chủng tộc!"`,
+        choices: [
+          {
+            label: "⚔️ Đấu Thẻ Bài Phong Ấn Thần Trí Cipheron (CR 1001)",
+            hint: "Trận Đấu Chiến Thuật tại Outer Layer • Bảo vệ nguyên vẹn Mã Nguồn 11 Chu Kỳ",
+            effects: (g) => {
+              g.setFlag("ch13_fought_cipheron", true);
+              g.addAffinity("emma", 18);
+              g.addAffinity("yulia", 15);
+            },
+            battle: {
+              playerId: "__PROTAGONIST__",
+              enemyId: "cipheron",
+              stageId: "outer_layer",
+              winNext: "ch13_win_archive",
+              loseNext: "ch13_compromise"
+            }
+          },
+          {
+            label: "🧬 Trích Xuất Dữ Liệu Di Truyền Cổ Đại Cho Toàn Bộ 8 Phe",
+            hint: "+450 Nghiên cứu • +60 Mảnh Gen • Công khai sự thật về Vòng Lặp Reset",
+            effects: (g) => {
+              g.addRes(g.playerFaction, "research", 450);
+              g.cardDust = (g.cardDust || 0) + 60;
+              g.setFlag("ch13_archive_public", true);
+              g.addAffinity("yulia", 22);
+            },
+            next: "ch13_public_reveal"
+          },
+          {
+            label: "🤝 Thương Lượng Chia Sẻ Ma Trận Tri Thức Với Cipheron",
+            hint: "+2,200 Credits • +120 Ảnh hưởng • Quan hệ Western Nadir +20",
+            effects: (g) => {
+              g.addRes(g.playerFaction, "credits", 2200);
+              g.addRes(g.playerFaction, "influence", 120);
+              g.addRelation(g.playerFaction, "western_nadir", 20);
+            },
+            next: "ch13_compromise"
+          }
+        ]
+      },
+      ch13_win_archive: {
+        sector: "outer_layer",
+        leftChar: "__PROTAGONIST__", rightChar: "yulia", leftMood: "smug", rightMood: "happy",
+        speaker: "yulia",
+        text: (g) => `"Đòn phản công xuất thần lắm, ${g.getProtagonist().name}! Cipheron đã bị đẩy lùi khỏi Hầm Lưu Trữ. Tôi đã sao lưu toàn bộ biên niên sử 11 Chu Kỳ — và phát hiện một âm mưu đảo chính đang âm ỉ ngay giữa lòng Thủ đô Kronea!"`,
+        effects: (g) => {
+          g.cardDust = (g.cardDust || 0) + 80;
+          g.addRes(g.playerFaction, "influence", 160);
+        },
+        end: {
+          title: "CHƯƠNG XIII HOÀN TẤT: NGƯỜI GIỮ KÝ Ức VŨ TRỤ",
+          summary: "+80 Mảnh Gen & +160 Ảnh hưởng! Tiếp tục Chương XIV: Bóng Tối Dưới Ngai Vàng Kronea.",
+          nextChapter: "ch14_kronea_shadows"
+        }
+      },
+      ch13_public_reveal: {
+        sector: "berlidona",
+        leftChar: "yulia", rightChar: "mina", leftMood: "happy", rightMood: "happy",
+        speaker: "mina",
+        text: "\"Tin chấn động phát sóng trên toàn mạng lưới Global Icon! Bản báo cáo của Yulia Makarova về 11 Chu Kỳ Đã Chết đang làm rung chuyển nội các Kronea, kích động phe đối lập của Carnavex hành động sớm hơn dự kiến!\"",
+        end: {
+          title: "CHƯƠNG XIII HOÀN TẤT: SỰ THẬT PHƠI BÀY",
+          summary: "+450 Nghiên cứu & +60 Mảnh Gen! Mở khóa Chương XIV: Bóng Tối Dưới Ngai Vàng Kronea.",
+          nextChapter: "ch14_kronea_shadows"
+        }
+      },
+      ch13_compromise: {
+        sector: "outer_layer",
+        leftChar: "emma", rightChar: "cipheron", leftMood: "tense", rightMood: "smug",
+        speaker: "emma",
+        text: "\"Dù Cipheron đã rút lui cùng một mảnh dữ liệu cổ, ngươi vẫn giữ được lõi điều khiển chính. Nhưng hãy cẩn thận: biến động chính trị tại Đế chế Sylvarian đang bùng lên từng giờ!\"",
+        end: {
+          title: "CHƯƠNG XIII HOÀN TẤT: THỎA HIỆP TRÊN ĐỈNH TRỜI",
+          summary: "+2,200 Credits & +120 Ảnh hưởng! Tiến sang Chương XIV: Bóng Tối Dưới Ngai Vàng Kronea.",
+          nextChapter: "ch14_kronea_shadows"
+        }
+      }
+    }
+  },
+  {
+    id: "ch14_kronea_shadows",
+    num: "CHƯƠNG XIV",
+    title: "Bóng Tối Dưới Ngai Vàng Kronea & Âm Mưu Đảo Chính",
+    subtitle: "Thủ Đô Kronea → Tiền Đồn Gandora (Border Division)",
+    sector: "sylvalon",
+    leadChar: "arisia",
+    summary: "Khi Hiệp ước Cursew và bí mật Gotterfall bị rò rỉ trong Thượng viện Kronea, Carnavex âm thầm liên kết với các quý tộc bất mãn nhằm phế truất Nữ hoàng Arisia Grok. Ojamon, Pussiri và Tướng Veidos của Border Division bị cuốn vào vòng xoáy sinh tử.",
+    nodes: {
+      start: {
+        sector: "sylvalon",
+        leftChar: "pussiri", rightChar: "ojamon", leftMood: "tense", rightMood: "secret",
+        speaker: "pussiri",
+        text: "\"Ngài Ojamon! Mạng lưới mật vụ của tôi vừa chặn được mật lệnh mã hóa từ dinh thự của Carnavex. Hắn đang thuyết phục một nửa Hội đồng Reformists rằng Nữ hoàng Arisia đã bán đứng đế chế cho Overlord qua Hiệp ước Cursew!\"",
+        next: "ch14_ojamon_calc"
+      },
+      ch14_ojamon_calc: {
+        sector: "sylvalon",
+        leftChar: "ojamon", rightChar: "arisia", leftMood: "smug", rightMood: "angry",
+        speaker: "arisia",
+        text: "\"Carnavex tưởng ta là kẻ dễ bị lật đổ trên chính ngai vàng của cha ta sao? Nhưng điều ta cần biết ngay lúc này là: Quân đoàn Biên giới (Border Division) của Tướng Veidos ở Gandora sẽ đứng về phía ai?\"",
+        next: "ch14_gandora_veidos"
+      },
+      ch14_gandora_veidos: {
+        sector: "gandora",
+        leftChar: "__PROTAGONIST__", rightChar: "veidos", leftMood: "combat", rightMood: "tense",
+        speaker: "veidos",
+        text: (g) => `"${g.getProtagonist().name}, ở Kronea đám quý tộc chế giễu ngoại hình đột biến của ta, nhưng ở Gandora này, từng người lính Ixalcienkorps đều đổ máu vì biên cương. Carnavex hứa trao cho ta quyền tự trị tuyệt đối nếu làm ngơ đêm nay. Ngươi nói xem — ta nên chọn bên nào?"`,
+        choices: [
+          {
+            label: "🛡️ Thuyết Phục Veidos Giữ Trọn Danh Dự Chiến Binh & Đập Tan Đảo Chính",
+            hint: "+25 Độ tin cậy Veidos & Arisia • Đấu Thẻ Bài trấn áp lực lượng phản loạn của Carnavex",
+            effects: (g) => {
+              g.addAffinity("veidos", 25);
+              g.addAffinity("arisia", 18);
+              g.setFlag("ch14_veidos_loyal", true);
+            },
+            battle: {
+              playerId: "__PROTAGONIST__",
+              enemyId: "carnavex",
+              stageId: "sylvalon",
+              winNext: "ch14_coup_crushed",
+              loseNext: "ch14_civil_strife"
+            }
+          },
+          {
+            label: "🕵️ Dùng Kế 'Tương Kế Tựu Kế' Của Ojamon & Pussiri Bắt Sống Phe Phản Loạn",
+            hint: "+2,500 Credits • +200 Nghiên cứu • Không tốn xương máu quân đoàn Gandora",
+            effects: (g) => {
+              g.addRes(g.playerFaction, "credits", 2500);
+              g.addRes(g.playerFaction, "research", 200);
+              g.addAffinity("ojamon", 20);
+              g.addAffinity("pussiri", 20);
+            },
+            next: "ch14_spy_trap"
+          },
+          {
+            label: "🔥 Hậu Thuẫn Cuộc Cải Tổ Quyền Lực Tại Kronea (Đấu Thử Thách Arisia)",
+            hint: "Thách thức trực diện quyền uy Sylvalon Supreme trên bàn đấu 3 làn",
+            battle: {
+              playerId: "__PROTAGONIST__",
+              enemyId: "arisia",
+              stageId: "sylvalon",
+              winNext: "ch14_new_order",
+              loseNext: "ch14_coup_crushed"
+            }
+          }
+        ]
+      },
+      ch14_coup_crushed: {
+        sector: "sylvalon",
+        leftChar: "arisia", rightChar: "veidos", leftMood: "smug", rightMood: "happy",
+        speaker: "arisia",
+        text: "\"Khi hạm đội Ixalcienkorps của Veidos xuất hiện trên bầu trời Kronea, toàn bộ đám phản loạn của Carnavex đã buông vũ khí trong vòng mười phút. Từ hôm nay, danh dự của Border Division được khắc lên bia vàng Đế chế!\"",
+        effects: (g) => {
+          g.cardDust = (g.cardDust || 0) + 75;
+          g.unlockCard("veidos", 1);
+        },
+        end: {
+          title: "CHƯƠNG XIV HOÀN TẤT: LÁ CHẮN THÉP KRONEA",
+          summary: "Mở khóa thẻ bài Tướng Veidos + 75 Mảnh Gen! Tiến vào Chương XV: Huyết Lệ Chị Em Prozonian.",
+          nextChapter: "ch15_predita_sisters"
+        }
+      },
+      ch14_spy_trap: {
+        sector: "sylvalon",
+        leftChar: "ojamon", rightChar: "pussiri", leftMood: "smug", rightMood: "happy",
+        speaker: "ojamon",
+        text: "\"Một cái bẫy thông tin hoàn hảo! Carnavex tự nộp toàn bộ danh sách tài khoản ngầm cho chúng ta trước khi kịp rút gươm. Kho ngân khố Kronea vừa thu hồi một khoản chiến phí khổng lồ!\"",
+        end: {
+          title: "CHƯƠNG XIV HOÀN TẤT: BẬC THẦY TÌNH BÁO",
+          summary: "+2,500 Credits & +200 Nghiên cứu! Tiếp tục Chương XV: Huyết Lệ Chị Em Prozonian.",
+          nextChapter: "ch15_predita_sisters"
+        }
+      },
+      ch14_new_order: {
+        sector: "sylvalon",
+        leftChar: "__PROTAGONIST__", rightChar: "arisia", leftMood: "smug", rightMood: "tense",
+        speaker: "arisia",
+        text: (g) => `"Khá lắm, ${g.getProtagonist().name}! Ngươi chứng minh được thực lực ngay tại điện chính Kronea. Ta chấp nhận cải tổ Hội đồng Hoàng gia và chia sẻ quyền điều động hạm đội cùng ngươi!"`,
+        effects: (g) => {
+          g.addRes(g.playerFaction, "influence", 250);
+          g.cardDust = (g.cardDust || 0) + 90;
+        },
+        end: {
+          title: "CHƯƠNG XIV HOÀN TẤT: TÂN HIẾN PHÁP KRONEA",
+          summary: "+250 Ảnh hưởng & +90 Mảnh Gen! Tiến sang Chương XV: Huyết Lệ Chị Em Prozonian.",
+          nextChapter: "ch15_predita_sisters"
+        }
+      },
+      ch14_civil_strife: {
+        sector: "sylvalon",
+        leftChar: "arisia", rightChar: "ojamon", leftMood: "tense", rightMood: "tense",
+        speaker: "ojamon",
+        text: "\"Dù cuộc giao tranh để lại nhiều vết rạn trong Thượng viện, Vệ binh Hoàng gia đã kịp thời khóa chặt các cửa ngõ Kronea. Nhưng ở phương Nam, chiến tuyến Predita và Salvic Union đang dậy sóng!\"",
+        end: {
+          title: "CHƯƠNG XIV HOÀN TẤT: DƯ CHẤN HOÀNG CUNG",
+          summary: "Tiếp tục hành trình tại Chương XV: Huyết Lệ Chị Em Prozonian.",
+          nextChapter: "ch15_predita_sisters"
+        }
+      }
+    }
+  },
+  {
+    id: "ch15_predita_sisters",
+    num: "CHƯƠNG XV",
+    title: "Huyết Lệ Chị Em Prozonian — Elita, Hyouya & Phép Màu Predita",
+    subtitle: "Pháo Đài Predita (Salvic Union) ↔ Thành Trì Nadirius",
+    sector: "predita",
+    leadChar: "zarcseid",
+    summary: "Mười năm trước, 500 triệu chiến binh Prozonian dưới trướng Tướng Zarcseid đã tử thủ tại Predita trước sự hủy diệt hoàn toàn. Nay hai chị em ruột dòng dõi Prozonian — Elita (Salvic Union) và Hyouya (Đế chế Nadirius) — buộc phải đối mặt nhau giữa ranh giới máu và nước mắt.",
+    nodes: {
+      start: {
+        sector: "predita",
+        leftChar: "zarcseid", rightChar: "elita", leftMood: "tense", rightMood: "tense",
+        speaker: "zarcseid",
+        text: "\"Mười năm bị vây hãm ở Predita, chúng ta ăn lương khô nhiễm xạ và đếm từng người đồng đội ngã xuống để giữ lấy ngọn lửa Prozonian cuối cùng. Elita, hôm nay hạm đội tuần tiễu của Nadirius áp sát biên giới — và người dẫn đầu lại chính là em gái cô, Hyouya.\"",
+        next: "ch15_sisters_meet"
+      },
+      ch15_sisters_meet: {
+        sector: "predita",
+        leftChar: "elita", rightChar: "hyouya", leftMood: "tense", rightMood: "tense",
+        speaker: "hyouya",
+        text: "\"Chị Elita... Em không tới đây để nổ súng vào đồng bào mình! Bệ hạ Magnatere cử em mang mật thư cảnh báo: nếu Salvic Union và Nadirius không lập tức nối lại đường dây phòng thủ chung, quân đoàn ký sinh Natheron từ Vực Thẳm sẽ đánh úp cả hai bên!\"",
+        next: "ch15_brigitte_intervene"
+      },
+      ch15_brigitte_intervene: {
+        sector: "predita",
+        leftChar: "brigitte", rightChar: "zarcseid", leftMood: "secret", rightMood: "neutral",
+        speaker: "brigitte",
+        text: "\"Tướng Zarcseid, dù tôi mang quân hàm Sylvarian, tôi đã bí mật chuyển bản đồ radar biên khu cho ngài vì lòng kính trọng. Nhưng các sĩ quan cực đoan trong quân đoàn đòi một trận tỉ thí danh dự trước khi mở cổng liên minh!\"",
+        choices: [
+          {
+            label: "⚔️ Tỉ Thí Danh Dự Chị Em: Elita & Zarcseid vs. Hyouya & Magnatere",
+            hint: "Đấu Thẻ Bài Chiến Thuật • Dùng thực lực chứng minh ý chí thống nhất dòng máu Prozonian",
+            effects: (g) => {
+              g.addAffinity("elita", 20);
+              g.addAffinity("hyouya", 20);
+              g.addAffinity("zarcseid", 18);
+            },
+            battle: {
+              playerId: "__PROTAGONIST__",
+              enemyId: "hyouya",
+              stageId: "predita",
+              winNext: "ch15_sisters_reconcile",
+              loseNext: "ch15_sisters_reconcile"
+            }
+          },
+          {
+            label: "🤝 Đứng Ra Bảo Chứng Hòa Ước Huynh Đệ Salvic — Nadirius",
+            hint: "+25 Quan hệ Salvic ↔ Nadirius • +300 Ảnh hưởng • Mở khóa tiếp viện Brigitte",
+            effects: (g) => {
+              g.addRelation("salvic", "nadirius", 25);
+              g.addRes(g.playerFaction, "influence", 300);
+              g.addAffinity("brigitte", 22);
+              g.addAffinity("magnatere", 15);
+            },
+            next: "ch15_sisters_reconcile"
+          }
+        ]
+      },
+      ch15_sisters_reconcile: {
+        sector: "predita",
+        leftChar: "elita", rightChar: "hyouya", leftMood: "happy", rightMood: "happy",
+        speaker: "elita",
+        text: "\"Dù khoác quân phục Salvic hay Nadirius, máu chảy trong huyết quản chúng ta mãi mãi là kiêu hãnh Prozonian! Cảm ơn người đã giúp hai chị em tôi không phải chĩa kiếm vào nhau thêm một lần nào nữa.\"",
+        effects: (g) => {
+          g.unlockCard("elita", 1);
+          g.unlockCard("hyouya", 1);
+          g.cardDust = (g.cardDust || 0) + 70;
+        },
+        end: {
+          title: "CHƯƠNG XV HOÀN TẤT: ĐOÀN TỤ DÒNG MÁU PROZONIAN",
+          summary: "Nhận thẻ bài Elita & Hyouya + 70 Mảnh Gen! Mở khóa Chương XVI: Đêm Dài Evernight.",
+          nextChapter: "ch16_evernight_noir"
+        }
+      }
+    }
+  },
+  {
+    id: "ch16_evernight_noir",
+    num: "CHƯƠNG XVI",
+    title: "Đêm Dài Evernight — The Supers Đột Kích Chợ Đen Collectors",
+    subtitle: "Đô Thị Ngầm Vander → Tháp Neon Tokyzhou",
+    sector: "evernight",
+    leadChar: "felicia",
+    summary: "Tại hành tinh không bao giờ thấy ánh mặt trời Evernight, tổ chức The Collectors dưới sự điều hành của Mr. Mind và tỷ phú Bill đang bí mật đấu giá các mẫu vật đột biến Wombiote cùng lọ Serum Pregnomorph. Felicia và AI Bernice phát động chiến dịch giải cứu.",
+    nodes: {
+      start: {
+        sector: "evernight",
+        leftChar: "felicia", rightChar: "bill", leftMood: "combat", rightMood: "smug",
+        speaker: "felicia",
+        text: "\"Bernice, khóa mục tiêu tầng 88 tháp Tokyzhou! Bill và Mr. Mind đang giam giữ hàng chục chiến binh đột biến trong các lồng năng lượng để ép trích xuất gen Hàng 2 bán cho giới tài phiệt ngân hà!\"",
+        next: "ch16_bill_offer"
+      },
+      ch16_bill_offer: {
+        sector: "evernight",
+        leftChar: "bill", rightChar: "felicia", leftMood: "smug", rightMood: "angry",
+        speaker: "bill",
+        text: "\"Bình tĩnh nào quý cô Felicia! Trong kỷ nguyên cá lớn nuốt cá bé này, Serum Pregnomorph của tôi là thứ duy nhất giúp những chủng tộc yếu ớt như con người thoát khỏi kiếp bị nghiền nát trên bàn cờ CR! Mọi thứ ở Vander đều có giá của nó cả thôi.\"",
+        choices: [
+          {
+            label: "⚡ Cùng Felicia & The Supers Đánh Sập Đấu Trường Ngầm Của Collectors!",
+            hint: "Đấu Thẻ Bài vs. Bill / Collectors • Giải phóng mẫu vật & thu giữ kho Mảnh Gen",
+            effects: (g) => {
+              g.addAffinity("felicia", 25);
+              g.setFlag("ch16_raided_collectors", true);
+            },
+            battle: {
+              playerId: "__PROTAGONIST__",
+              enemyId: "bill",
+              stageId: "evernight",
+              winNext: "ch16_supers_triumph",
+              loseNext: "ch16_underground_deal"
+            }
+          },
+          {
+            label: "💉 Thu Mua Toàn Bộ Lô Huyết Thanh Pregnomorph & Dữ Liệu Wombiote",
+            hint: "+350 Nghiên cứu • +90 Mảnh Gen • Nâng cấp sức mạnh sinh sản Hàng 2 cho đội hình",
+            effects: (g) => {
+              g.addRes(g.playerFaction, "research", 350);
+              g.cardDust = (g.cardDust || 0) + 90;
+              g.addAffinity("bill", 18);
+            },
+            next: "ch16_underground_deal"
+          }
+        ]
+      },
+      ch16_supers_triumph: {
+        sector: "evernight",
+        leftChar: "felicia", rightChar: "__PROTAGONIST__", leftMood: "happy", rightMood: "smug",
+        speaker: "felicia",
+        text: (g) => `"AI Bernice báo cáo: toàn bộ lồng giam tại Tokyzhou đã mở khóa! ${g.getProtagonist().name}, nhờ chiến thuật thẻ bài của ngươi mà người dân Evernight lại nhìn thấy hy vọng giữa màn đêm vĩnh cửu!"`,
+        effects: (g) => {
+          g.unlockCard("felicia", 1);
+          g.addRes(g.playerFaction, "credits", 2400);
+          g.cardDust = (g.cardDust || 0) + 80;
+        },
+        end: {
+          title: "CHƯƠNG XVI HOÀN TẤT: ANH HÙNG ĐÊM EVERNIGHT",
+          summary: "Nhận thẻ Felicia + 2,400 Credits + 80 Mảnh Gen! Tiến vào Chương XVII: Khế Ước Mẫu Thần Vực Thẳm.",
+          nextChapter: "ch17_impregnita_brood"
+        }
+      },
+      ch16_underground_deal: {
+        sector: "evernight",
+        leftChar: "bill", rightChar: "felicia", leftMood: "happy", rightMood: "tense",
+        speaker: "bill",
+        text: "\"Làm ăn với người hiểu chuyện thật sảng khoái! Toàn bộ công thức điều chế tăng tỷ lệ sinh Token Hàng 2 và lô Mảnh Gen tinh khiết đã được chuyển thẳng vào kho chiến lược của ngài.\"",
+        end: {
+          title: "CHƯƠNG XVI HOÀN TẤT: THƯƠNG VỤ BÓNG ĐÊM",
+          summary: "+350 Nghiên cứu & +90 Mảnh Gen! Mở khóa Chương XVII: Khế Ước Mẫu Thần Vực Thẳm.",
+          nextChapter: "ch17_impregnita_brood"
+        }
+      }
+    }
+  },
+  {
+    id: "ch17_impregnita_brood",
+    num: "CHƯƠNG XVII",
+    title: "Khế Ước Mẫu Thần Impregnita & Cuộc Đào Thoát Của Meralina",
+    subtitle: "Thánh Điện Vực Thẳm Tây ↔ Ẩn Cư Pherone Nexus",
+    sector: "western_abyss",
+    leadChar: "meralina",
+    summary: "Sâu trong lõi Western Abyss, thực thể nguyên thủy Impregnita thức giấc, hé lộ nguồn gốc vì sao cuộc chiến giữa Nam (♂) và Nữ (♀) trên Hàng 1 lại dẫn tới quy luật Bắt Giữ & Lai Tạo ở Hàng 2. Meralina Caranter và con trai Ragnaroir đứng trước thử thách định mệnh.",
+    nodes: {
+      start: {
+        sector: "western_abyss",
+        leftChar: "meralina", rightChar: "ragnaroir", leftMood: "tense", rightMood: "combat",
+        speaker: "meralina",
+        text: "\"Ragnaroir, đứng sát bên mẹ! Tiếng vọng từ vực sâu Impregnita đang lay động huyết mạch của mọi sinh vật mang dòng máu lai Nadir. Đó chính là cội nguồn của quy luật Sinh Sản Chiến Tranh trong Kỷ 12 này!\"",
+        next: "ch17_tsunadia_revelation"
+      },
+      ch17_tsunadia_revelation: {
+        sector: "western_abyss",
+        leftChar: "tsunadia", rightChar: "meralina", leftMood: "smug", rightMood: "angry",
+        speaker: "tsunadia",
+        text: "\"Công chúa Meralina, dù cô có nhuộm tóc đen trốn ở Pherone Nexus thì cũng không chối bỏ được sự thật: chính đứa con lai Ragnaroir của cô là minh chứng sống động nhất cho sức mạnh Hàng 2! Khi hai huyết thống va chạm, kẻ mạnh hơn sẽ hợp nhất gen để sinh ra thế hệ chiến binh vượt trội!\"",
+        choices: [
+          {
+            label: "⚔️ Sát Cánh Cùng Meralina & Ragnaroir Đánh Bại Hạm Đội Truy Kích Vực Thẳm",
+            hint: "Đấu Thẻ Bài vs. Tsunadia • Khẳng định quyền tự quyết của Meralina & dòng máu Lai",
+            effects: (g) => {
+              g.addAffinity("meralina", 25);
+              g.addAffinity("ragnaroir", 25);
+            },
+            battle: {
+              playerId: "__PROTAGONIST__",
+              enemyId: "tsunadia",
+              stageId: "western_abyss",
+              winNext: "ch17_freedom_won",
+              loseNext: "ch17_abyss_pact"
+            }
+          },
+          {
+            label: "🧬 Tiếp Nhận Phước Lành Nguyên Thủy Của Impregnita & Tsunadia",
+            hint: "+100 Mảnh Gen • +300 Nghiên cứu • Mở khóa thẻ bài Ragnaroir & Tsunadia",
+            effects: (g) => {
+              g.cardDust = (g.cardDust || 0) + 100;
+              g.addRes(g.playerFaction, "research", 300);
+              g.unlockCard("tsunadia", 1);
+              g.unlockCard("ragnaroir", 1);
+            },
+            next: "ch17_abyss_pact"
+          }
+        ]
+      },
+      ch17_freedom_won: {
+        sector: "earth_sol",
+        leftChar: "meralina", rightChar: "ragnaroir", leftMood: "happy", rightMood: "happy",
+        speaker: "meralina",
+        text: (g) => `"Không một thế lực nào — dù là Hoàng gia Kronea hay Mẫu thần Vực Thẳm — có quyền định đoạt số phận mẹ con ta nữa! ${g.getProtagonist().name}, thanh gươm của Meralina và móng vuốt Ragnaroir nguyện chiến đấu trong bộ bài của ngươi tới tận cùng!"`,
+        effects: (g) => {
+          g.unlockCard("meralina", 1);
+          g.unlockCard("ragnaroir", 1);
+          g.cardDust = (g.cardDust || 0) + 90;
+        },
+        end: {
+          title: "CHƯƠNG XVII HOÀN TẤT: KHÚC CA TỰ DO",
+          summary: "Mở khóa thẻ Meralina & Ragnaroir + 90 Mảnh Gen! Tiến vào Chương Kết XVIII: Giải Đấu Tuyệt Đỉnh Gaiastra!",
+          nextChapter: "ch18_cosmic_grand_prix"
+        }
+      },
+      ch17_abyss_pact: {
+        sector: "western_abyss",
+        leftChar: "tsunadia", rightChar: "ragnaroir", leftMood: "happy", rightMood: "smug",
+        speaker: "tsunadia",
+        text: "\"Sự cộng hưởng giữa các chủng tộc đã đạt tới cảnh giới tối thượng. Giờ thì hãy mang bộ bài mạnh nhất của ngươi tới Đấu Trường Tuyệt Đỉnh Gaiastra — nơi 8 Thủ Lĩnh Tối Cao đang chờ đợi!\"",
+        end: {
+          title: "CHƯƠNG XVII HOÀN TẤT: CỘNG HƯỞNG HUYẾT THỐNG",
+          summary: "+100 Mảnh Gen & thẻ Ragnaroir/Tsunadia! Mở khóa Chương XVIII: Giải Đấu Tuyệt Đỉnh Gaiastra!",
+          nextChapter: "ch18_cosmic_grand_prix"
+        }
+      }
+    }
+  },
+  {
+    id: "ch18_cosmic_grand_prix",
+    num: "CHƯƠNG XVIII",
+    title: "Giải Đấu Tuyệt Đỉnh Gaiastra — Cosmic TCG Grand Prix",
+    subtitle: "Đấu Trường Quỹ Đạo Trung Lập • Đại Hội Võ Lâm Thẻ Bài 8 Phe",
+    sector: "outer_layer",
+    leadChar: "__PROTAGONIST__",
+    summary: "Để tránh một cuộc chiến hủy diệt kích hoạt Reset lần thứ 13, toàn bộ 8 Phe Phái đồng thuận tổ chức 'Giải Đấu Tuyệt Đỉnh Gaiastra' (Cosmic TCG Grand Prix) trên Bàn Đấu 3 Hàng. Kẻ chiến thắng giải đấu sẽ nắm giữ Vương Quyền Tối Thượng của Chu Kỳ Mới!",
+    nodes: {
+      start: {
+        sector: "outer_layer",
+        leftChar: "__PROTAGONIST__", rightChar: "mina", leftMood: "combat", rightMood: "happy",
+        speaker: "mina",
+        text: (g) => `"Xin chào toàn thể cư dân từ 20 hệ sao! Tôi là Mina Lascivana, tường thuật trực tiếp từ Đấu Trường Quỹ Đạo Trung Lập! Hôm nay, ${g.getProtagonist().name} sẽ bước vào vòng Chung Kết Liên Ngân Hà để tranh ngôi Vô Địch TCG Chu Kỳ 12!"`,
+        next: "ch18_round1"
+      },
+      ch18_round1: {
+        sector: "outer_layer",
+        leftChar: "zarcseid", rightChar: "magnatere", leftMood: "combat", rightMood: "combat",
+        speaker: "magnatere",
+        text: "\"Tại đấu trường này, chỉ có chiến thuật sử dụng Năng lượng Gen ⚡, khả năng phán đoán 3 Làn và nghệ thuật vận hành Hàng 1 – Hàng 2 – Hàng 3 mới quyết định ai xứng đáng là Bá Chủ! Hãy chọn đối thủ Chung Kết của ngươi!\"",
+        choices: [
+          {
+            label: "🏆 Nhánh Bá Vương Chiến Tranh: Quyết Đấu Hoàng Đế Magnatere (CR 1001)",
+            hint: "Trận Chung Kết Nhánh Võ Thần • Thưởng +4,000 Credits & +120 Mảnh Gen",
+            battle: {
+              playerId: "__PROTAGONIST__",
+              enemyId: "magnatere",
+              stageId: "outer_layer",
+              winNext: "ch18_grand_champion",
+              loseNext: "ch18_honorable_finalist"
+            }
+          },
+          {
+            label: "👑 Nhánh Nữ Hoàng Tối Cao: Quyết Đấu Arisia Grok (CR 1001)",
+            hint: "Trận Chung Kết Nhánh Đế Chế • Thưởng +4,000 Credits & +120 Mảnh Gen",
+            battle: {
+              playerId: "__PROTAGONIST__",
+              enemyId: "arisia",
+              stageId: "outer_layer",
+              winNext: "ch18_grand_champion",
+              loseNext: "ch18_honorable_finalist"
+            }
+          },
+          {
+            label: "💗 Nhánh Thánh Mẫu Huyết Thống: Quyết Đấu Nữ Vương Ovalina (CR 2000)",
+            hint: "Trận Siêu Chung Kết Khó Nhất Game • Thưởng +6,000 Credits, +180 Mảnh Gen & Nâng Cấp ★",
+            battle: {
+              playerId: "__PROTAGONIST__",
+              enemyId: "ovalina",
+              stageId: "earth_sol",
+              winNext: "ch18_grand_champion",
+              loseNext: "ch18_honorable_finalist"
+            }
+          }
+        ]
+      },
+      ch18_grand_champion: {
+        sector: "outer_layer",
+        leftChar: "__PROTAGONIST__", rightChar: "emma", leftMood: "smug", rightMood: "happy",
+        speaker: "emma",
+        text: (g) => `"Toàn bộ khán đài 20 hệ sao đang vỡ òa! ${g.getProtagonist().name} chính thức đăng quang QUÁN QUÂN GIẢI ĐẤU TUYỆT ĐỈNH GAIASTRA! Thẻ bài Thủ lĩnh của ngươi vừa được khắc ấn Tinh Anh Hoàng Kim!"`,
+        effects: (g) => {
+          g.addRes(g.playerFaction, "credits", 6000);
+          g.addRes(g.playerFaction, "influence", 350);
+          g.cardDust = (g.cardDust || 0) + 180;
+          if (typeof g.upgradeCardStar === "function") {
+            g.upgradeCardStar(g.protagonistId, true);
+          }
+        },
+        end: {
+          title: "🏆 QUÁN QUÂN TCG TOÀN VŨ TRỤ — ĐẠI HOÀN MỸ 19 CHƯƠNG!",
+          summary: "+6,000 Credits, +350 Ảnh hưởng, +180 Mảnh Gen & Tăng +1★ Tinh Anh cho Thủ lĩnh của bạn!"
+        }
+      },
+      ch18_honorable_finalist: {
+        sector: "outer_layer",
+        leftChar: "__PROTAGONIST__", rightChar: "mina", leftMood: "happy", rightMood: "happy",
+        speaker: "mina",
+        text: (g) => `"Một trận chung kết nghẹt thở tới giây cuối cùng! Dù chưa bước lên ngôi vị cao nhất hôm nay, ${g.getProtagonist().name} vẫn nhận được sự tôn kính tuyệt đối của toàn bộ 8 Phe Phái cùng phần thưởng Á Quân danh giá!"`,
+        effects: (g) => {
+          g.addRes(g.playerFaction, "credits", 2500);
+          g.cardDust = (g.cardDust || 0) + 90;
+        },
+        end: {
+          title: "🥈 Á QUÂN GIẢI ĐẤU TUYỆT ĐỈNH GAIASTRA",
+          summary: "+2,500 Credits & +90 Mảnh Gen! Bạn có thể Cường Hóa ★ thẻ bài và tái đấu bất cứ lúc nào!"
         }
       }
     }
@@ -1623,6 +2186,16 @@ export function buildEncounterScene(charId, gameState) {
             next: "enc_deal"
           },
           {
+            label: `📖 Mở Cốt Truyện Tâm Sự Riêng & Thề Ước Huyết Thống (${c.name})`,
+            hint: `Khám phá chiều sâu nội tâm • Mở khóa Thẻ Bài ${c.name}, +45 Mảnh Gen & +1★ Tinh Anh (khi Tin cậy >= 50)`,
+            effects: (g) => {
+              g.addAffinity(c.id, 16);
+              g.cardDust = (g.cardDust || 0) + 45;
+              if (typeof g.unlockCard === "function") g.unlockCard(c.id, 1);
+            },
+            next: "enc_bond_1"
+          },
+          {
             label: `⚔️ Thách đấu Thẻ Bài (Bắt & Lai Hàng 2) với ${c.name}!`,
             hint: `Đấu Thẻ Bài 3 Hàng: ${CHAR_BY_ID[playerCharId]?.name || "Tướng"} vs ${c.name} (CR ${c.cr})`,
             battle: {
@@ -1639,6 +2212,66 @@ export function buildEncounterScene(charId, gameState) {
             next: "enc_bye"
           }
         ]
+      },
+      enc_bond_1: {
+        sector: sectorId,
+        leftChar: playerCharId,
+        rightChar: c.id,
+        leftMood: "neutral",
+        rightMood: "secret",
+        speaker: c.id,
+        text: (g) => {
+          const aff = g.getAffinity(c.id);
+          return `"Ít ai ở ${loc ? loc.label : "Gaiastra"} này hỏi ta thật sự nghĩ gì sau ánh hào quang CR ${c.cr}. Là một ${c.species} thuộc ${fac.name}, mỗi trận chiến trên Hàng 1 và mỗi lần chứng kiến dòng máu lai sinh ra từ Hàng 2 đều nhắc ta rằng: trong Chu Kỳ 12, kẻ đứng một mình sớm muộn cũng bị lịch sử xóa sổ." (Độ tin cậy: ${aff}/100)`;
+        },
+        next: "enc_bond_2"
+      },
+      enc_bond_2: {
+        sector: sectorId,
+        leftChar: playerCharId,
+        rightChar: c.id,
+        leftMood: "happy",
+        rightMood: "happy",
+        speaker: c.id,
+        text: (g) => {
+          const heroName = g.getProtagonist()?.name || "bạn";
+          return `"${c.bio || "Ta đã đi qua vô số chiến trường từ sau cuộc Đại Chiến Uniwar."} Nhưng khi đứng cạnh ${heroName}, ta cảm nhận được một trật tự hoàn toàn mới. Dù sắp tới là pháo Gotterfall hay Khe Nứt Vực Thẳm, thẻ bài và sinh mệnh của ${c.name} sẽ luôn sát cánh cùng ngươi!"`;
+        },
+        choices: [
+          {
+            label: `🌟 Lập Thề Ước Tinh Anh Cùng ${c.name} (Cường Hóa +1★ Thẻ Bài)`,
+            hint: "Tăng +1★ Tinh Anh cho thẻ bài nhân vật này & +100 Ảnh hưởng",
+            effects: (g) => {
+              g.addAffinity(c.id, 15);
+              g.addRes(g.playerFaction, "influence", 100);
+              if (typeof g.upgradeCardStar === "function") {
+                g.upgradeCardStar(c.id, true);
+              }
+            },
+            next: "enc_bond_vow"
+          },
+          {
+            label: "🤝 Ghi Nhận Tâm Sự & Nhận Thẻ Bài Chiến Thuật",
+            hint: "+300 Credits • Đã thêm thẻ bài vào Kho Thẻ",
+            effects: (g) => {
+              g.addRes(g.playerFaction, "credits", 300);
+            },
+            next: "enc_lore"
+          }
+        ]
+      },
+      enc_bond_vow: {
+        sector: sectorId,
+        leftChar: playerCharId,
+        rightChar: c.id,
+        leftMood: "smug",
+        rightMood: "happy",
+        speaker: c.id,
+        text: (g) => `"Khế ước huyết thống và danh dự giữa ta với ${g.getProtagonist()?.name || "ngươi"} đã hoàn tất! Hãy nhìn xem — thẻ bài của ${c.name} vừa thức tỉnh hào quang Tinh Anh ★ mới trên bàn đấu!"`,
+        end: {
+          title: `🌟 THỀ ƯỚC TINH ANH: ${c.name.toUpperCase()}`,
+          summary: `Đã mở khóa Thẻ Bài ${c.name}, +45 Mảnh Gen, +100 Ảnh hưởng & Cường Hóa +1★ Tinh Anh!`
+        }
       },
       enc_lore: {
         sector: sectorId,

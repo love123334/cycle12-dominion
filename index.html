@@ -64,6 +64,7 @@
         <select id="vn-chapter-select" aria-label="Chọn chương cốt truyện"></select>
       </div>
       <div class="vn-controls">
+        <button class="btn-primary btn-compact" id="btn-vn-chapter-map" title="Xem toàn cảnh 19 Chương Sử Thi, nhánh lựa chọn & độ thân mật nhân vật">🗺️ Sơ Đồ 19 Chương</button>
         <button class="btn-accent btn-compact" id="btn-vn-ai-expand" title="Dùng AI viết tiếp nhánh truyện / đối thoại sâu theo góc nhìn của bạn">✨ Mở Rộng AI</button>
         <button class="btn-gold btn-compact" id="btn-play-cutscene" title="Xem phim hoạt cảnh lịch sử vũ trụ">🎬 Sử Thi</button>
         <button class="btn-glass btn-compact" id="btn-open-protagonist" title="Chọn nhân vật bất kỳ làm Nhân vật chính">🎭 Đổi Tướng</button>
@@ -73,7 +74,10 @@
       </div>
     </div>
 
-    <div class="vn-location-pill" id="vn-location-pill">📍 Hệ Sylvalon</div>
+    <div class="vn-meta-strip">
+      <div class="vn-location-pill" id="vn-location-pill">📍 Hệ Sylvalon</div>
+      <div class="vn-chronicle-pill" id="vn-story-chronicle-pill">📜 Tiến độ: 0/19 Chương • Hiệp ước Cursew: Hiệu lực</div>
+    </div>
     <div class="vn-chapter-banner hidden" id="vn-chapter-banner"></div>
 
     <div class="vn-stage-bottom">
@@ -121,6 +125,7 @@
         <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
           <button class="btn-glass active" data-dtab="skirmish">⚔️ Đấu Trường Snap × Yu-Gi-Oh</button>
           <button class="btn-glass" data-dtab="gauntlet">🗼 Tháp Hư Không</button>
+          <button class="btn-glass" data-dtab="draft">🎲 Draft &amp; Nhiệm Vụ</button>
           <button class="btn-glass" data-dtab="deck">🗂️ Tạo &amp; Xếp Deck (<span id="deck-count-badge">16</span>/16)</button>
           <button class="btn-glass" data-dtab="shop">🛒 Chợ &amp; Gói Thẻ</button>
           <button type="button" class="btn-glass btn-compact" id="btn-duel-sfx-toggle" title="Bật / Tắt âm thanh chiến đấu">🔊 Âm Thanh</button>
@@ -250,6 +255,8 @@
             <span class="badge energy-orb-pill" id="duel-energy-badge" title="Năng lượng Gen hiện tại (+1⚡ mỗi lượt, tối đa 8⚡)">⚡ 3/8 Năng Lượng</span>
             <button class="btn-gold btn-clash-orb" id="btn-resolve-clash">⚔️ GIAO CHIẾN</button>
             <div class="tcg-dock-subbtns">
+              <button type="button" class="btn-glass btn-compact" id="btn-mulligan-duel" title="Đổi bài khởi đầu (Lượt 1 trước khi đặt thẻ: xáo lại tay bài & rút 4 lá mới)">🔄 Đổi Bài</button>
+              <button type="button" class="btn-accent btn-compact" id="btn-tactical-directive" title="Phát động Chỉ Thị Chiến Thuật tức thời (Khiên Quang Năng 1⚡ / Đột Biến 2⚡ / Giải Cứu 2⚡)">⚡ Chỉ Thị</button>
               <button type="button" class="btn-glass btn-compact" id="btn-undo-duel" disabled title="Hoàn tác thao tác trong lượt trước khi Giao Chiến">↩️ Hoàn Tác</button>
               <button type="button" class="btn-glass btn-compact" id="btn-open-duel-log" title="Xem toàn bộ nhật ký giao chiến &amp; lai tạo">📜 Nhật Ký</button>
             </div>
@@ -283,6 +290,7 @@
         <div class="faction-rule-banner" id="deck-faction-rule">
           📜 Luật Phe Phái: Chỉ sử dụng thẻ cùng phe với Thủ lĩnh đại diện và nằm trong Kho Thẻ Đã Sở Hữu.
         </div>
+        <div id="deck-analytics-bar" class="deck-analytics-bar"></div>
         <div class="deck-toolbar">
           <strong style="color:var(--gold);">🗂️ Bộ Bài Đang Dùng (<span id="deck-active-count-text">16</span>/16 lá — Bấm 🔍 để Zoom Đọc, ✕ để Gỡ)</strong>
           <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
@@ -331,6 +339,16 @@
           </div>
         </div>
         <div id="shop-cards-grid" class="shop-cards-grid"></div>
+      </div>
+
+      <!-- v13.0: DRAFT ARENA (3-PICK-1 CROSS-FACTION) & TCG QUESTS HUB -->
+      <div id="duel-draft-view" class="duel-shop-panel hidden">
+        <div class="draft-arena-panel" id="draft-arena-panel"></div>
+        <div class="deck-toolbar" style="margin-top:12px;">
+          <strong style="color:var(--gold);">🎯 Nhiệm Vụ Chiến Thuật TCG &amp; Phần Thưởng Tinh Anh</strong>
+          <span class="muted" style="font-size:11px;">Hoàn thành mục tiêu đấu bài &amp; cốt truyện để nhận Credits + Mảnh Gen cường hóa ★!</span>
+        </div>
+        <div id="tcg-quests-grid" class="tcg-quests-grid"></div>
       </div>
     </div>
   </section>
@@ -471,6 +489,20 @@
         <button class="btn-danger btn-compact" id="btn-close-vn-history">✕ Đóng</button>
       </div>
       <div id="vn-history-list" class="vn-history-list"></div>
+    </div>
+  </div>
+
+  <!-- v13.0: 19-CHAPTER STORY ATLAS & COMPANION BOND MODAL -->
+  <div id="vn-chapter-map-modal" class="modal-overlay hidden">
+    <div class="modal-card" style="max-width:860px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--panel-border); padding-bottom:10px; gap:8px;">
+        <div>
+          <h3 style="color:var(--gold); margin:0;">🗺️ Bản Đồ Sử Thi 19 Chương &amp; Tuyến Thân Mật Nhân Vật</h3>
+          <div class="muted" style="font-size:11.5px;">Chọn bất kỳ chương nào để đọc/chơi lại, hoặc mở nhanh Cốt Truyện Tâm Sự của từng nhân vật</div>
+        </div>
+        <button type="button" class="btn-danger btn-compact" id="btn-close-vn-chapter-map">✕ Đóng</button>
+      </div>
+      <div id="vn-chapter-map-body" style="display:flex; flex-direction:column; gap:12px; margin-top:10px; max-height:72dvh; overflow-y:auto; padding-right:4px;"></div>
     </div>
   </div>
 

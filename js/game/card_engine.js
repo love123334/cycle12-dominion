@@ -170,12 +170,46 @@ export function resolveLanePair(pCard, eCard, pEval, eEval, laneIdx = 0) {
   };
 }
 
-function makeInstance(card, ownerSide, uidNum) {
+export const TACTICAL_DIRECTIVES = [
+  {
+    id: "shield_matrix",
+    name: "Khiên Quang Năng",
+    icon: "🛡️",
+    cost: 1,
+    desc: "1⚡: Cấp Khiên Chặn Thua (🛡️) cho các thẻ Hàng 1 của bạn (hoặc +60 CR nếu đã có Khiên)."
+  },
+  {
+    id: "mutagen_burst",
+    name: "Xung Kích Đột Biến",
+    icon: "🧬",
+    cost: 2,
+    desc: "2⚡: +90 CR toàn Hàng 1 lượt này & kích hoạt ngay 1 đợt Lai Tạo Sớm Hàng 2 → Hàng 1 (hoặc Rút +1 lá)."
+  },
+  {
+    id: "tactical_rescue",
+    name: "Giải Cứu Tác Chiến",
+    icon: "🔓",
+    cost: 2,
+    desc: "2⚡: Giải cứu 1 thẻ của bạn từ Hàng 2 Địch về tay (giảm 1 điểm bắt của Địch), hoặc Rút +2 lá nếu H2 Địch trống."
+  }
+];
+
+function makeInstance(card, ownerSide, uidNum, gameStateRef = null) {
   const h1Keywords = [...(card.h1Keywords || card.row1Effect?.keywords || [])];
   const h2Keywords = [...(card.h2Keywords || card.row2Effect?.keywords || ["spawn_token"])];
   const cost = typeof card.cost === "number" ? card.cost : getCardEnergyCost(card.cr, card.isToken);
+  const starLevel = (ownerSide === "player" && gameStateRef && typeof gameStateRef.getCardStarLevel === "function")
+    ? gameStateRef.getCardStarLevel(card.id)
+    : (card.starLevel || 0);
+  const starBonusCR = (starLevel > 0 && gameStateRef && typeof gameStateRef.getCardStarBonusCR === "function")
+    ? gameStateRef.getCardStarBonusCR(card.cr, starLevel)
+    : 0;
   return {
     ...card,
+    baseOriginCR: card.cr,
+    cr: (card.cr || 100) + starBonusCR,
+    starLevel,
+    starBonusCR,
     cost,
     h1Keywords,
     h2Keywords,
@@ -218,6 +252,7 @@ export class CardBattleEngine {
     hybrids = [],
     difficulty = 1,
     gauntletFloor = 0,
+    isDraftMode = false,
     sectorId = null,
     gameStateRef = null
   } = {}) {
@@ -225,6 +260,7 @@ export class CardBattleEngine {
     this.difficulty = difficulty;
     this.gauntletFloor = gauntletFloor || 0;
     this.isBossFloor = this.gauntletFloor > 0 && this.gauntletFloor % 5 === 0;
+    this.isDraftMode = Boolean(isDraftMode);
     this.sectorId = sectorId;
     this.gameStateRef = gameStateRef;
     this.uidCounter = 1;
@@ -248,7 +284,9 @@ export class CardBattleEngine {
     const eLeaderCard = resolveCard(enemyLeaderId, []) || CARD_BY_ID.overlord;
 
     const legalPDeck = (playerDeckIds && playerDeckIds.length)
-      ? validateDeckForLeader(playerDeckIds, pLeaderCard.id, hybrids)
+      ? (this.isDraftMode
+        ? playerDeckIds.filter((id) => Boolean(resolveCard(id, hybrids)))
+        : validateDeckForLeader(playerDeckIds, pLeaderCard.id, hybrids))
       : buildFactionDeck(pLeaderCard.id, hybrids);
     const finalPDeckIds = legalPDeck.length >= 10 ? legalPDeck : buildFactionDeck(pLeaderCard.id, hybrids);
 
@@ -261,24 +299,28 @@ export class CardBattleEngine {
       side: "player",
       energy: 3,
       maxEnergy: 8,
+      mulliganUsed: false,
+      directiveUsedThisTurn: false,
       geneSurgeUsed: false,
       geneSurgeActiveThisTurn: false,
       leaderSkillUsed: false,
       leaderSkillBuffCR: 0,
       leaderSkillEnemyPenaltyCR: 0,
       leaderSkillBreedBoost: 0,
-      leader: makeInstance(pLeaderCard, "player", this.uidCounter++),
+      leader: makeInstance(pLeaderCard, "player", this.uidCounter++, gameStateRef),
       row1: [null, null, null],
       row2: [],
       hand: [],
       totalTokensBred: 0,
-      deck: shuffle(finalPDeckIds.map((id) => makeInstance(resolveCard(id, hybrids) || CARD_BY_ID.tr_syl_guard, "player", this.uidCounter++)))
+      deck: shuffle(finalPDeckIds.map((id) => makeInstance(resolveCard(id, hybrids) || CARD_BY_ID.tr_syl_guard, "player", this.uidCounter++, gameStateRef)))
     };
 
     this.enemy = {
       side: "enemy",
       energy: this.isBossFloor ? 4 : 3,
       maxEnergy: 8,
+      mulliganUsed: false,
+      directiveUsedThisTurn: false,
       geneSurgeUsed: false,
       geneSurgeActiveThisTurn: false,
       leaderSkillUsed: false,
@@ -750,6 +792,105 @@ export class CardBattleEngine {
   }
 
   // ==========================================================================
+  // v13.0: OPENING HAND MULLIGAN (1/MATCH ON TURN 1) & TACTICAL DIRECTIVES
+  // ==========================================================================
+  canMulligan() {
+    return !this.over && this.turn === 1 && !this.player.mulliganUsed && this.getRow1Cards("player").length === 0;
+  }
+
+  mulliganHand() {
+    if (!this.canMulligan()) {
+      return { ok: false, reason: "Chỉ có thể Đổi Bài Mở Màn (Mulligan) ở Lượt 1 trước khi đặt thẻ lên sân!" };
+    }
+    this.saveTurnSnapshot("Đổi bài khởi đầu (Mulligan)");
+    const count = Math.max(4, this.player.hand.length);
+    while (this.player.hand.length > 0) {
+      this.player.deck.push(this.player.hand.pop());
+    }
+    this.player.deck = shuffle(this.player.deck);
+    this.drawCards("player", count);
+    this.ensureTurn1PlayableHand("player");
+    this.player.mulliganUsed = true;
+    this.selectedHandIdx = null;
+    this.pushLog(`🔄 Đổi Bài Mở Màn (Mulligan): Xáo lại tay bài khởi đầu vào bộ bài và rút ${this.player.hand.length} lá mới!`);
+    return { ok: true, hand: this.player.hand };
+  }
+
+  activateTacticalDirective(directiveId, sideKey = "player") {
+    if (this.over) return { ok: false, reason: "Trận đấu đã kết thúc." };
+    const s = this.getSide(sideKey);
+    const opp = this.getOpp(sideKey);
+    const dir = TACTICAL_DIRECTIVES.find((d) => d.id === directiveId) || TACTICAL_DIRECTIVES[0];
+    if (s.directiveUsedThisTurn) {
+      return { ok: false, reason: "Mỗi lượt chỉ được phát động 1 Chỉ Thị Chiến Thuật!" };
+    }
+    if ((s.energy || 0) < dir.cost) {
+      return { ok: false, reason: `Cần ${dir.cost}⚡ Năng lượng Gen để dùng ${dir.name} (Hiện có ${s.energy}⚡)!` };
+    }
+
+    if (sideKey === "player") {
+      this.saveTurnSnapshot(`Chỉ thị ${dir.name} (${dir.cost}⚡)`);
+    }
+
+    s.energy -= dir.cost;
+    s.directiveUsedThisTurn = true;
+    const notes = [];
+
+    if (dir.id === "shield_matrix") {
+      let shieldedCount = 0;
+      s.row1.forEach((u) => {
+        if (!u) return;
+        shieldedCount++;
+        if ((u.shieldCharges || 0) <= 0) {
+          u.shieldCharges = 1;
+          if (!u.h1Keywords) u.h1Keywords = [];
+          if (!u.h1Keywords.includes("shield")) u.h1Keywords.push("shield");
+        } else {
+          u.tokenBoostCR = (u.tokenBoostCR || 0) + 60;
+        }
+      });
+      if (shieldedCount === 0) {
+        s.leaderSkillBuffCR = (s.leaderSkillBuffCR || 0) + 60;
+        notes.push("+60 CR Hàng 1 lượt này");
+      } else {
+        notes.push(`Cấp 🛡️ Khiên / +60 CR cho ${shieldedCount} thẻ Hàng 1`);
+      }
+    } else if (dir.id === "mutagen_burst") {
+      s.leaderSkillBuffCR = (s.leaderSkillBuffCR || 0) + 90;
+      notes.push("+90 CR toàn Hàng 1");
+      const breeder = s.row2.find((c) => c.breedingActive);
+      if (breeder) {
+        const bRes = this.spawnTokensForCaptive(sideKey, breeder, 0);
+        if (bRes.spawned.length > 0) {
+          notes.push(`🧬 Sinh sớm Token ${bRes.spawned[0].name} lên Hàng 1`);
+        }
+      } else {
+        const d = this.drawCards(sideKey, 1);
+        if (d > 0) notes.push(`Rút +${d} lá`);
+      }
+    } else if (dir.id === "tactical_rescue") {
+      if (opp.row2.length > 0) {
+        const rescued = opp.row2.pop();
+        rescued.ownerSide = sideKey;
+        rescued.breedingActive = false;
+        rescued.sireCard = null;
+        if (s.hand.length < this.maxHandSize) {
+          s.hand.push(rescued);
+        } else {
+          s.deck.unshift(rescued);
+        }
+        notes.push(`🔓 Giải cứu ${rescued.name} khỏi Hàng 2 Địch về tay (Địch còn ${opp.row2.length}/3)!`);
+      } else {
+        const d = this.drawCards(sideKey, 2);
+        notes.push(`Rút +${d} lá chiến thuật`);
+      }
+    }
+
+    this.pushLog(`${dir.icon} [Chỉ Thị Chiến Thuật: ${dir.name} (-${dir.cost}⚡)] ${notes.join(" • ")}!`);
+    return { ok: true, directive: dir, notes, remainingEnergy: s.energy };
+  }
+
+  // ==========================================================================
   // DEPLOY & RECALL (WITH ENERGY COST ⚡ & UNDO SUPPORT)
   // ==========================================================================
   deployCardToRow1(handIdx, laneIdx) {
@@ -757,7 +898,7 @@ export class CardBattleEngine {
     const s = this.player;
     const card = s.hand[handIdx];
     if (!card) return { ok: false, reason: "Không tìm thấy thẻ trên tay." };
-    if (card.fac !== s.leader.fac) {
+    if (!this.isDraftMode && card.fac !== s.leader.fac) {
       return { ok: false, reason: `Vi phạm phe phái: Thủ lĩnh ${s.leader.name} chỉ dùng thẻ phe ${s.leader.fac}!` };
     }
     if (laneIdx < 0 || laneIdx > 2) return { ok: false, reason: "Làn Hàng 1 không hợp lệ." };
@@ -943,6 +1084,9 @@ export class CardBattleEngine {
     if (lane && lane.id === "pherone_nexus") {
       chance += 12;
     }
+
+    // ★ Star Mastery boost (+3% per star on Sire or Captive)
+    chance += ((captive.starLevel || 0) + (sire?.starLevel || 0)) * 3;
 
     return Math.max(0, Math.min(99, chance));
   }
@@ -1366,6 +1510,8 @@ export class CardBattleEngine {
     // 5B. END OF TURN: Clear single-turn skill buffs, gain +1⚡ Gene Energy (up to 8⚡), and Draw 2 Cards!
     this.player.geneSurgeActiveThisTurn = false;
     this.enemy.geneSurgeActiveThisTurn = false;
+    this.player.directiveUsedThisTurn = false;
+    this.enemy.directiveUsedThisTurn = false;
     this.player.leaderSkillBuffCR = 0;
     this.enemy.leaderSkillBuffCR = 0;
     this.player.leaderSkillEnemyPenaltyCR = 0;

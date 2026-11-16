@@ -26,8 +26,8 @@ import {
   getLeaderSkillForCard
 } from "./data/cards.js";
 import { buildHistoryCutscenes } from "./data/cutscenes.js";
-import { GameState, ACHIEVEMENTS } from "./game/state.js";
-import { CardBattleEngine } from "./game/card_engine.js";
+import { GameState, ACHIEVEMENTS, TCG_QUESTS } from "./game/state.js";
+import { CardBattleEngine, TACTICAL_DIRECTIVES } from "./game/card_engine.js";
 import {
   detectAIStatus,
   getStoredAIKeys,
@@ -556,6 +556,26 @@ class Cycle12App {
       hModal.classList.add("hidden");
     });
 
+    const mapModal = document.getElementById("vn-chapter-map-modal");
+    document.getElementById("btn-vn-chapter-map")?.addEventListener("click", () => {
+      SFX.click();
+      this.openVNChapterMapModal();
+    });
+    document.getElementById("vn-story-chronicle-pill")?.addEventListener("click", () => {
+      SFX.click();
+      this.openVNChapterMapModal();
+    });
+    document.getElementById("btn-close-vn-chapter-map")?.addEventListener("click", () => {
+      SFX.click();
+      mapModal?.classList.add("hidden");
+    });
+    mapModal?.addEventListener("click", (e) => {
+      if (e.target === mapModal) {
+        SFX.click();
+        mapModal.classList.add("hidden");
+      }
+    });
+
     document.getElementById("vn-dialogue-box").addEventListener("click", (e) => {
       if (e.target.closest("button, input, select, #vn-ai-dock")) return;
       this.advanceVN();
@@ -628,6 +648,94 @@ class Cycle12App {
     }
     sel.innerHTML = opts.join("");
     sel.value = this.activeEncounterScript ? "__encounter__" : (CHAPTER_BY_ID[this.game.vn.currentChapterId] ? this.game.vn.currentChapterId : CHAPTERS[0].id);
+  }
+
+  openVNChapterMapModal() {
+    const modal = document.getElementById("vn-chapter-map-modal");
+    const body = document.getElementById("vn-chapter-map-body");
+    if (!modal || !body) return;
+
+    const doneSet = new Set(this.game.vn.completedChapters || []);
+    const curChapId = this.game.vn.currentChapterId;
+    const topBonds = [...CHARACTERS]
+      .map((c) => ({ c, aff: this.game.getAffinity(c.id), star: this.game.getCardStarLevel(c.id) }))
+      .sort((a, b) => b.aff - a.aff || b.c.cr - a.c.cr)
+      .slice(0, 12);
+
+    body.innerHTML = `
+      <div class="chapter-map-summary-bar">
+        <span class="badge" style="color:var(--gold);">📖 Hoàn tất: ${doneSet.size}/${CHAPTERS.length} Chương</span>
+        <span class="badge">${this.game.pact?.active ? "🤝 Cursew Pact: Hiệu lực" : "🔥 Cursew Pact: Đã vỡ"}</span>
+        <span class="badge" style="color:#f472b6;">💞 Tri kỷ (≥50): ${Object.values(this.game.vn?.affinity || {}).filter((v) => v >= 50).length}</span>
+        <span class="badge" style="color:#c084fc;">🌟 Thẻ Tinh Anh ★: ${Object.keys(this.game.cardStars || {}).filter((k) => this.game.cardStars[k] > 0).length}</span>
+      </div>
+
+      <div style="font-weight:800; color:var(--primary); font-size:13px;">📚 19 Chương Sử Thi Chính Tuyến &amp; Hậu Chiến (Bấm để vào ngay)</div>
+      <div class="chapter-atlas-grid">
+        ${CHAPTERS.map((ch, idx) => {
+          const isDone = doneSet.has(ch.id);
+          const isCur = !this.activeEncounterScript && curChapId === ch.id;
+          const leadId = resolveStoryChar(ch.leadChar || "__PROTAGONIST__", this.game);
+          const leadObj = CHAR_BY_ID[leadId] || this.game.getProtagonist();
+          return `
+            <div class="chapter-atlas-card ${isCur ? "active" : ""} ${isDone ? "done" : ""}">
+              <div style="display:flex; justify-content:space-between; align-items:center; gap:6px;">
+                <span class="badge" style="color:${isDone ? "#4ade80" : "var(--gold)"};">${isDone ? "✓ " : ""}${ESC(ch.num)}</span>
+                <span class="muted" style="font-size:10.5px;">#${idx + 1}/19 • POV: ${ESC(leadObj?.name || leadId)}</span>
+              </div>
+              <strong style="font-size:13px; color:#fff;">${ESC(ch.title)}</strong>
+              <div class="muted" style="font-size:11px;">${ESC(ch.subtitle || "")}</div>
+              <p style="font-size:11.5px; color:#cbd5e1; margin:4px 0; line-height:1.45;">${ESC(ch.summary || "")}</p>
+              <button type="button" class="btn-primary btn-compact" data-jump-chapter="${ESC(ch.id)}" style="margin-top:auto;">
+                ${isCur ? "▶ Đang Đọc Chương Này" : (isDone ? "↺ Đọc Lại Chương" : "▶ Bắt Đầu Chương")}
+              </button>
+            </div>
+          `;
+        }).join("")}
+      </div>
+
+      <div style="font-weight:800; color:#f472b6; font-size:13px; margin-top:6px;">💞 Tuyến Tâm Sự Nhân Vật &amp; Thề Ước Tinh Anh (Mở khóa Thẻ &amp; +1★)</div>
+      <div class="bond-atlas-grid">
+        ${topBonds.map(({ c, aff, star }) => `
+          <div class="bond-atlas-chip">
+            <img src="${this.resolvePortrait(c.id)}" alt="${ESC(c.name)}" />
+            <div style="flex:1; min-width:0;">
+              <div style="font-weight:800; font-size:12px; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                ${ESC(c.name)} ${star > 0 ? `<span style="color:#fbbf24;">${"★".repeat(star)}</span>` : ""}
+              </div>
+              <div class="muted" style="font-size:10.5px;">💞 Tin cậy: ${aff}/100 • CR ${c.cr}</div>
+            </div>
+            <button type="button" class="btn-accent btn-compact" data-jump-bond="${ESC(c.id)}">💬 Tâm Sự</button>
+          </div>
+        `).join("")}
+      </div>
+    `;
+
+    body.querySelectorAll("[data-jump-chapter]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const chId = btn.dataset.jumpChapter;
+        if (!CHAPTER_BY_ID[chId]) return;
+        SFX.choice();
+        this.activeEncounterScript = null;
+        this.game.vn.currentChapterId = chId;
+        this.game.vn.currentNodeId = "start";
+        this.lastAppliedNodeKey = null;
+        modal.classList.add("hidden");
+        this.switchMode("vn");
+        this.renderVNNode();
+      });
+    });
+
+    body.querySelectorAll("[data-jump-bond]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const cid = btn.dataset.jumpBond;
+        SFX.choice();
+        modal.classList.add("hidden");
+        this.startEncounter(cid);
+      });
+    });
+
+    modal.classList.remove("hidden");
   }
 
   getActiveVNContext() {
@@ -713,6 +821,22 @@ class Cycle12App {
     const secId = resolveStorySector(node.sector, this.game);
     const sec = SECTOR_BY_ID[secId];
     document.getElementById("vn-location-pill").textContent = `📍 ${sec ? sec.name : "Vũ Trụ Gaiastra"}${sec?.realm ? " • " + sec.realm : ""}`;
+
+    const chronPill = document.getElementById("vn-story-chronicle-pill");
+    if (chronPill) {
+      const doneCount = (this.game.vn.completedChapters || []).length;
+      const pactTxt = this.game.pact?.active ? "Hiệp ước Cursew: Hiệu lực" : "Cursew Pact: Đã vỡ";
+      const bondCount = Object.values(this.game.vn?.affinity || {}).filter((v) => v >= 50).length;
+      const flags = this.game.vn?.flags || {};
+      const flagTags = [];
+      if (flags.ch1_used_gotterfall) flagTags.push("⚡Gotterfall");
+      if (flags.prussireich_spared) flagTags.push("🛡️Prussireich");
+      if (flags.ch13_archive_public || flags.ch13_fought_cipheron) flagTags.push("📜11 Chu Kỳ");
+      if (flags.ch14_veidos_loyal) flagTags.push("⚔️Gandora");
+      if (flags.ch16_raided_collectors) flagTags.push("🌃Evernight");
+      const flagSuffix = flagTags.length ? ` • ${flagTags.join(" ")}` : "";
+      chronPill.textContent = `📜 Chương: ${doneCount}/${CHAPTERS.length} • ${pactTxt} • 💞 Tri kỷ: ${bondCount}${flagSuffix}`;
+    }
 
     const leftId = node.leftChar ? resolveStoryChar(node.leftChar, this.game) : null;
     const rightId = node.rightChar ? resolveStoryChar(node.rightChar, this.game) : null;
@@ -1309,6 +1433,45 @@ class Cycle12App {
       this.showToast("↩️ Đã hoàn tác thao tác", `Hoàn lại ⚡ Năng lượng (${this.duelEngine.player.energy}/${this.duelEngine.player.maxEnergy}⚡) & trạng thái bàn đấu.`);
     });
 
+    document.getElementById("btn-mulligan-duel")?.addEventListener("click", () => {
+      if (!this.duelEngine || this.duelEngine.over || this.isResolvingClash) return;
+      const res = this.duelEngine.mulliganHand();
+      if (!res.ok) {
+        SFX.alert();
+        this.showToast("🔄 Đổi Bài Mở Màn", res.reason || "Chỉ dùng ở Lượt 1 trước khi đặt thẻ!");
+        return;
+      }
+      SFX.cardPlay();
+      this.renderDuelUI();
+      this.showToast("🔄 Đổi Bài Mở Màn (Mulligan)!", "Đã xáo lại tay bài khởi đầu và rút 4 lá mới!");
+    });
+
+    document.getElementById("btn-tactical-directive")?.addEventListener("click", () => {
+      if (!this.duelEngine || this.duelEngine.over || this.isResolvingClash) return;
+      const eng = this.duelEngine;
+      // Smartly select the highest-impact affordable Tactical Directive:
+      // 1) If enemy has captured >= 1 of our cards in Row 2 and we have 2⚡ -> tactical_rescue
+      // 2) Else if we have 2⚡ and an active breeder or multiple Row 1 units -> mutagen_burst
+      // 3) Else -> shield_matrix (1⚡)
+      let dirId = "shield_matrix";
+      if (eng.player.energy >= 2) {
+        if (eng.enemy.row2.length > 0) {
+          dirId = "tactical_rescue";
+        } else if (eng.player.row2.some((c) => c.breedingActive) || eng.getRow1Cards("player").length >= 2) {
+          dirId = "mutagen_burst";
+        }
+      }
+      const res = eng.activateTacticalDirective(dirId, "player");
+      if (!res.ok) {
+        SFX.alert();
+        this.showToast("⚡ Chỉ Thị Chiến Thuật", res.reason || "Không thể phát động Chỉ Thị.");
+        return;
+      }
+      SFX.choice();
+      this.renderDuelUI();
+      this.showToast(`${res.directive.icon} Chỉ Thị: ${res.directive.name}!`, (res.notes || []).join(" • "));
+    });
+
     document.getElementById("btn-gene-surge")?.addEventListener("click", () => {
       this.triggerPlayerGeneSurge();
     });
@@ -1537,9 +1700,10 @@ class Cycle12App {
   setDuelTab(tab) {
     this.duelTab = tab;
     document.querySelectorAll("[data-dtab]").forEach((b) => b.classList.toggle("active", b.dataset.dtab === tab));
-    document.getElementById("duel-battle-view")?.classList.toggle("hidden", tab === "deck" || tab === "shop");
+    document.getElementById("duel-battle-view")?.classList.toggle("hidden", tab === "deck" || tab === "shop" || tab === "draft");
     document.getElementById("duel-deck-view")?.classList.toggle("hidden", tab !== "deck");
     document.getElementById("duel-shop-view")?.classList.toggle("hidden", tab !== "shop");
+    document.getElementById("duel-draft-view")?.classList.toggle("hidden", tab !== "draft");
     document.getElementById("duel-skirmish-controls")?.classList.toggle("hidden", tab !== "skirmish");
     document.getElementById("duel-gauntlet-controls")?.classList.toggle("hidden", tab !== "gauntlet");
 
@@ -1547,6 +1711,8 @@ class Cycle12App {
       this.renderDeckBuilder();
     } else if (tab === "shop") {
       this.renderShopView();
+    } else if (tab === "draft") {
+      this.renderDraftView();
     } else if (tab === "gauntlet" && this.duelContext.kind !== "gauntlet") {
       document.getElementById("gauntlet-floor-badge").textContent = `🗼 Tầng 1 • Kỷ lục: ${this.game.stats?.gauntletMax || 0}`;
     } else if (tab === "skirmish") {
@@ -1721,13 +1887,17 @@ class Cycle12App {
     }
   }
 
-  startCardMatch({ kind = "skirmish", playerCharId = null, enemyId = "overlord", buffMult = 1, modeLabel = "Đấu Thẻ 3 Hàng", gauntletFloor = 0, difficulty = 1 } = {}) {
+  startCardMatch({ kind = "skirmish", playerCharId = null, enemyId = "overlord", buffMult = 1, modeLabel = "Đấu Thẻ 3 Hàng", gauntletFloor = 0, difficulty = 1, isDraftMode = false, customDeckIds = null } = {}) {
     const activeDeckObj = this.game.getActiveDeck();
     const pId = playerCharId || activeDeckObj?.leaderId || this.game.protagonistId || "arisia";
-    const sourceCards = playerCharId && playerCharId !== activeDeckObj?.leaderId
-      ? (this.game.customDeck || [])
-      : (activeDeckObj?.cards || []);
-    const legalOwned = validateDeckForLeader(sourceCards, pId, this.game.hybrids || [], this.game.collection);
+    const sourceCards = Array.isArray(customDeckIds) && customDeckIds.length > 0
+      ? customDeckIds
+      : (playerCharId && playerCharId !== activeDeckObj?.leaderId
+        ? (this.game.customDeck || [])
+        : (activeDeckObj?.cards || []));
+    const legalOwned = isDraftMode
+      ? sourceCards.filter((id) => Boolean(resolveCard(id, this.game.hybrids || [])))
+      : validateDeckForLeader(sourceCards, pId, this.game.hybrids || [], this.game.collection);
     const ownedPoolDeck = buildFactionDeck(pId, this.game.hybrids || [], this.game.collection);
     // Keep custom Story battles resilient even if player owns < 6 cards of an alternate story lead
     const activeDeck = legalOwned.length >= 6
@@ -1735,8 +1905,8 @@ class Cycle12App {
       : (ownedPoolDeck.length >= 6 ? ownedPoolDeck : buildFactionDeck(pId, this.game.hybrids || [], null));
 
     const effDifficulty = buffMult > 1 ? Math.min(difficulty, 0.85) : difficulty;
-    this.lastMatchParams = { kind, playerCharId, enemyId, buffMult, modeLabel, gauntletFloor, difficulty };
-    this.duelContext = { kind, enemyId, floor: gauntletFloor, buffMult };
+    this.lastMatchParams = { kind, playerCharId, enemyId, buffMult, modeLabel, gauntletFloor, difficulty, isDraftMode, customDeckIds };
+    this.duelContext = { kind, enemyId, floor: gauntletFloor, buffMult, isDraftMode };
     this.duelEngine = new CardBattleEngine({
       playerLeaderId: pId,
       playerDeckIds: activeDeck,
@@ -1744,6 +1914,7 @@ class Cycle12App {
       hybrids: this.game.hybrids || [],
       difficulty: effDifficulty,
       gauntletFloor,
+      isDraftMode,
       sectorId: this.pendingInvasionSectorId || null,
       gameStateRef: this.game
     });
@@ -2756,6 +2927,14 @@ class Cycle12App {
     }
 
     if (isCollectible && !card.isHybrid) {
+      const curStar = this.game.getCardStarLevel(card.id);
+      if (curStar < 3) {
+        const starCost = this.game.getCardStarUpgradeCost(curStar);
+        const nextBonus = this.game.getCardStarBonusCR(card.baseOriginCR || card.cr, curStar + 1);
+        btns.push(`<button type="button" class="btn-gold btn-compact" id="btn-cz-upgrade-star" title="Cường hóa thẻ lên ★${curStar + 1} (+${nextBonus} CR & +${(curStar + 1) * 3}% tỷ lệ Lai H2)">🌟 Cường Hóa ★${curStar + 1} (${starCost} Mảnh)</button>`);
+      } else {
+        btns.push(`<span class="badge" style="color:#fbbf24;border-color:#fbbf24;">★★★ Tinh Anh Tối Đa</span>`);
+      }
       if (owned < maxCap) {
         btns.push(`<button type="button" class="btn-gold btn-compact" id="btn-cz-buy">🪙 Mua (${priceInfo.credits.toLocaleString()} Cr)</button>`);
         btns.push(`<button type="button" class="btn-accent btn-compact" id="btn-cz-craft">⚒️ Chế Tạo (${priceInfo.dust} Mảnh)</button>`);
@@ -2772,6 +2951,23 @@ class Cycle12App {
 
     btns.push(`<button type="button" class="btn-glass btn-compact" id="btn-cz-close-footer">Đóng</button>`);
     actionsEl.innerHTML = btns.join("");
+
+    document.getElementById("btn-cz-upgrade-star")?.addEventListener("click", () => {
+      const r = this.game.upgradeCardStar(card.id, false);
+      if (r.ok) {
+        SFX.victory();
+        this.refreshTopResources();
+        if (this.duelTab === "deck") this.renderDeckBuilder();
+        if (this.duelTab === "shop") this.renderShopView();
+        if (this.duelTab === "draft") this.renderDraftView();
+        if (this.duelEngine) this.renderDuelUI();
+        this.showToast(`🌟 Cường Hóa ${"★".repeat(r.star)} Thành Công!`, `${card.name} nhận +${r.bonusCR} CR gốc & +${r.star * 3}% tỷ lệ Lai H2!`);
+        this.openCardZoomModal(card, ctx);
+      } else {
+        SFX.alert();
+        this.showToast("Chưa đủ Mảnh Gen", r.msg);
+      }
+    });
 
     document.getElementById("btn-cz-close-footer")?.addEventListener("click", () => {
       SFX.click();
@@ -2920,6 +3116,10 @@ class Cycle12App {
     const r2 = c.row2Effect || {};
     const rarity = this.getCardRarityClass(c);
     const condLit = Boolean(opts.condMet);
+    const starLevel = typeof c.starLevel === "number" ? c.starLevel : this.game.getCardStarLevel(c.id);
+    const starBonus = typeof c.starBonusCR === "number" ? c.starBonusCR : this.game.getCardStarBonusCR(c.cr, starLevel);
+    const displayCR = typeof c.starBonusCR === "number" ? c.cr : ((c.cr || 100) + starBonus);
+    const starBadge = starLevel > 0 ? `<span class="star-foil-pill star-${starLevel}" title="Cấp Tinh Anh ${"★".repeat(starLevel)}: +${starBonus} CR & +${starLevel * 3}% Lai H2">${"★".repeat(starLevel)}</span>` : "";
     const cardCost = Number(c.cost || getCardEnergyCost(c.cr, c.isToken));
     const h1Kws = (c.h1Keywords || []).map((k) => H1_KEYWORDS[k]).filter(Boolean);
     const h2Kws = (c.h2Keywords || []).map((k) => H2_KEYWORDS[k]).filter(Boolean);
@@ -2931,6 +3131,7 @@ class Cycle12App {
     const extraCls = [
       opts.className || "hand-card",
       rarity,
+      starLevel > 0 ? `star-foil-${starLevel}` : "",
       opts.selected ? "selected" : "",
       opts.playable === false ? "unaffordable" : "playable",
       opts.locked ? "card-locked" : "",
@@ -2955,8 +3156,9 @@ class Cycle12App {
         <span class="card-foil-sweep"></span>
         <span class="card-zoom-trigger" data-zoom-trigger="1" role="button" tabindex="0" title="Phóng to hoặc nhấn giữ để đọc toàn bộ thông số &amp; hiệu ứng">🔍</span>
         <span class="card-cost-gem" title="Chi phí Năng lượng Gen: ${cardCost}⚡">${cardCost}⚡</span>
-        <span class="card-cr-gem">${c.cr}</span>
+        <span class="card-cr-gem">${displayCR}</span>
         <div class="card-top-badges">
+          ${starBadge}
           <span class="gender-pill ${isM ? "male" : "female"}">${isM ? "♂" : "♀"}</span>
           ${ownBadge}
           ${badgeTop}
@@ -3109,6 +3311,22 @@ class Cycle12App {
     const undoBtn = document.getElementById("btn-undo-duel");
     if (undoBtn) {
       undoBtn.disabled = !eng.canUndo() || this.isResolvingClash;
+    }
+    const mulliganBtn = document.getElementById("btn-mulligan-duel");
+    if (mulliganBtn) {
+      const canMull = eng.canMulligan() && !this.isResolvingClash;
+      mulliganBtn.disabled = !canMull;
+      mulliganBtn.textContent = eng.player.mulliganUsed ? "✓ Đã Đổi Bài" : "🔄 Đổi Bài";
+    }
+    const dirBtn = document.getElementById("btn-tactical-directive");
+    if (dirBtn) {
+      const canDir = !eng.over && !this.isResolvingClash && !eng.player.directiveUsedThisTurn && eng.player.energy >= 1;
+      dirBtn.disabled = !canDir;
+      dirBtn.textContent = eng.player.directiveUsedThisTurn
+        ? "✓ Đã Dùng Chỉ Thị"
+        : (eng.enemy.row2.length > 0 && eng.player.energy >= 2
+          ? "🔓 Giải Cứu (2⚡)"
+          : (eng.player.energy >= 2 ? "🧬 Đột Biến (2⚡)" : "🛡️ Khiên (1⚡)"));
     }
 
     // Active Leader Skills Bar (Gene Surge 4⚡ + Faction/Leader Skill 3⚡)
@@ -3619,16 +3837,21 @@ class Cycle12App {
     won ? SFX.victory() : SFX.alert();
 
     const isGauntlet = this.duelContext.kind === "gauntlet";
+    const isDraft = this.duelContext.kind === "draft";
     const floor = Number(this.duelContext.floor || 1);
     const isBossFloor = isGauntlet && floor % 5 === 0;
-    const creditReward = isGauntlet ? (600 + floor * 150 + (isBossFloor ? 600 : 0)) : 600;
+    const creditReward = isGauntlet ? (600 + floor * 150 + (isBossFloor ? 600 : 0)) : (isDraft ? 900 : 600);
     let spoil = null;
+    let draftOutcome = null;
+    if (isDraft) {
+      draftOutcome = this.game.recordDraftMatchResult(won);
+    }
     if (won) {
       this.game.recordBattleWin();
       this.game.addRes(this.game.playerFaction, "credits", creditReward);
       this.game.addRes(this.game.playerFaction, "influence", isBossFloor ? 50 : 25);
       // Void Tower guarantees a random card or Gene Shards drop (100%), skirmish has 48% card drop + guaranteed dust
-      spoil = this.game.grantBattleSpoil(eng.enemy.leader.id, isGauntlet ? 1.0 : 0.48);
+      spoil = this.game.grantBattleSpoil(eng.enemy.leader.id, isGauntlet || isDraft ? 1.0 : 0.48);
       if (isGauntlet) {
         this.game.recordGauntletFloor(floor);
         const fBadge = document.getElementById("gauntlet-floor-badge");
@@ -3638,6 +3861,8 @@ class Cycle12App {
       }
       this.refreshTopResources();
       this.checkAndToastAchievements();
+    } else if (isDraft) {
+      this.refreshTopResources();
     }
 
     const reasonMap = {
@@ -3651,15 +3876,20 @@ class Cycle12App {
         ? ` • 🎁 Thưởng Thẻ: ${spoil.card.name} (+${spoil.dust} Mảnh Gen)!`
         : ` • ⚒️ +${spoil.dust} Mảnh Gen!`)
       : "";
+    const draftNote = draftOutcome
+      ? (draftOutcome.runEnded && draftOutcome.grandPrize
+        ? ` • 🎲 KẾT THÚC DRAFT (${draftOutcome.grandPrize.wins} Thắng - ${draftOutcome.grandPrize.losses} Thua): Thưởng tổng +${draftOutcome.grandPrize.credits.toLocaleString()} Credits & +${draftOutcome.grandPrize.dust} Mảnh Gen!`
+        : ` • 🎲 Tiến độ Draft: ${draftOutcome.draftState?.wins || 0}/5 Thắng • ${draftOutcome.draftState?.losses || 0}/2 Thua`)
+      : "";
 
     const modal = document.getElementById("duel-victory-modal");
     document.getElementById("victory-title").textContent = won
-      ? (isBossFloor ? `👑 ĐẠI THẮNG BOSS TẦNG ${floor}!` : "🏆 CHIẾN THẮNG VÁN BÀI!")
+      ? (isBossFloor ? `👑 ĐẠI THẮNG BOSS TẦNG ${floor}!` : (isDraft ? "🎲 CHIẾN THẮNG ĐẤU TRƯỜNG DRAFT!" : "🏆 CHIẾN THẮNG VÁN BÀI!"))
       : "💀 THẤT BẠI!";
     document.getElementById("victory-title").style.color = won ? "var(--gold)" : "var(--danger)";
     document.getElementById("victory-desc").textContent = won
-      ? `${eng.player.leader.name} thắng ${eng.enemy.leader.name} (${reasonMap[eng.winReason] || ""}) (+${creditReward} Credits, +${isBossFloor ? 50 : 25} Ảnh hưởng${spoilMsg})`
-      : `${eng.enemy.leader.name} thắng trận (${reasonMap[eng.winReason] || ""}). Hãy tận dụng Năng lượng Gen ⚡, Gene Surge, Từ khóa H1/H2 hoặc nâng cấp Bộ Bài!`;
+      ? `${eng.player.leader.name} thắng ${eng.enemy.leader.name} (${reasonMap[eng.winReason] || ""}) (+${creditReward} Credits, +${isBossFloor ? 50 : 25} Ảnh hưởng${spoilMsg}${draftNote})`
+      : `${eng.enemy.leader.name} thắng trận (${reasonMap[eng.winReason] || ""}).${draftNote} Hãy tận dụng Năng lượng Gen ⚡, Gene Surge, Chỉ Thị Chiến Thuật hoặc Cường Hóa ★ thẻ bài!`;
 
     document.getElementById("btn-victory-story").classList.toggle("hidden", !this.pendingStoryBattle);
     document.getElementById("btn-victory-conquer").classList.toggle("hidden", !(won && this.pendingInvasionSectorId));
@@ -3753,7 +3983,55 @@ class Cycle12App {
     const ruleBanner = document.getElementById("deck-faction-rule");
     if (ruleBanner) {
       const ownCap = this.game.getFactionOwnedCapacity(fac);
-      ruleBanner.innerHTML = `🔒 <strong>Bộ Bài "${ESC(activeDeck.name)}" • Luật Phe Phái &amp; Sở Hữu:</strong> Thủ lĩnh <strong>${ESC(lead.name)}</strong> (CR ${lead.cr}) trấn thủ <strong>Hàng 3</strong>. Bộ bài tối đa 16 lá thuộc phe <strong style="color:var(--gold);">${ESC(facName)}</strong> từ Kho Thẻ (Đang mở: ${ownCap} slot khả dụng • ⚒️ Mảnh Gen: ${this.game.cardDust || 0}). Bấm <strong>🔍</strong> trên bất kỳ thẻ nào để Zoom đọc full H1/H2/Lore!`;
+      ruleBanner.innerHTML = `🔒 <strong>Bộ Bài "${ESC(activeDeck.name)}" • Luật Phe Phái &amp; Sở Hữu:</strong> Thủ lĩnh <strong>${ESC(lead.name)}</strong> (CR ${lead.cr}) trấn thủ <strong>Hàng 3</strong>. Bộ bài tối đa 16 lá thuộc phe <strong style="color:var(--gold);">${ESC(facName)}</strong> từ Kho Thẻ (Đang mở: ${ownCap} slot khả dụng • ⚒️ Mảnh Gen: ${this.game.cardDust || 0}). Bấm <strong>🔍</strong> trên bất kỳ thẻ nào để Zoom đọc full H1/H2/Lore &amp; Cường Hóa ★!`;
+    }
+
+    // v13.0: Live TCG Mana Curve (1⚡-4⚡), Gender Ratio, Avg CR & Keyword Breakdown
+    const analyticsEl = document.getElementById("deck-analytics-bar");
+    if (analyticsEl) {
+      const resolvedDeck = deck.map((cid) => resolveCard(cid, hybrids)).filter(Boolean);
+      const costCounts = { 1: 0, 2: 0, 3: 0, 4: 0 };
+      let maleCount = 0;
+      let femaleCount = 0;
+      let totalCR = 0;
+      let totalStars = this.game.getCardStarLevel(lead.id);
+      const kwCounts = { charge: 0, shield: 0, draw: 0, pierce: 0, recover: 0 };
+      resolvedDeck.forEach((c) => {
+        const cost = Math.max(1, Math.min(4, Number(c.cost || getCardEnergyCost(c.cr, c.isToken))));
+        costCounts[cost] = (costCounts[cost] || 0) + 1;
+        if (c.gender === "Male") maleCount++;
+        else femaleCount++;
+        const st = this.game.getCardStarLevel(c.id);
+        totalStars += st;
+        totalCR += (c.cr || 100) + this.game.getCardStarBonusCR(c.cr, st);
+        (c.h1Keywords || []).forEach((k) => {
+          if (kwCounts[k] !== undefined) kwCounts[k]++;
+        });
+      });
+      const avgCR = resolvedDeck.length ? Math.round(totalCR / resolvedDeck.length) : 0;
+      const maxBar = Math.max(1, costCounts[1], costCounts[2], costCounts[3], costCounts[4]);
+      analyticsEl.innerHTML = `
+        <div class="mana-curve-group">
+          <span class="badge" style="color:var(--gold);">📊 Biểu Đồ ⚡Cost:</span>
+          ${[1, 2, 3, 4].map((cost) => {
+            const cnt = costCounts[cost] || 0;
+            const pct = Math.round((cnt / maxBar) * 100);
+            return `
+              <div class="mana-curve-col" title="Số thẻ ${cost}⚡: ${cnt} lá">
+                <div class="mana-bar-wrap"><div class="mana-bar-fill" style="height:${pct}%;"></div></div>
+                <span>${cost}⚡: <strong>${cnt}</strong></span>
+              </div>
+            `;
+          }).join("")}
+        </div>
+        <div class="deck-stat-pills">
+          <span class="badge" style="color:#60a5fa;">♂ Nam: ${maleCount}</span>
+          <span class="badge" style="color:#f472b6;">♀ Nữ: ${femaleCount}</span>
+          <span class="badge" style="color:#fde047;">⚔️ CR TB: ${avgCR}</span>
+          <span class="badge" style="color:#c084fc;">🌟 Tổng ★: ${totalStars}</span>
+          <span class="badge">⚡Xung: ${kwCounts.charge} • 🛡️Khiên: ${kwCounts.shield} • 🗡️Xuyên: ${kwCounts.pierce} • 🃏Rút: ${kwCounts.draw} • 💚Hồi: ${kwCounts.recover}</span>
+        </div>
+      `;
     }
 
     const activeEl = document.getElementById("deck-active-list");
@@ -4060,6 +4338,178 @@ class Cycle12App {
       });
     });
     if (prevShopScroll > 0) view.scrollTop = prevShopScroll;
+  }
+
+  renderDraftView() {
+    const view = document.getElementById("duel-draft-view");
+    if (!view) return;
+    const ds = this.game.draftState || { active: false, phase: "idle", leaderId: null, cards: [], currentChoices: [], wins: 0, losses: 0 };
+    const hybrids = this.game.hybrids || [];
+    const panel = document.getElementById("draft-arena-panel");
+
+    if (panel) {
+      if (!ds.active || ds.phase === "idle") {
+        panel.innerHTML = `
+          <div class="draft-hero-banner">
+            <div>
+              <h3 style="margin:0 0 4px 0; color:var(--gold);">🎲 Đấu Trường Tuyển Chọn (Draft Arena 3-Chọn-1 Liên Phe Phái)</h3>
+              <p class="muted" style="margin:0; font-size:12px;">
+                Phá vỡ giới hạn phe phái! Chọn 1 trong 3 Thủ lĩnh Hàng 3, sau đó qua 8 vòng chọn thẻ (mỗi lượt nhận 2 bản sao = 16 lá từ mọi chủng tộc).
+                Chinh phục chuỗi <strong>5 Trận Thắng</strong> (tối đa 2 Thua) để nhận thưởng lớn Credits &amp; Mảnh Gen!
+              </p>
+            </div>
+            <button type="button" class="btn-gold" id="btn-start-new-draft">🎲 Bắt Đầu Lượt Draft Mới (Miễn Phí)</button>
+          </div>
+        `;
+      } else if (ds.phase === "leader_pick" || ds.phase === "card_pick") {
+        const isLeaderPick = ds.phase === "leader_pick";
+        const roundNum = Math.floor((ds.cards?.length || 0) / 2) + 1;
+        const choices = (ds.currentChoices || []).map((cid) => resolveCard(cid, hybrids)).filter(Boolean);
+        const leadCard = ds.leaderId ? resolveCard(ds.leaderId, hybrids) : null;
+        panel.innerHTML = `
+          <div class="draft-hero-banner">
+            <div>
+              <h3 style="margin:0 0 4px 0; color:var(--primary);">
+                ${isLeaderPick ? "👑 Bước 1/9: Chọn 1 trong 3 Thủ Lĩnh Hàng 3" : `🃏 Bước ${roundNum + 1}/9: Chọn 1 trong 3 Thẻ Bài (+2 bản vào Deck • Đã có ${ds.cards.length}/16 lá)`}
+              </h3>
+              <div class="muted" style="font-size:11.5px;">
+                ${leadCard ? `Thủ lĩnh Draft: <strong style="color:var(--gold);">${ESC(leadCard.name)} (CR ${leadCard.cr})</strong> • Chế độ Liên Phe Phái (Dùng được mọi thẻ!)` : "Hãy chọn Thủ lĩnh dẫn dắt đội hình Draft của bạn."}
+              </div>
+            </div>
+            <button type="button" class="btn-glass btn-compact" id="btn-reset-draft">↺ Chọn Lại Từ Đầu</button>
+          </div>
+          <div class="draft-choices-grid">
+            ${choices.map((c) => this.renderTCGCardHTML(c, {
+              playable: true,
+              ownText: isLeaderPick ? "👑 Chọn Thủ Lĩnh" : "+2 Bản Vào Draft",
+              style: "width:auto;min-width:0;",
+              zoomAttrs: `data-zoom-host="1" data-zoom-card="${ESC(c.id)}"`,
+              attrs: `data-pick-draft="${ESC(c.id)}"`
+            })).join("")}
+          </div>
+        `;
+      } else {
+        const leadCard = resolveCard(ds.leaderId, hybrids) || CARD_BY_ID.arisia;
+        const draftedCards = (ds.cards || []).map((cid) => resolveCard(cid, hybrids)).filter(Boolean);
+        panel.innerHTML = `
+          <div class="draft-hero-banner">
+            <div>
+              <h3 style="margin:0 0 4px 0; color:#4ade80;">⚔️ Bộ Bài Draft Đã Sẵn Sàng (16/16 Lá Liên Phe Phái)</h3>
+              <div style="font-size:12px; color:#e2e8f0;">
+                Thủ lĩnh: <strong style="color:var(--gold);">${ESC(leadCard.name)} (CR ${leadCard.cr})</strong> •
+                Thành tích hiện tại: <strong style="color:#4ade80;">${ds.wins || 0}/5 Thắng</strong> — <strong style="color:#fb7185;">${ds.losses || 0}/2 Thua</strong>
+              </div>
+            </div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <button type="button" class="btn-gold" id="btn-play-draft-match">🔥 Khai Chiến Trận Draft Tiếp Theo</button>
+              <button type="button" class="btn-glass btn-compact" id="btn-reset-draft">🗑️ Hủy &amp; Draft Mới</button>
+            </div>
+          </div>
+          <div class="deck-active-strip" style="margin-top:8px;">
+            ${draftedCards.map((c) => `
+              <div class="deck-chip" data-zoom-host="1" data-zoom-card="${ESC(c.id)}">
+                <span class="chip-main">${c.gender === "Male" ? "♂" : "♀"} [${c.cost || getCardEnergyCost(c.cr)}⚡ • CR ${c.cr}] ${ESC(c.name)}</span>
+                <button type="button" class="chip-zoom-btn" data-zoom-trigger="1">🔍</button>
+              </div>
+            `).join("")}
+          </div>
+        `;
+      }
+
+      document.getElementById("btn-start-new-draft")?.addEventListener("click", () => {
+        SFX.choice();
+        this.game.startNewDraftRun();
+        this.renderDraftView();
+      });
+
+      document.getElementById("btn-reset-draft")?.addEventListener("click", () => {
+        SFX.click();
+        this.game.startNewDraftRun();
+        this.renderDraftView();
+      });
+
+      panel.querySelectorAll("[data-pick-draft]").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          if (e.target.closest("[data-zoom-trigger]")) return;
+          const cid = btn.dataset.pickDraft;
+          const res = this.game.pickDraftChoice(cid);
+          if (res.ok) {
+            SFX.cardPlay();
+            this.renderDraftView();
+            if (res.draftState.phase === "ready") {
+              this.showToast("🎲 Đã Hoàn Tất 16 Lá Draft!", "Bấm '🔥 Khai Chiến Trận Draft Tiếp Theo' để bước vào bàn đấu!");
+            }
+          }
+        });
+      });
+
+      document.getElementById("btn-play-draft-match")?.addEventListener("click", () => {
+        SFX.choice();
+        const round = (ds.wins || 0) + (ds.losses || 0) + 1;
+        const pool = [...CHARACTERS].sort((a, b) => a.cr - b.cr);
+        const oppIdx = Math.min(pool.length - 1, Math.floor((pool.length - 1) * Math.min(1, 0.25 + round * 0.14)));
+        const opp = pool[oppIdx] || CHAR_BY_ID.overlord;
+        this.setDuelTab("skirmish");
+        this.startCardMatch({
+          kind: "draft",
+          playerCharId: ds.leaderId || this.game.protagonistId,
+          enemyId: opp.id,
+          isDraftMode: true,
+          customDeckIds: ds.cards,
+          difficulty: 0.95 + (ds.wins || 0) * 0.12,
+          modeLabel: `🎲 Draft (${ds.wins || 0}W-${ds.losses || 0}L)`
+        });
+      });
+
+      this.bindZoomTriggers(panel, (host) => ({
+        card: resolveCard(host.dataset.zoomCard, hybrids),
+        ctx: { source: "draft" }
+      }));
+    }
+
+    const questsGrid = document.getElementById("tcg-quests-grid");
+    if (questsGrid) {
+      const claimed = new Set(this.game.claimedQuests || []);
+      questsGrid.innerHTML = TCG_QUESTS.map((q) => {
+        const prog = q.progress(this.game);
+        const isClaimed = claimed.has(q.id);
+        const isReady = !isClaimed && prog.cur >= prog.max;
+        const pct = Math.min(100, Math.round((prog.cur / Math.max(1, prog.max)) * 100));
+        return `
+          <div class="tcg-quest-card ${isReady ? "ready" : ""} ${isClaimed ? "claimed" : ""}">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:6px;">
+              <strong style="color:#fff; font-size:13px;">${q.icon} ${ESC(q.title)}</strong>
+              <span class="badge" style="color:${isClaimed ? "#4ade80" : (isReady ? "var(--gold)" : "#94a3b8")};">
+                ${isClaimed ? "✓ Đã Nhận" : `${prog.cur}/${prog.max}`}
+              </span>
+            </div>
+            <div class="muted" style="font-size:11.5px;">${ESC(q.desc)}</div>
+            <div class="quest-prog-bar"><div class="quest-prog-fill" style="width:${pct}%;"></div></div>
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-top:4px;">
+              <span style="font-size:11px; color:#fde047;">🎁 +${q.rewardCredits.toLocaleString()} Cr • +${q.rewardDust} Mảnh Gen</span>
+              <button type="button" class="${isReady ? "btn-gold" : "btn-glass"} btn-compact" data-claim-quest="${ESC(q.id)}" ${isReady ? "" : "disabled"}>
+                ${isClaimed ? "✓ Hoàn Tất" : (isReady ? "🎁 Nhận Thưởng" : "Đang Làm")}
+              </button>
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      questsGrid.querySelectorAll("[data-claim-quest]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const r = this.game.claimTCGQuest(btn.dataset.claimQuest);
+          if (r.ok) {
+            SFX.victory();
+            this.refreshTopResources();
+            this.renderDraftView();
+            this.showToast(`🎁 Hoàn Thành: ${r.quest.title}!`, `Nhận +${r.quest.rewardCredits.toLocaleString()} Credits & +${r.quest.rewardDust} Mảnh Gen!`);
+          } else {
+            SFX.alert();
+            this.showToast("Chưa thể nhận", r.msg);
+          }
+        });
+      });
+    }
   }
 
   // ==========================================================================

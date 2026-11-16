@@ -29,8 +29,65 @@ export const ACHIEVEMENTS = [
   { id: "shadow_intel",  title: "Tai Mắt Bóng Đêm",        name: "Tai Mắt Bóng Đêm",        desc: "Thực hiện 2 chiến dịch Tình báo & Phá hoại thành công.",       rewardCr: 450,  rewardInf: 60,  check: (g) => (g.stats?.reconOps || 0) >= 2 },
   { id: "social_bonds",  title: "Tri Kỷ Gaiastra",         name: "Tri Kỷ Gaiastra",         desc: "Đạt Độ tin cậy >= 50 với ít nhất 3 nhân vật.",                rewardCr: 650,  rewardInf: 90,  check: (g) => Object.values(g.vn?.affinity || {}).filter(v => v >= 50).length >= 3 },
   { id: "story_half",    title: "Biên Niên Sử Giữa Kỷ",    name: "Biên Niên Sử Giữa Kỷ",    desc: "Hoàn thành ít nhất 5 chương Cốt truyện Tương tác.",           rewardCr: 900,  rewardInf: 100, check: (g) => (g.vn?.completedChapters?.length || 0) >= 5 },
-  { id: "story_master",  title: "Huyền Thoại Cycle 12",    name: "Huyền Thoại Cycle 12",    desc: "Hoàn thành trọn vẹn toàn bộ 11 chương (Khởi Nguyên + I–X)!",  rewardCr: 3000, rewardInf: 300, check: (g) => (g.vn?.completedChapters?.length || 0) >= 11 },
+  { id: "story_master",  title: "Huyền Thoại Cycle 12",    name: "Huyền Thoại Cycle 12",    desc: "Hoàn thành từ 11 chương Cốt truyện Sử Thi trở lên!",          rewardCr: 3000, rewardInf: 300, check: (g) => (g.vn?.completedChapters?.length || 0) >= 11 },
   { id: "hegemon",       title: "Thống Lĩnh Thiên Hà",     name: "Thống Lĩnh Thiên Hà",     desc: "Kiểm soát từ 75% lãnh thổ Gaiastra trở lên.",                 rewardCr: 2200, rewardInf: 220, check: (g) => g.getFactionTerritoryPct(g.playerFaction) >= 75 }
+];
+
+export const TCG_QUESTS = [
+  {
+    id: "q_win_1",
+    icon: "⚔️",
+    title: "Chiến Công Mở Màn",
+    desc: "Thắng ít nhất 1 trận Đấu Thẻ Bài 3 Hàng.",
+    rewardCredits: 900,
+    rewardDust: 50,
+    progress: (g) => ({ cur: Math.min(1, g.stats?.battlesWon || 0), max: 1 })
+  },
+  {
+    id: "q_breed_1",
+    icon: "🧬",
+    title: "Khai Sinh Hậu Duệ Hàng 2",
+    desc: "Kích hoạt Lai Tạo Hàng 2 (♂ thắng ♀) sinh Token lên Hàng 1.",
+    rewardCredits: 1200,
+    rewardDust: 65,
+    progress: (g) => ({ cur: Math.min(1, g.stats?.hybridsCreated || 0), max: 1 })
+  },
+  {
+    id: "q_star_1",
+    icon: "🌟",
+    title: "Thức Tỉnh Tinh Anh ★",
+    desc: "Cường hóa ít nhất 1 thẻ bài lên cấp ★ Tinh Anh (Foil Mastery).",
+    rewardCredits: 1400,
+    rewardDust: 80,
+    progress: (g) => ({ cur: Math.min(1, Object.keys(g.cardStars || {}).filter((k) => g.cardStars[k] > 0).length), max: 1 })
+  },
+  {
+    id: "q_draft_1",
+    icon: "🎲",
+    title: "Chiến Binh Tuyển Chọn (Draft)",
+    desc: "Hoàn thành 1 bộ bài Draft 16 lá hoặc thắng 1 trận tại Đấu Trường Draft.",
+    rewardCredits: 1600,
+    rewardDust: 95,
+    progress: (g) => ({ cur: ((g.stats?.draftWins || 0) >= 1 || (g.draftState?.cards?.length || 0) >= 16) ? 1 : 0, max: 1 })
+  },
+  {
+    id: "q_tower_3",
+    icon: "🗼",
+    title: "Chinh Phục Tháp Hư Không",
+    desc: "Vượt qua Tầng 3+ trong chế độ Tháp Hư Không.",
+    rewardCredits: 2200,
+    rewardDust: 120,
+    progress: (g) => ({ cur: Math.min(3, g.stats?.gauntletMax || 0), max: 3 })
+  },
+  {
+    id: "q_story_5",
+    icon: "📖",
+    title: "Biên Niên Sử Chu Kỳ 12",
+    desc: "Hoàn thành ít nhất 3 chương trong 19 Chương Cốt Truyện Sử Thi.",
+    rewardCredits: 2000,
+    rewardDust: 110,
+    progress: (g) => ({ cur: Math.min(3, (g.vn?.completedChapters || []).length), max: 3 })
+  }
 ];
 
 export class GameState {
@@ -65,6 +122,17 @@ export class GameState {
 
     this.hybrids = [];
     this.collection = {};
+    this.cardStars = {};
+    this.claimedQuests = [];
+    this.draftState = {
+      active: false,
+      phase: "idle",
+      leaderId: null,
+      cards: [],
+      currentChoices: [],
+      wins: 0,
+      losses: 0
+    };
     this.cardDust = 260;
     this.decks = [];
     this.activeDeckId = "deck_1";
@@ -1086,10 +1154,161 @@ export class GameState {
     return { card: null, dust };
   }
 
+  // --- v13.0: CARD STAR MASTERY (★1 -> ★★ -> ★★★ FOIL), TCG QUESTS & DRAFT ARENA ---
+  getCardStarLevel(cardId) {
+    return Math.max(0, Math.min(3, Number(this.cardStars?.[cardId] || 0)));
+  }
+
+  getCardStarBonusCR(baseCR, starLevel = 0) {
+    const s = Math.max(0, Math.min(3, Number(starLevel || 0)));
+    if (s <= 0) return 0;
+    const pct = s === 1 ? 0.08 : (s === 2 ? 0.16 : 0.25);
+    const minFlat = s === 1 ? 25 : (s === 2 ? 55 : 95);
+    return Math.max(minFlat, Math.round((baseCR || 100) * pct));
+  }
+
+  getCardStarUpgradeCost(currentStar = 0) {
+    if (currentStar <= 0) return 60;
+    if (currentStar === 1) return 120;
+    if (currentStar === 2) return 220;
+    return 0;
+  }
+
+  upgradeCardStar(cardId, free = false) {
+    const card = resolveCard(cardId, this.hybrids);
+    if (!card) return { ok: false, msg: "Không tìm thấy thẻ bài." };
+    if (!this.cardStars || typeof this.cardStars !== "object") this.cardStars = {};
+    const cur = this.getCardStarLevel(cardId);
+    if (cur >= 3) {
+      return { ok: false, msg: `${card.name} đã đạt cấp Tinh Anh tối đa (★★★ Vũ Trụ)!` };
+    }
+    const cost = free ? 0 : this.getCardStarUpgradeCost(cur);
+    if (!free && (this.cardDust || 0) < cost) {
+      return { ok: false, msg: `Cần ${cost} Mảnh Gen để cường hóa ${card.name} lên ★${cur + 1} (Hiện có ${this.cardDust || 0} Mảnh).` };
+    }
+    if (!free) this.cardDust -= cost;
+    if (this.getOwnedCount(cardId) < 1) {
+      this.unlockCard(cardId, 1);
+    }
+    const nextStar = cur + 1;
+    this.cardStars[cardId] = nextStar;
+    this.stats.cardsUpgraded = (this.stats.cardsUpgraded || 0) + 1;
+    const bonusCR = this.getCardStarBonusCR(card.cr, nextStar);
+    this.addChronicle(`🌟 Cường hóa thẻ ${card.name} lên cấp ${"★".repeat(nextStar)} (+${bonusCR} CR & +${nextStar * 3}% tỷ lệ Lai H2)!`, "Cường Hóa Thẻ", "upgrade");
+    this.saveToSlot("auto");
+    return { ok: true, card, star: nextStar, bonusCR, cost };
+  }
+
+  claimTCGQuest(questId) {
+    const q = TCG_QUESTS.find((item) => item.id === questId);
+    if (!q) return { ok: false, msg: "Nhiệm vụ không tồn tại." };
+    if (!Array.isArray(this.claimedQuests)) this.claimedQuests = [];
+    if (this.claimedQuests.includes(questId)) {
+      return { ok: false, msg: "Bạn đã nhận thưởng nhiệm vụ này rồi!" };
+    }
+    const prog = q.progress(this);
+    if (prog.cur < prog.max) {
+      return { ok: false, msg: `Chưa hoàn thành tiến độ (${prog.cur}/${prog.max})!` };
+    }
+    this.claimedQuests.push(questId);
+    this.addRes(this.playerFaction, "credits", q.rewardCredits);
+    this.cardDust = (this.cardDust || 0) + q.rewardDust;
+    this.addChronicle(`🎁 Hoàn thành nhiệm vụ TCG "${q.title}": +${q.rewardCredits.toLocaleString()} Credits & +${q.rewardDust} Mảnh Gen!`, "Nhiệm Vụ TCG", "reward");
+    this.saveToSlot("auto");
+    return { ok: true, quest: q };
+  }
+
+  rollDraftPool(count = 3, leadersOnly = false) {
+    const pool = leadersOnly
+      ? CARDS.filter((c) => c.unique && c.cr >= 650)
+      : [...CARDS, ...(this.hybrids || [])];
+    const picked = [];
+    const copy = [...pool];
+    while (picked.length < count && copy.length > 0) {
+      const idx = Math.floor(Math.random() * copy.length);
+      picked.push(copy.splice(idx, 1)[0].id);
+    }
+    return picked;
+  }
+
+  startNewDraftRun() {
+    this.draftState = {
+      active: true,
+      phase: "leader_pick",
+      leaderId: null,
+      cards: [],
+      currentChoices: this.rollDraftPool(3, true),
+      wins: 0,
+      losses: 0
+    };
+    this.saveToSlot("auto");
+    return this.draftState;
+  }
+
+  pickDraftChoice(cardId) {
+    if (!this.draftState || !this.draftState.active) return { ok: false, msg: "Chưa khởi tạo lượt Draft." };
+    if (!this.draftState.currentChoices.includes(cardId)) return { ok: false, msg: "Lựa chọn không hợp lệ." };
+    const card = resolveCard(cardId, this.hybrids);
+    if (!card) return { ok: false, msg: "Thẻ bài không hợp lệ." };
+
+    if (this.draftState.phase === "leader_pick") {
+      this.draftState.leaderId = cardId;
+      this.draftState.phase = "card_pick";
+      this.draftState.currentChoices = this.rollDraftPool(3, false);
+      this.saveToSlot("auto");
+      return { ok: true, picked: card, isLeader: true, draftState: this.draftState };
+    }
+
+    if (this.draftState.phase === "card_pick") {
+      // Each pick adds 2 copies to complete a 16-card draft deck in 8 quick picks
+      this.draftState.cards.push(cardId);
+      if (this.draftState.cards.length < 16) {
+        this.draftState.cards.push(cardId);
+      }
+      if (this.draftState.cards.length >= 16) {
+        this.draftState.cards = this.draftState.cards.slice(0, 16);
+        this.draftState.phase = "ready";
+        this.draftState.currentChoices = [];
+      } else {
+        this.draftState.currentChoices = this.rollDraftPool(3, false);
+      }
+      this.saveToSlot("auto");
+      return { ok: true, picked: card, isLeader: false, draftState: this.draftState };
+    }
+    return { ok: false, msg: "Bộ bài Draft đã hoàn tất 16/16 lá!" };
+  }
+
+  recordDraftMatchResult(didWin) {
+    if (!this.draftState || !this.draftState.active) return null;
+    if (didWin) {
+      this.draftState.wins = (this.draftState.wins || 0) + 1;
+      this.stats.draftWins = (this.stats.draftWins || 0) + 1;
+    } else {
+      this.draftState.losses = (this.draftState.losses || 0) + 1;
+    }
+
+    let runEnded = false;
+    let grandPrize = null;
+    if (this.draftState.wins >= 5 || this.draftState.losses >= 2) {
+      runEnded = true;
+      const w = this.draftState.wins;
+      const prizeCr = 1000 + w * 900;
+      const prizeDust = 45 + w * 35;
+      this.addRes(this.playerFaction, "credits", prizeCr);
+      this.cardDust = (this.cardDust || 0) + prizeDust;
+      grandPrize = { wins: w, losses: this.draftState.losses, credits: prizeCr, dust: prizeDust };
+      this.addChronicle(`🎲 Kết thúc Đấu Trường Draft (${w} Thắng - ${this.draftState.losses} Thua): nhận +${prizeCr.toLocaleString()} Credits & +${prizeDust} Mảnh Gen!`, "Đấu Trường Draft", "draft");
+      this.draftState.active = false;
+      this.draftState.phase = "idle";
+    }
+    this.saveToSlot("auto");
+    return { runEnded, grandPrize, draftState: this.draftState };
+  }
+
   // --- SAVE / LOAD MULTI-SLOT ---
   serialize() {
     return JSON.stringify({
-      version: 5,
+      version: 6,
       savedAt: new Date().toLocaleString("vi-VN"),
       cycleMajor: this.cycleMajor,
       cycleMinor: this.cycleMinor,
@@ -1104,6 +1323,9 @@ export class GameState {
       superweaponCooldowns: this.superweaponCooldowns,
       hybrids: this.hybrids,
       collection: this.collection,
+      cardStars: this.cardStars,
+      claimedQuests: this.claimedQuests,
+      draftState: this.draftState,
       cardDust: this.cardDust,
       decks: this.decks,
       activeDeckId: this.activeDeckId,
@@ -1149,6 +1371,11 @@ export class GameState {
       if (data.superweaponCooldowns) this.superweaponCooldowns = data.superweaponCooldowns;
       this.hybrids = Array.isArray(data.hybrids) ? data.hybrids : [];
       this.collection = (data.collection && typeof data.collection === "object") ? { ...data.collection } : {};
+      this.cardStars = (data.cardStars && typeof data.cardStars === "object") ? { ...data.cardStars } : {};
+      this.claimedQuests = Array.isArray(data.claimedQuests) ? [...data.claimedQuests] : [];
+      this.draftState = (data.draftState && typeof data.draftState === "object")
+        ? { active: false, phase: "idle", leaderId: null, cards: [], currentChoices: [], wins: 0, losses: 0, ...data.draftState }
+        : { active: false, phase: "idle", leaderId: null, cards: [], currentChoices: [], wins: 0, losses: 0 };
       this.cardDust = typeof data.cardDust === "number" ? data.cardDust : 260;
 
       // Migrate or restore collection & multi-deck store cleanly
