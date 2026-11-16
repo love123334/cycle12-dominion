@@ -1,17 +1,15 @@
 // ============================================================================
-// CYCLE 12: AGE OF DOMINION — MARVEL SNAP × YU-GI-OH 3-ROW CARD ENGINE (v12.0)
-// Pure State + Resolve + AI Engine:
-// 1. Gene Energy ⚡: Starts at 3, +1/turn, max 8. Each card has cost 1–4 derived from CR.
-// 2. Data-Driven H1 Keywords: Xung Phong (charge), Khiên (shield), Rút Bài (draw),
-//    Xuyên Giáp (pierce), Hồi Phục (recover).
-// 3. Data-Driven H2 Keywords: Sinh Token (spawn_token), Rút Thêm (bonus_draw),
-//    Gỡ 1 Điểm Bắt (purge_capture).
-// 4. Gender Advantage: Male vs Female +2 Tier (+120 CR). Male beats Female ->
-//    Captured to Row 2, spawns Token onto Row 1, draws 2 cards at turn end.
-// 5. Leader Active Skills: "Gene Surge" (4⚡, +3 Tier / +180 CR all-board, 1/match) +
-//    Faction/Leader Unique Active Skill (3⚡, data-driven, 1/match).
-// 6. Smart AI (prioritizes player lanes, pre-calculates win/loss, saves ⚡,
-//    Void Tower scaling + Boss every 5 floors) & Full Turn Undo stack.
+// CYCLE 12: AGE OF DOMINION — 5-LANE × 5-PHASE YU-GI-OH / SNAP TCG ENGINE (v14.0)
+// Core Architecture:
+// 1. 5 Lanes per Row (Row 1: 5 Combat Slots, Row 2: up to 5 Support/Breeding Slots, Row 3: Representative Leader).
+// 2. Opening Hand = 2 Male (♂) + 2 Female (♀) cards. Legal Deck requires >= 2 Male & >= 2 Female cards.
+// 3. 5 Explicit Turn Phases:
+//    - DRAW PHASE (Rút 1 lá mặc định, hoặc 2 lá nếu có hiệu ứng Meralina; +1⚡ Năng lượng Gen).
+//    - SUMMON PHASE (Triệu hồi bài từ tay lên 5 làn Hàng 1 & ẤN kích hoạt Ignition Effect của các lá ở Hàng 2).
+//    - EFFECT PHASE (ẤN kích hoạt hiệu ứng của các lá ở Hàng 1 và Hàng 3).
+//    - BATTLE PHASE (Giao chiến dọc 5 làn: Thẻ thường thua -> sang Hàng 2 đối phương; Token thua -> biến mất & dồn sát thương vào Hàng 3!).
+//    - END PHASE (Kết thúc lượt, dọn hiệu ứng hết hạn, chuyển sang lượt mới).
+// 4. Lore-Accurate Custom Character Effects (Ovalina, Meralina, Arisia, Aphrodina, Cynthia & all 72 characters).
 // ============================================================================
 
 import {
@@ -19,6 +17,7 @@ import {
   resolveCard,
   buildFactionDeck,
   validateDeckForLeader,
+  checkDeckLegality,
   hybridToCard,
   H1_KEYWORDS,
   H2_KEYWORDS,
@@ -30,20 +29,47 @@ import {
 import { FACTIONS } from "../data/lore.js";
 import { RACE_STYLE } from "../data/characters.js";
 
-export const LANE_LOCATIONS = [
-  { id: "kronea_bastion", name: "Pháo Đài Kronea", desc: "Làn Sylvarian: Thẻ phe Sylvarian +80 CR tại làn này." },
-  { id: "pherone_nexus", name: "Pherone Nexus", desc: "Làn Sinh Sản: +12% tỷ lệ tạo Token Hàng 2 nếu thắng tại làn này (Tối đa 99%, Tamarite 100%)." },
-  { id: "predita_line", name: "Chiến Tuyến Predita", desc: "Làn Tử Thủ: Thẻ có CR gốc <= 600 được cộng +90 CR." },
-  { id: "outer_layer", name: "Vùng Ngoại Eris", desc: "Làn Cân Bằng: Vô hiệu hóa buff chủng tộc ở làn này." },
-  { id: "abyss_rift", name: "Khe Nứt Vực Thẳm", desc: "Làn Hỗn Mang: Thẻ Nadir / Demon +90 CR; thẻ < 800 CR bị -40 CR." },
-  { id: "gaiastra_orbit", name: "Quỹ Đạo Gaiastra", desc: "Làn Chuẩn: Giao chiến thuần CR & nội tại Hàng 1–2–3." }
+export const DUEL_PHASES = [
+  { id: "draw", num: 1, name: "DRAW PHASE", short: "1. Draw", vi: "1. Rút Bài", desc: "Rút 1 lá (hoặc 2 lá nếu có Meralina H1) & +1⚡." },
+  { id: "summon", num: 2, name: "SUMMON PHASE", short: "2. Summon & H2", vi: "2. Triệu Hồi & Eff H2", desc: "Đặt bài lên 5 làn Hàng 1 & ẤN kích hoạt hiệu ứng Hàng 2 (Ignition)." },
+  { id: "effect", num: 3, name: "EFFECT PHASE", short: "3. Effect H1/H3", vi: "3. Hiệu Ứng H1/H3", desc: "ẤN kích hoạt hiệu ứng các thẻ ở Hàng 1 & Thủ lĩnh Hàng 3." },
+  { id: "battle", num: 4, name: "BATTLE PHASE", short: "4. Battle (5 Làn)", vi: "4. Giao Chiến 5 Làn", desc: "Giao chiến dọc 5 làn! Token thua biến mất; thẻ thường thua sang Hàng 2 địch." },
+  { id: "end", num: 5, name: "END PHASE", short: "5. End Phase", vi: "5. Kết Lượt", desc: "Kết thúc lượt & sang Draw Phase lượt tiếp theo." }
 ];
 
-const OMNI_VARIANTS = [
-  { key: "titan", title: "Giáp Thú", crBonus: 95, r1Id: "omni_titan", tag: "Omni: Càn Quét (+95 CR)", desc: "Hàng 1: Token đột biến hình thái Giáp Thú (+95 CR)." },
-  { key: "siphon", title: "Ký Sinh", crBonus: 45, r1Id: "nadir_psionic", tag: "Omni: Hấp Thụ (-70 CR địch)", desc: "Hàng 1: +45 CR & giảm 70 CR đối thủ đối diện (CR < 800)." },
-  { key: "guard", title: "Máu Xanh", crBonus: 65, r1Id: "blue_blood_guard", tag: "Omni: Kháng Độc (+65 CR)", desc: "Hàng 1: +65 CR & miễn nhiễm trừ CR từ Virus/Nadir." },
-  { key: "twin", title: "Phân Bào Đôi", crBonus: 25, r1Id: "frontline_valor", tag: "Omni: Sinh Đôi (+25 CR)", desc: "Hàng 1: +25 CR — Omni-Womb tự phân đôi thành 2 Token lên Hàng 1!" }
+export const LANE_LOCATIONS = [
+  { id: "kronea_bastion", name: "Pháo Đài Kronea", desc: "Làn Sylvarian: Thẻ phe Sylvarian +80 CR tại làn này." },
+  { id: "pherone_nexus", name: "Pherone Nexus", desc: "Làn Huyết Thống: Thẻ Pherone Nexus / Tamarite & Token +90 CR tại làn này." },
+  { id: "predita_line", name: "Chiến Tuyến Predita", desc: "Làn Tử Thủ: Thẻ có CR gốc <= 600 hoặc Salvic được cộng +90 CR." },
+  { id: "outer_layer", name: "Vùng Ngoại Eris", desc: "Làn Cân Bằng: Thẻ Eris +90 CR; vô hiệu hóa buff địa hình khác." },
+  { id: "abyss_rift", name: "Khe Nứt Vực Thẳm", desc: "Làn Hỗn Mang: Thẻ Nadir / Demon +90 CR tại làn này." },
+  { id: "gaiastra_orbit", name: "Quỹ Đạo Gaiastra", desc: "Làn Trung Tâm: Giao chiến chuẩn theo CR & hiệu ứng Hàng 1–2–3." },
+  { id: "evernight_tower", name: "Tháp Đêm Evernight", desc: "Làn Đô Thị Ngầm: Thẻ Người / The Supers / Collectors +85 CR." },
+  { id: "citadel_throne", name: "Thành Trì Nadirius", desc: "Làn Thiết Luật: Thẻ Nam (♂) hoặc Nadirius +80 CR tại làn này." }
+];
+
+export const TACTICAL_DIRECTIVES = [
+  {
+    id: "shield_matrix",
+    name: "Khiên Quang Năng",
+    icon: "🛡️",
+    cost: 1,
+    desc: "1⚡ (Effect Phase): Cấp Khiên Chặn Thua lần đầu cho các thẻ Hàng 1 của bạn (hoặc +80 CR nếu đã có)."
+  },
+  {
+    id: "mutagen_burst",
+    name: "Xung Kích Đột Biến",
+    icon: "🧬",
+    cost: 2,
+    desc: "2⚡ (Effect Phase): +120 CR toàn Hàng 1 lượt này & rút +1 lá bài chiến thuật."
+  },
+  {
+    id: "tactical_rescue",
+    name: "Giải Cứu Tác Chiến",
+    icon: "🔓",
+    cost: 2,
+    desc: "2⚡ (Effect Phase): Giải cứu 1 thẻ của bạn từ Hàng 2 Địch về tay, hoặc Rút +2 lá nếu H2 Địch trống."
+  }
 ];
 
 function shuffle(arr) {
@@ -55,8 +81,6 @@ function shuffle(arr) {
   return copy;
 }
 
-// Scales small tactical bonuses (+2, +3) so they work identically in both
-// small-number unit tests (CR <= 25 -> literal +2 / +3) and Cycle 12 lore CR (CR > 25 -> +120 / +180)
 export function scaleTacticalDelta(smallVal, referenceCR = 500, customScaled = null) {
   if ((referenceCR || 0) <= 25) return smallVal;
   return customScaled !== null ? customScaled : smallVal * 60;
@@ -74,8 +98,17 @@ export function hasH2Keyword(card, kwId) {
   return list.includes(kwId);
 }
 
+export function isCardUnaffected(card) {
+  if (!card) return false;
+  return Boolean(
+    card.unaffectedByOtherCards ||
+    card.row1Effect?.unaffectedByOtherCards ||
+    card.id === "aphrodina"
+  );
+}
+
 // ============================================================================
-// PURE LANE RESOLVE FUNCTION (Testable in isolation without DOM or Engine)
+// PURE LANE RESOLVE FUNCTION (Supports 5 Lanes, First-Battle Immunity & Token Vanish)
 // ============================================================================
 export function resolveLanePair(pCard, eCard, pEval, eEval, laneIdx = 0) {
   const pTotal = pEval ? pEval.total : (pCard?.cr || 0);
@@ -92,9 +125,9 @@ export function resolveLanePair(pCard, eCard, pEval, eEval, laneIdx = 0) {
   }
 
   if (pTotal > eTotal) {
-    const pHasPierce = hasH1Keyword(pCard, "pierce");
-    const eHasShield = (eCard.shieldCharges || 0) > 0;
-    if (eHasShield && !pHasPierce) {
+    const pHasPierce = Boolean(hasH1Keyword(pCard, "pierce") || pCard.row1Effect?.pierceImmunity);
+    const eImmune = Boolean((eCard.shieldCharges || 0) > 0 || eCard.firstBattleImmunity);
+    if (eImmune && !pHasPierce && !isCardUnaffected(pCard)) {
       return {
         lane: laneIdx,
         outcome: "enemy_shield_block",
@@ -108,27 +141,31 @@ export function resolveLanePair(pCard, eCard, pEval, eEval, laneIdx = 0) {
         winnerRecoverEnergy: hasH1Keyword(pCard, "recover") ? 1 : 0
       };
     }
-    const triggeredBreed = pCard.gender === "Male" && eCard.gender === "Female";
+    const loserIsToken = Boolean(eCard.isToken);
+    const triggeredBreed = !loserIsToken && pCard.gender === "Male" && eCard.gender === "Female";
     return {
       lane: laneIdx,
       outcome: "player_win",
       winnerSide: "player",
       pTotal,
       eTotal,
-      captured: eCard.name,
-      capturedCard: eCard,
+      overkill: Math.max(0, pTotal - eTotal),
+      loserIsToken,
+      captured: loserIsToken ? null : eCard.name,
+      capturedCard: loserIsToken ? null : eCard,
+      destroyedToken: loserIsToken ? eCard : null,
       winnerCard: pCard,
       shieldBroken: false,
-      pierced: Boolean(eHasShield && pHasPierce),
+      pierced: Boolean(eImmune && pHasPierce),
       triggeredBreed,
       winnerRecoverEnergy: hasH1Keyword(pCard, "recover") ? 1 : 0
     };
   }
 
   if (eTotal > pTotal) {
-    const eHasPierce = hasH1Keyword(eCard, "pierce");
-    const pHasShield = (pCard.shieldCharges || 0) > 0;
-    if (pHasShield && !eHasPierce) {
+    const eHasPierce = Boolean(hasH1Keyword(eCard, "pierce") || eCard.row1Effect?.pierceImmunity);
+    const pImmune = Boolean((pCard.shieldCharges || 0) > 0 || pCard.firstBattleImmunity);
+    if (pImmune && !eHasPierce && !isCardUnaffected(eCard)) {
       return {
         lane: laneIdx,
         outcome: "player_shield_block",
@@ -142,18 +179,22 @@ export function resolveLanePair(pCard, eCard, pEval, eEval, laneIdx = 0) {
         winnerRecoverEnergy: hasH1Keyword(eCard, "recover") ? 1 : 0
       };
     }
-    const triggeredBreed = eCard.gender === "Male" && pCard.gender === "Female";
+    const loserIsToken = Boolean(pCard.isToken);
+    const triggeredBreed = !loserIsToken && eCard.gender === "Male" && pCard.gender === "Female";
     return {
       lane: laneIdx,
       outcome: "enemy_win",
       winnerSide: "enemy",
       pTotal,
       eTotal,
-      captured: pCard.name,
-      capturedCard: pCard,
+      overkill: Math.max(0, eTotal - pTotal),
+      loserIsToken,
+      captured: loserIsToken ? null : pCard.name,
+      capturedCard: loserIsToken ? null : pCard,
+      destroyedToken: loserIsToken ? pCard : null,
       winnerCard: eCard,
       shieldBroken: false,
-      pierced: Boolean(pHasShield && eHasPierce),
+      pierced: Boolean(pImmune && eHasPierce),
       triggeredBreed,
       winnerRecoverEnergy: hasH1Keyword(eCard, "recover") ? 1 : 0
     };
@@ -170,33 +211,11 @@ export function resolveLanePair(pCard, eCard, pEval, eEval, laneIdx = 0) {
   };
 }
 
-export const TACTICAL_DIRECTIVES = [
-  {
-    id: "shield_matrix",
-    name: "Khiên Quang Năng",
-    icon: "🛡️",
-    cost: 1,
-    desc: "1⚡: Cấp Khiên Chặn Thua (🛡️) cho các thẻ Hàng 1 của bạn (hoặc +60 CR nếu đã có Khiên)."
-  },
-  {
-    id: "mutagen_burst",
-    name: "Xung Kích Đột Biến",
-    icon: "🧬",
-    cost: 2,
-    desc: "2⚡: +90 CR toàn Hàng 1 lượt này & kích hoạt ngay 1 đợt Lai Tạo Sớm Hàng 2 → Hàng 1 (hoặc Rút +1 lá)."
-  },
-  {
-    id: "tactical_rescue",
-    name: "Giải Cứu Tác Chiến",
-    icon: "🔓",
-    cost: 2,
-    desc: "2⚡: Giải cứu 1 thẻ của bạn từ Hàng 2 Địch về tay (giảm 1 điểm bắt của Địch), hoặc Rút +2 lá nếu H2 Địch trống."
-  }
-];
-
 function makeInstance(card, ownerSide, uidNum, gameStateRef = null) {
-  const h1Keywords = [...(card.h1Keywords || card.row1Effect?.keywords || [])];
-  const h2Keywords = [...(card.h2Keywords || card.row2Effect?.keywords || ["spawn_token"])];
+  const r1 = card.row1Effect ? { ...card.row1Effect } : { id: "none", isNone: true, tag: "None", bonusFlat: 0, desc: "None" };
+  const r2 = card.row2Effect ? { ...card.row2Effect } : { id: "none", isNone: true, tag: "None", crAura: 0, desc: "None" };
+  const h1Keywords = [...(card.h1Keywords || r1.keywords || [])];
+  const h2Keywords = [...(card.h2Keywords || r2.keywords || [])];
   const cost = typeof card.cost === "number" ? card.cost : getCardEnergyCost(card.cr, card.isToken);
   const starLevel = (ownerSide === "player" && gameStateRef && typeof gameStateRef.getCardStarLevel === "function")
     ? gameStateRef.getCardStarLevel(card.id)
@@ -206,6 +225,8 @@ function makeInstance(card, ownerSide, uidNum, gameStateRef = null) {
     : 0;
   return {
     ...card,
+    row1Effect: r1,
+    row2Effect: r2,
     baseOriginCR: card.cr,
     cr: (card.cr || 100) + starBonusCR,
     starLevel,
@@ -213,10 +234,23 @@ function makeInstance(card, ownerSide, uidNum, gameStateRef = null) {
     cost,
     h1Keywords,
     h2Keywords,
+    unaffectedByOtherCards: Boolean(card.unaffectedByOtherCards || r1.unaffectedByOtherCards || card.id === "aphrodina"),
+    firstBattleImmunity: Boolean(r1.selfFirstBattleImmunity),
     shieldCharges: h1Keywords.includes("shield") ? 1 : 0,
+    h1EffectActive: false,
+    h1ActivatedThisTurn: false,
+    h2ActivatedThisTurn: false,
+    meralinaHalved: false,
+    tempBuffCR: 0,
+    tempPenaltyCR: 0,
+    nullifiedBuffs: false,
+    halvedByEnemy: false,
+    battleDamageTaken: 0,
     uid: `${ownerSide}_${card.id}_${uidNum}`,
     ownerSide,
+    originalOwnerSide: ownerSide,
     deployedTurn: 0,
+    spawnedFromRow2Turn: card.spawnedFromRow2Turn || 0,
     breedingActive: false,
     sireCard: null,
     spawnCount: 0,
@@ -227,20 +261,6 @@ function makeInstance(card, ownerSide, uidNum, gameStateRef = null) {
 
 function cloneSideState(side) {
   return JSON.parse(JSON.stringify(side));
-}
-
-function isNadirCard(c) {
-  if (!c) return false;
-  const sp = (c.species || "").toLowerCase();
-  const rc = (c.race || "").toLowerCase();
-  return c.fac === "western_nadir" || c.fac === "nadirius" || sp.includes("nadir") || rc.includes("nadir");
-}
-
-function isMutantOrWombiote(c) {
-  if (!c) return false;
-  const sp = (c.species || "").toLowerCase();
-  const rc = (c.race || "").toLowerCase();
-  return sp.includes("wombiote") || rc === "mutant" || rc === "wombiote" || c.fac === "collectors";
 }
 
 export class CardBattleEngine {
@@ -256,6 +276,8 @@ export class CardBattleEngine {
     sectorId = null,
     gameStateRef = null
   } = {}) {
+    this.maxLanes = 5;
+    this.maxRow2 = 5;
     this.hybrids = hybrids;
     this.difficulty = difficulty;
     this.gauntletFloor = gauntletFloor || 0;
@@ -265,20 +287,21 @@ export class CardBattleEngine {
     this.gameStateRef = gameStateRef;
     this.uidCounter = 1;
     this.turn = 1;
-    this.maxTurns = 24;
+    this.phase = "summon"; // Turn 1 begins in Summon Phase right after Opening Hand (2♂ + 2♀) is drawn!
+    this.maxTurns = 28;
     this.log = [];
     this.lastNewTokens = [];
     this.lastLaneResults = [];
     this.over = false;
     this.winner = null; // "player" | "enemy"
-    this.winReason = null; // "capture_3" | "leader_breach" | "tiebreak"
+    this.winReason = null; // "capture_5" | "leader_breach" | "tiebreak"
     this.selectedHandIdx = null;
-    this.maxHandSize = 8;
+    this.maxHandSize = 9;
     this.turnHistory = [];
 
-    // Roll 3 Marvel-Snap-inspired Cosmic Locations for the 3 Vertical Lanes
+    // Roll 5 Cosmic Locations for the 5 Vertical Lanes
     const shuffledLocs = shuffle(LANE_LOCATIONS);
-    this.lanes = shuffledLocs.slice(0, 3);
+    this.lanes = shuffledLocs.slice(0, 5);
 
     const pLeaderCard = resolveCard(playerLeaderId, hybrids) || CARD_BY_ID.arisia;
     const eLeaderCard = resolveCard(enemyLeaderId, []) || CARD_BY_ID.overlord;
@@ -288,7 +311,10 @@ export class CardBattleEngine {
         ? playerDeckIds.filter((id) => Boolean(resolveCard(id, hybrids)))
         : validateDeckForLeader(playerDeckIds, pLeaderCard.id, hybrids))
       : buildFactionDeck(pLeaderCard.id, hybrids);
-    const finalPDeckIds = legalPDeck.length >= 10 ? legalPDeck : buildFactionDeck(pLeaderCard.id, hybrids);
+    const legalityCheck = checkDeckLegality(legalPDeck, hybrids);
+    const finalPDeckIds = (legalPDeck.length >= 10 && legalityCheck.hasMinGender)
+      ? legalPDeck
+      : buildFactionDeck(pLeaderCard.id, hybrids);
 
     const legalEDeck = (enemyDeckIds && enemyDeckIds.length)
       ? validateDeckForLeader(enemyDeckIds, eLeaderCard.id, [])
@@ -297,7 +323,7 @@ export class CardBattleEngine {
 
     this.player = {
       side: "player",
-      energy: 3,
+      energy: 4,
       maxEnergy: 8,
       mulliganUsed: false,
       directiveUsedThisTurn: false,
@@ -307,9 +333,14 @@ export class CardBattleEngine {
       leaderSkillBuffCR: 0,
       leaderSkillEnemyPenaltyCR: 0,
       leaderSkillBreedBoost: 0,
+      summonLockedOnTurn: 0,
+      ovalinaH1Active: false,
+      meralinaDrawTwoActive: false,
+      arisiaTokenBuffActive: false,
       leader: makeInstance(pLeaderCard, "player", this.uidCounter++, gameStateRef),
-      row1: [null, null, null],
+      row1: [null, null, null, null, null],
       row2: [],
+      graveyard: [],
       hand: [],
       totalTokensBred: 0,
       deck: shuffle(finalPDeckIds.map((id) => makeInstance(resolveCard(id, hybrids) || CARD_BY_ID.tr_syl_guard, "player", this.uidCounter++, gameStateRef)))
@@ -317,7 +348,7 @@ export class CardBattleEngine {
 
     this.enemy = {
       side: "enemy",
-      energy: this.isBossFloor ? 4 : 3,
+      energy: this.isBossFloor ? 5 : 4,
       maxEnergy: 8,
       mulliganUsed: false,
       directiveUsedThisTurn: false,
@@ -327,38 +358,63 @@ export class CardBattleEngine {
       leaderSkillBuffCR: 0,
       leaderSkillEnemyPenaltyCR: 0,
       leaderSkillBreedBoost: 0,
+      summonLockedOnTurn: 0,
+      ovalinaH1Active: false,
+      meralinaDrawTwoActive: false,
+      arisiaTokenBuffActive: false,
       leader: makeInstance(eLeaderCard, "enemy", this.uidCounter++),
-      row1: [null, null, null],
+      row1: [null, null, null, null, null],
       row2: [],
+      graveyard: [],
       hand: [],
       totalTokensBred: 0,
       deck: shuffle(finalEDeckIds.map((id) => makeInstance(resolveCard(id, []) || CARD_BY_ID.tr_wn_raider, "enemy", this.uidCounter++)))
     };
 
-    // Draw 4 opening cards each (+2 drawn at end of every turn!)
-    // Ensure opening hand has at least one 1–3⚡ playable card on Turn 1
-    this.drawCards("player", 4);
-    this.drawCards("enemy", 4);
+    // Opening Hand Rule: Strictly 2 Male (♂) + 2 Female (♀) cards!
+    this.drawOpeningHand("player");
+    this.drawOpeningHand("enemy");
     this.ensureTurn1PlayableHand("player");
     this.ensureTurn1PlayableHand("enemy");
 
     const pFacName = (FACTIONS[pLeaderCard.fac] && FACTIONS[pLeaderCard.fac].name) || pLeaderCard.fac;
     const eFacName = (FACTIONS[eLeaderCard.fac] && FACTIONS[eLeaderCard.fac].name) || eLeaderCard.fac;
     const bossTag = this.isBossFloor ? ` [👑 BOSS TẦNG ${this.gauntletFloor}]` : "";
-    this.pushLog(`⚔️ Khai chiến 3 Làn! ${pLeaderCard.name} [${pFacName}] vs ${eLeaderCard.name} [${eFacName}]${bossTag}. Khởi đầu 3⚡ (+1⚡/lượt, tối đa 8⚡)!`);
-    this.pushLog(`💗 Luật TCG: ♂ đấu ♀ (+2 Cấp/+120 CR) • ♂ thắng ♀ -> Sang Hàng 2, sinh Token lên HÀNG 1 & rút 2 lá cuối lượt!`);
+    this.pushLog(`⚔️ Khai chiến 5 Làn! ${pLeaderCard.name} [${pFacName}] vs ${eLeaderCard.name} [${eFacName}]${bossTag}. Tay khởi đầu: 2 ♂ Nam + 2 ♀ Nữ!`);
+    this.pushLog(`🧭 Chu trình 5 Phase: [1. Draw] → [2. Summon & Ấn Eff H2] → [3. Effect H1/H3] → [4. Battle 5 Làn] → [5. End Phase].`);
+  }
+
+  // Draws exactly 2 Male (♂) and 2 Female (♀) cards for the Opening Hand
+  drawOpeningHand(sideKey) {
+    const s = this.getSide(sideKey);
+    let mCount = 0;
+    let fCount = 0;
+
+    for (let i = 0; i < s.deck.length && mCount < 2; ) {
+      if (s.deck[i].gender === "Male") {
+        s.hand.push(s.deck.splice(i, 1)[0]);
+        mCount++;
+      } else {
+        i++;
+      }
+    }
+    for (let i = 0; i < s.deck.length && fCount < 2; ) {
+      if (s.deck[i].gender === "Female") {
+        s.hand.push(s.deck.splice(i, 1)[0]);
+        fCount++;
+      } else {
+        i++;
+      }
+    }
+    while (s.hand.length < 4 && s.deck.length > 0) {
+      s.hand.push(s.deck.shift());
+    }
   }
 
   ensureTurn1PlayableHand(sideKey) {
     const s = this.getSide(sideKey);
     if (s.hand.some((c) => (c.cost || 1) <= s.energy)) return;
-    const cheapIdx = s.deck.findIndex((c) => (c.cost || 1) <= s.energy);
-    if (cheapIdx >= 0 && s.hand.length > 0) {
-      const cheapCard = s.deck.splice(cheapIdx, 1)[0];
-      const expensiveCard = s.hand.pop();
-      s.hand.push(cheapCard);
-      s.deck.push(expensiveCard);
-    } else if (s.hand.length > 0) {
+    if (s.hand.length > 0) {
       s.hand[0].cost = Math.min(s.hand[0].cost || 3, s.energy);
     }
   }
@@ -366,6 +422,7 @@ export class CardBattleEngine {
   saveTurnSnapshot(actionLabel = "Thao tác") {
     this.turnHistory.push({
       actionLabel,
+      phase: this.phase,
       uidCounter: this.uidCounter,
       selectedHandIdx: this.selectedHandIdx,
       log: [...this.log],
@@ -383,18 +440,19 @@ export class CardBattleEngine {
       return { ok: false, reason: "Không có thao tác nào trong lượt này để hoàn tác." };
     }
     const snap = this.turnHistory.pop();
+    this.phase = snap.phase || "summon";
     this.uidCounter = snap.uidCounter;
     this.selectedHandIdx = null;
     this.log = snap.log;
     this.player = snap.player;
     this.enemy = snap.enemy;
-    this.pushLog(`↩️ Đã hoàn tác: ${snap.actionLabel} (Hoàn lại ⚡ & vị trí thẻ).`);
+    this.pushLog(`↩️ Đã hoàn tác: ${snap.actionLabel} (Phục hồi Phase & vị trí thẻ).`);
     return { ok: true, actionLabel: snap.actionLabel, remainingUndos: this.turnHistory.length };
   }
 
   pushLog(msg) {
     this.log.push(msg);
-    if (this.log.length > 80) this.log.shift();
+    if (this.log.length > 90) this.log.shift();
   }
 
   getSide(sideKey) {
@@ -412,10 +470,24 @@ export class CardBattleEngine {
     return s.energy - prev;
   }
 
-  // Live snapshot of Row 2 Breeding & Row 1 Token state for Conditional Passives
+  drawCards(sideKey, count = 1) {
+    const s = this.getSide(sideKey);
+    let drawn = 0;
+    for (let i = 0; i < count; i++) {
+      if (s.deck.length === 0 || s.hand.length >= this.maxHandSize) break;
+      s.hand.push(s.deck.shift());
+      drawn++;
+    }
+    return drawn;
+  }
+
+  getRow1Cards(sideKey) {
+    return this.getSide(sideKey).row1.filter(Boolean);
+  }
+
   getSideBreedingContext(sideKey = "player") {
     const s = this.getSide(sideKey);
-    const activeBreeders = s.row2.filter((c) => Boolean(c.breedingActive));
+    const activeBreeders = s.row2.filter((c) => Boolean(c.row2Effect && !c.row2Effect.isNone && c.row2Effect.id !== "none"));
     const row1Tokens = s.row1.filter((c) => c && c.isToken);
     const hasDick =
       s.leader?.id === "dick" ||
@@ -439,47 +511,25 @@ export class CardBattleEngine {
   isConditionMet(card, oppCard = null, sideKey = "player") {
     if (!card) return false;
     const r1 = card.row1Effect || {};
-    const cond = r1.condType;
-    if (!cond) return false;
+    if (r1.isNone || r1.id === "none") return false;
     const ctx = this.getSideBreedingContext(sideKey);
     const s = this.getSide(sideKey);
-    const opp = this.getOpp(sideKey);
-
-    switch (cond) {
-      case "row1_token":
-        return ctx.hasRow1Token || (r1.id === "cr_gap_burst" && Boolean(oppCard) && Math.abs((card.cr || 0) - (oppCard.cr || 0)) >= 250);
-      case "row1_ally_token":
-        return s.row1.some((ally) => ally && ally.uid !== card.uid && ally.isToken);
-      case "active_breed":
-        return ctx.hasActiveBreed;
-      case "token_bred":
-        return ctx.totalTokensBred > 0 || ctx.hasRow1Token;
-      case "active_breed_or_token":
-        return ctx.hasTokenOrBreed || (r1.id === "predita_will" && (isNadirCard(oppCard) || opp.row2.length >= 1));
-      case "active_breed_or_dick":
-        return ctx.hasTokenOrBreed || ctx.hasDick;
-      default:
-        return false;
+    if (card.id === "ovalina") return s.row2.length > 0;
+    if (card.id === "meralina") return s.row1.some((u) => u && u.id === "ragnaroir") || s.leader?.id === "ragnaroir";
+    if (card.id === "arisia") return ctx.hasRow1Token || s.row1.some(Boolean);
+    if (r1.condType) {
+      return ctx.hasTokenOrBreed || ctx.hasDick;
     }
-  }
-
-  drawCards(sideKey, count = 2) {
-    const s = this.getSide(sideKey);
-    let drawn = 0;
-    for (let i = 0; i < count; i++) {
-      if (s.deck.length === 0 || s.hand.length >= this.maxHandSize) break;
-      s.hand.push(s.deck.shift());
-      drawn++;
-    }
-    return drawn;
+    return Boolean(card.h1EffectActive);
   }
 
   getRow2SupportAura(sideKey) {
     const s = this.getSide(sideKey);
     const ctx = this.getSideBreedingContext(sideKey);
     return s.row2.reduce((sum, cap) => {
-      let aura = (cap.row2Effect && cap.row2Effect.crAura) || 40;
-      if (cap.row2Effect?.doubleIfTokenBred && (ctx.hasRow1Token || ctx.totalTokensBred > 0)) {
+      if (!cap.row2Effect || cap.row2Effect.isNone || cap.row2Effect.id === "none") return sum;
+      let aura = cap.row2Effect.crAura || 0;
+      if (cap.row2Effect.doubleIfTokenBred && (ctx.hasRow1Token || ctx.totalTokensBred > 0)) {
         aura *= 2;
       }
       return sum + aura;
@@ -491,180 +541,744 @@ export class CardBattleEngine {
     const leader = s.leader;
     if (!leader || !targetCard || targetCard.uid === leader.uid) return 0;
     if ((targetCard.cr || 0) <= 25) return 0;
+    if (isCardUnaffected(targetCard)) return 0;
     const r1 = leader.row1Effect || {};
-    if (r1.id === "syl_empress" && (targetCard.fac === "sylvarian" || (targetCard.race || "").includes("syl"))) return 80;
-    if (r1.id === "nadirius_decree" && targetCard.fac === "nadirius") return 55;
-    if (r1.id === "predita_will" && targetCard.fac === "salvic") return 60;
-    if (r1.id === "hyper_photon" && targetCard.fac === "tamarite") return 70;
-    if (r1.id === "collector_harvest") return s.row2.length * 40;
-    return Math.round((r1.bonusFlat || 60) * 0.35);
+    if (r1.isNone || r1.id === "none") return 0;
+    if (leader.h1EffectActive) {
+      return Math.round((r1.bonusFlat || 80) * 0.4);
+    }
+    return Math.round((r1.bonusFlat || 60) * 0.25);
   }
 
-  // Computes transparent Combat CR for any card on Row 1 (with optional laneIdx) or Leader on Row 3
+  // ==========================================================================
+  // PHASE MANAGEMENT: DRAW -> SUMMON -> EFFECT -> BATTLE -> END
+  // ==========================================================================
+  setPhase(targetPhaseId) {
+    if (this.over) return { ok: false, reason: "Trận đấu đã kết thúc." };
+    const order = ["draw", "summon", "effect", "battle", "end"];
+    const curIdx = order.indexOf(this.phase);
+    const tgtIdx = order.indexOf(targetPhaseId);
+    if (tgtIdx < 0) return { ok: false, reason: "Phase không hợp lệ." };
+    if (tgtIdx < curIdx) {
+      return { ok: false, reason: `Không thể lùi về ${targetPhaseId.toUpperCase()} PHASE (hãy dùng nút Hoàn Tác ↩️ nếu muốn quay lại)!` };
+    }
+    if (targetPhaseId === "effect" && this.phase === "summon") {
+      this.saveTurnSnapshot("Chuyển sang Effect Phase");
+      this.phase = "effect";
+      this.selectedHandIdx = null;
+      this.pushLog(`✨ [Lượt ${this.turn} • EFFECT PHASE] Hãy ấn vào thẻ ở Hàng 1 hoặc Hàng 3 (hoặc bấm '✨ Bật Eff H1/H3') để kích hoạt hiệu ứng!`);
+      return { ok: true, phase: this.phase };
+    }
+    return { ok: true, phase: this.phase };
+  }
+
+  // Helper to spawn a Token onto a side's Row 1 (up to 5 slots)
+  createAndPlaceToken(sideKey, {
+    name = "Token Chiến Binh",
+    species = "Token",
+    race = "hybrid",
+    fac = null,
+    gender = null,
+    cr = 400,
+    unaffected = false,
+    tag = "Token Trực Chiến",
+    desc = "Token triệu hồi lên Hàng 1 (Nếu thua giao chiến sẽ biến mất thay vì vào Hàng 2)."
+  } = {}) {
+    const s = this.getSide(sideKey);
+    const targetLane = s.row1.findIndex((slot) => slot === null);
+    const finalGender = gender || (Math.random() < 0.5 ? "Male" : "Female");
+    const finalFac = fac || s.leader.fac;
+    const style = RACE_STYLE[race] || { aura: "#38bdf8" };
+    const finalCR = Math.max(20, Math.round(cr));
+
+    const tokenObj = {
+      id: `tok_${this.turn}_${this.uidCounter}`,
+      isToken: true,
+      name,
+      fac: finalFac,
+      species,
+      race,
+      gender: finalGender,
+      cr: finalCR,
+      cost: 1,
+      h: 1.85,
+      auraA: style.aura,
+      auraB: "#f472b6",
+      unaffectedByOtherCards: unaffected,
+      h1Keywords: unaffected ? [] : ["charge"],
+      h2Keywords: [],
+      row1Effect: {
+        id: unaffected ? "token_unaffected" : "token_standard",
+        tag: unaffected ? "🛡️ Kháng Hiệu Ứng Bài Khác" : tag,
+        bonusFlat: 0,
+        unaffectedByOtherCards: unaffected,
+        desc
+      },
+      row2Effect: {
+        id: "none",
+        isNone: true,
+        tier: "none",
+        crAura: 0,
+        tag: "Token (Biến mất khi thua)",
+        desc: "Token không thể bị đặt vào Hàng 2 mà biến mất khi thua giao chiến."
+      }
+    };
+
+    const inst = makeInstance(hybridToCard(tokenObj), sideKey, this.uidCounter++, this.gameStateRef);
+    inst.isToken = true;
+    inst.fromRow2Breeding = true;
+    inst.unaffectedByOtherCards = unaffected;
+    inst.spawnedFromRow2Turn = this.turn;
+    inst.deployedTurn = this.turn;
+
+    if (targetLane >= 0) {
+      inst.spawnedZone = "row1";
+      inst.spawnedLane = targetLane;
+      s.row1[targetLane] = inst;
+      s.totalTokensBred = (s.totalTokensBred || 0) + 1;
+      if (sideKey === "player") this.lastNewTokens.push(inst);
+      return { placed: true, lane: targetLane, token: inst };
+    }
+    return { placed: false, lane: -1, token: inst };
+  }
+
+  // Triggered when a non-token card loses in Battle Phase and is placed into opponent's Row 2
+  onCardPlacedIntoRow2(capturerSideKey, captiveCard, sireCard = null, laneIdx = 0) {
+    const capturer = this.getSide(capturerSideKey);
+    const originalOwnerKey = capturerSideKey === "player" ? "enemy" : "player";
+
+    // Rule: Tokens CANNOT be placed into Row 2 — they disappear!
+    if (captiveCard.isToken) {
+      this.getSide(originalOwnerKey).graveyard.push(captiveCard);
+      return { vanishedToken: true, notes: [`💨 Token ${captiveCard.name} bị đánh bại và biến mất khỏi sân!`] };
+    }
+
+    captiveCard.ownerSide = `captured_by_${capturerSideKey}`;
+    captiveCard.captureLane = laneIdx;
+    captiveCard.capturedOnTurn = this.turn;
+    captiveCard.h2ActivatedThisTurn = false;
+    if (sireCard && sireCard.gender === "Male" && captiveCard.gender === "Female") {
+      captiveCard.breedingActive = true;
+      captiveCard.sireCard = sireCard;
+    }
+
+    const notes = [];
+    const r2 = captiveCard.row2Effect || {};
+
+    // 1. OVALINA H2 Mandatory Trigger: "người chơi k thể triệu hồi card vào lượt tiếp theo sau khi lá này dc đặt vào hàng 2"
+    if (captiveCard.id === "ovalina" || r2.lockNextTurnSummon) {
+      capturer.summonLockedOnTurn = this.turn + 1;
+      notes.push(`🔒 Hiệu ứng H2 Ovalina: Khóa Triệu Hồi lượt kế tiếp (Lượt ${this.turn + 1}) của bên giữ Hàng 2!`);
+    }
+
+    // 2. APHRODINA H2 Mandatory Trigger: "khi lá này được đặt vào hàng 2, đối thủ được rút 1 lá (player control ban đầu là người rút lá đó)"
+    if (captiveCard.id === "aphrodina" || r2.onCaptureOriginalOwnerDraw) {
+      const drawn = this.drawCards(originalOwnerKey, r2.onCaptureOriginalOwnerDraw || 1);
+      if (drawn > 0) {
+        const whoLbl = originalOwnerKey === "player" ? "Bạn (Chủ ban đầu của Aphrodina)" : "Địch (Chủ ban đầu của Aphrodina)";
+        notes.push(`🃏 Hiệu ứng H2 Aphrodina khi vào Hàng 2: ${whoLbl} được rút ngay +${drawn} lá bài!`);
+      }
+    }
+
+    capturer.row2.push(captiveCard);
+    return { vanishedToken: false, notes };
+  }
+
+  // ==========================================================================
+  // SUMMON PHASE: ROW 2 IGNITION EFFECTS (Must be clicked during Summon Phase!)
+  // ==========================================================================
+  canActivateRow2Ignition(row2Idx, sideKey = "player") {
+    if (this.over) return { ok: false, reason: "Trận đấu đã kết thúc." };
+    if (sideKey === "player" && this.phase !== "summon") {
+      return { ok: false, reason: "Hiệu ứng Hàng 2 (Ignition) CHỈ được kích hoạt trong SUMMON PHASE (Pha 2)!" };
+    }
+    const s = this.getSide(sideKey);
+    const card = s.row2[row2Idx];
+    if (!card) return { ok: false, reason: "Không tìm thấy lá bài ở Hàng 2." };
+    const r2 = card.row2Effect || {};
+    if (r2.isNone || r2.id === "none") {
+      return { ok: false, reason: `${card.name} có Hiệu ứng Hàng 2: None (Không có hiệu ứng).` };
+    }
+    if (card.h2ActivatedThisTurn) {
+      return { ok: false, reason: `${card.name} đã kích hoạt hiệu ứng Hàng 2 trong lượt này rồi (1 lần/lượt)!` };
+    }
+    const emptySlots = s.row1.filter((slot) => slot === null).length;
+    if (emptySlots === 0 && r2.id !== "ovalina_h2") {
+      return { ok: false, reason: "Hàng 1 đã đầy 5/5 ô, không còn chỗ trống để triệu hồi Token!" };
+    }
+    return { ok: true, card, r2 };
+  }
+
+  activateRow2Ignition(row2Idx, sideKey = "player") {
+    const check = this.canActivateRow2Ignition(row2Idx, sideKey);
+    if (!check.ok) return check;
+
+    const s = this.getSide(sideKey);
+    const opp = this.getOpp(sideKey);
+    const card = check.card;
+    const r2 = check.r2;
+
+    if (sideKey === "player") {
+      this.saveTurnSnapshot(`Kích hoạt Eff H2: ${card.name}`);
+    }
+
+    const spawnedTokens = [];
+    const notes = [];
+
+    // --- 1. OVALINA H2: Send 3 cards from hand/field to Graveyard -> Summon 3 Tokens (CR = sent card CR + 850) ---
+    if (card.id === "ovalina" || r2.id === "ovalina_h2") {
+      const handPool = s.hand.map((c, idx) => ({ zone: "hand", idx, card: c }));
+      const fieldPool = s.row1
+        .map((c, idx) => (c ? { zone: "row1", idx, card: c } : null))
+        .filter(Boolean);
+      const totalAvailable = handPool.length + fieldPool.length;
+      if (totalAvailable < 3) {
+        if (sideKey === "player") this.turnHistory.pop();
+        return {
+          ok: false,
+          reason: `Hiệu ứng H2 Ovalina cần gửi 3 lá từ tay và/hoặc sân xuống Mộ (Hiện chỉ có ${totalAvailable} lá)!`
+        };
+      }
+
+      // Pick 3 cards: prioritize hand cards first, then lowest-CR Row 1 cards (so Row 1 opens up slots for the 3 massive Tokens!)
+      const sacrificed = [];
+      while (sacrificed.length < 3 && s.hand.length > 0) {
+        const c = s.hand.shift();
+        s.graveyard.push(c);
+        sacrificed.push(c);
+      }
+      if (sacrificed.length < 3) {
+        const r1Indices = s.row1
+          .map((c, i) => (c ? { c, i } : null))
+          .filter(Boolean)
+          .sort((a, b) => a.c.cr - b.c.cr);
+        for (const item of r1Indices) {
+          if (sacrificed.length >= 3) break;
+          s.row1[item.i] = null;
+          s.graveyard.push(item.c);
+          sacrificed.push(item.c);
+        }
+      }
+
+      for (const sac of sacrificed) {
+        const tokCR = (sac.cr || 100) + 850;
+        const res = this.createAndPlaceToken(sideKey, {
+          name: `Token Ovalina [${sac.name.split(" ")[0]}]`,
+          species: "Tamarite Hyper-Token",
+          race: "tamarite",
+          fac: "tamarite",
+          cr: tokCR,
+          tag: `Hiến ${sac.name.split(" ")[0]} (+850 CR)`,
+          desc: `Token triệu hồi bởi hiệu ứng Hàng 2 của Ovalina (CR gốc ${sac.cr} + 850 = ${tokCR}).`
+        });
+        if (res.placed) spawnedTokens.push(res.token);
+      }
+      s.summonLockedOnTurn = Math.max(s.summonLockedOnTurn || 0, this.turn + 1);
+      notes.push(`Hiến 3 lá (${sacrificed.map((c) => c.name.split(" ")[0]).join(", ")}) xuống Mộ → Triệu hồi ${spawnedTokens.length} Token (+850 CR mỗi lá) lên Hàng 1 (Khóa Summon lượt ${this.turn + 1})`);
+    }
+    // --- 2. MERALINA H2: If 1 Male card on Row 1 -> Spawn 1 Token with same Species & Faction, CR = Father CR (3x if Ragnaroir or CR<350 & non-Sylvarian) ---
+    else if (card.id === "meralina" || r2.id === "meralina_h2") {
+      const malesOnRow1 = s.row1.filter((u) => u && u.gender === "Male");
+      if (malesOnRow1.length === 0) {
+        if (sideKey === "player") this.turnHistory.pop();
+        return {
+          ok: false,
+          reason: "Điều kiện Meralina H2: Cần có ít nhất 1 card Nam (♂) đang ở Hàng 1 sân ta!"
+        };
+      }
+      // Prioritize Ragnaroir or a <350 non-Sylvarian Male for 3x CR mutation, else highest CR Male
+      const sortedMales = [...malesOnRow1].sort((a, b) => {
+        const aTriple = a.id === "ragnaroir" || ((a.cr || 0) < 350 && !(a.species || "").toLowerCase().includes("sylvarian") && a.race !== "sylvarian");
+        const bTriple = b.id === "ragnaroir" || ((b.cr || 0) < 350 && !(b.species || "").toLowerCase().includes("sylvarian") && b.race !== "sylvarian");
+        const aVal = aTriple ? a.cr * 3 : a.cr;
+        const bVal = bTriple ? b.cr * 3 : b.cr;
+        return bVal - aVal;
+      });
+      const father = sortedMales[0];
+      const fEval = this.evalCardCombatCR(father, null, sideKey);
+      const fatherCR = fEval.total || father.cr;
+      const isTriple =
+        father.id === "ragnaroir" ||
+        (fatherCR < 350 && !(father.species || "").toLowerCase().includes("sylvarian") && father.race !== "sylvarian");
+      const tokCR = isTriple ? fatherCR * 3 : fatherCR;
+
+      const res = this.createAndPlaceToken(sideKey, {
+        name: `Hậu Duệ ${father.name.split(" ")[0]}${isTriple ? " [×3 Đột Biến]" : ""}`,
+        species: father.species,
+        race: father.race,
+        fac: father.fac,
+        cr: tokCR,
+        tag: isTriple ? `Đột Biến ×3 CR Cha (${tokCR})` : `Kế Thừa CR Cha (${tokCR})`,
+        desc: `Token sinh bởi Meralina H2 cùng loài (${father.species}) & phe (${father.fac}) với ${father.name}.`
+      });
+      if (res.placed) spawnedTokens.push(res.token);
+      notes.push(`Kết hợp cùng ♂ ${father.name} → Sinh Token ${res.token.name} (CR ${tokCR}${isTriple ? " — Nhân 3 CR!" : ""})`);
+    }
+    // --- 3. APHRODINA H2: Each Summon Phase, spawn 1 Token with CR = any 1 Row 1 card on either side, and that Token is unaffected by other card effects ---
+    else if (card.id === "aphrodina" || r2.id === "aphrodina_h2") {
+      const allRow1 = [
+        ...this.player.row1.filter(Boolean).map((u) => ({ u, side: "player" })),
+        ...this.enemy.row1.filter(Boolean).map((u) => ({ u, side: "enemy" }))
+      ];
+      if (allRow1.length === 0) {
+        if (sideKey === "player") this.turnHistory.pop();
+        return {
+          ok: false,
+          reason: "Điều kiện Aphrodina H2: Cần có ít nhất 1 lá bài đang đứng trên Hàng 1 (của bất kỳ bên nào) để sao chép CR!"
+        };
+      }
+      // Pick the highest combat CR unit across both Row 1s
+      allRow1.sort((a, b) => {
+        const crA = this.evalCardCombatCR(a.u, null, a.side).total;
+        const crB = this.evalCardCombatCR(b.u, null, b.side).total;
+        return crB - crA;
+      });
+      const target = allRow1[0];
+      const copiedCR = this.evalCardCombatCR(target.u, null, target.side).total || target.u.cr;
+      const res = this.createAndPlaceToken(sideKey, {
+        name: `Token Phản Chiếu [${target.u.name.split(" ")[0]}]`,
+        species: card.species || "Prozonian",
+        race: card.race || "prozonian",
+        fac: s.leader.fac,
+        cr: copiedCR,
+        unaffected: true,
+        tag: `🛡️ Kháng Eff • Sao chép ${copiedCR} CR`,
+        desc: `Token của Aphrodina: Sao chép CR của ${target.u.name} (${copiedCR} CR) và không bị ảnh hưởng bởi hiệu ứng bài khác ở Hàng 1!`
+      });
+      if (res.placed) spawnedTokens.push(res.token);
+      notes.push(`Sao chép CR của ${target.u.name} → Sinh Token ${copiedCR} CR (Kháng mọi hiệu ứng bài khác ở Hàng 1!)`);
+    }
+    // --- 4. CYNTHIA H2: Discard entire hand -> Summon N Tokens (CR = 200 * N) ---
+    else if (card.id === "cynthia" || r2.id === "cynthia_h2") {
+      const discardCount = s.hand.length;
+      if (discardCount === 0) {
+        if (sideKey === "player") this.turnHistory.pop();
+        return {
+          ok: false,
+          reason: "Điều kiện Cynthia H2: Bạn cần có ít nhất 1 lá bài trên tay để bỏ xuống Mộ!"
+        };
+      }
+      while (s.hand.length > 0) {
+        s.graveyard.push(s.hand.pop());
+      }
+      const tokCR = 200 * discardCount;
+      for (let k = 0; k < discardCount; k++) {
+        const res = this.createAndPlaceToken(sideKey, {
+          name: `Token Thám Hiểm Cynthia #${k + 1}`,
+          species: "Người Thám Hiểm",
+          race: "human",
+          fac: s.leader.fac,
+          cr: tokCR,
+          tag: `Bỏ ${discardCount} lá (200×${discardCount} = ${tokCR} CR)`,
+          desc: `Token triệu hồi bởi Cynthia H2 khi bỏ ${discardCount} lá trên tay (CR = 200 × ${discardCount} = ${tokCR}).`
+        });
+        if (res.placed) spawnedTokens.push(res.token);
+      }
+      notes.push(`Bỏ toàn bộ ${discardCount} lá trên tay → Triệu hồi ${spawnedTokens.length} Token (Mỗi Token ${tokCR} CR) lên Hàng 1!`);
+    }
+    // --- 5. OTHER CUSTOM CHARACTERS & FACTION TROOPS H2 IGNITION ---
+    else if (r2.id === "uterussa_h2") {
+      const sac = s.hand.shift() || s.row1.find(Boolean);
+      const baseCR = sac ? sac.cr : 450;
+      if (sac && s.row1.includes(sac)) s.row1[s.row1.indexOf(sac)] = null;
+      if (sac) s.graveyard.push(sac);
+      for (let k = 0; k < 2; k++) {
+        const res = this.createAndPlaceToken(sideKey, {
+          name: `Omni-Token Uterussa #${k + 1}`,
+          species: "Omni-Tamarite",
+          race: "tamarite",
+          fac: s.leader.fac,
+          cr: baseCR + 450,
+          tag: `Omni-Womb (${baseCR + 450} CR)`
+        });
+        if (res.placed) spawnedTokens.push(res.token);
+      }
+      notes.push(`Omni-Womb triệu hồi ${spawnedTokens.length} Token (${baseCR + 450} CR) lên Hàng 1!`);
+    } else if (r2.id === "emma_h2") {
+      if (s.graveyard.length > 0 && s.hand.length < this.maxHandSize) {
+        const rev = s.graveyard.pop();
+        s.hand.push(rev);
+        notes.push(`Thu hồi ${rev.name} từ Mộ về tay`);
+      }
+      const res = this.createAndPlaceToken(sideKey, {
+        name: "Token Thiên Sứ Eris",
+        species: "Erisian",
+        race: "erisian",
+        fac: s.leader.fac,
+        cr: 650,
+        unaffected: true,
+        tag: "Thiên Sứ Eris (650 CR • Kháng Eff)"
+      });
+      if (res.placed) spawnedTokens.push(res.token);
+      notes.push(`Triệu hồi Token Thiên Sứ Eris (650 CR, Kháng Hiệu Ứng)`);
+    } else {
+      // General Lore / Species Ignition Token Spawn
+      const sire = card.sireCard || s.row1.find((u) => u && u.gender === "Male") || s.leader;
+      const baseTokenCR = Math.max(380, Math.round(((sire?.cr || 500) * 0.45 + (card.cr || 500) * 0.55) * (r2.crMult || 0.95)));
+      const countToSpawn = (r2.id === "tsunadia_h2" || r2.id === "atomina_h2" || r2.id === "qiyana_h2" || r2.id === "trang_h2" || r2.id === "carnavex_h2" || r2.id === "sentrion_h2" || r2.id === "exorotic_h2" || r2.id === "eremite_h2" || r2.id === "mrmind_h2" || r2.id === "bill_h2" || r2.id === "dick_h2") ? 2 : 1;
+      for (let k = 0; k < countToSpawn; k++) {
+        const res = this.createAndPlaceToken(sideKey, {
+          name: `Token ${card.name.split(" ")[0]} #${k + 1}`,
+          species: card.species || "Token",
+          race: card.race || "hybrid",
+          fac: s.leader.fac,
+          cr: baseTokenCR,
+          tag: r2.tag || `Token H2 (${baseTokenCR} CR)`
+        });
+        if (res.placed) spawnedTokens.push(res.token);
+      }
+      if (r2.id === "brigitte_h2" || r2.id === "sofie_h2" || r2.id === "jorduyn_h2" || r2.id === "yulia_h2" || r2.id === "mina_h2" || r2.id === "jokar_h2" || r2.id === "ojamon_h2" || r2.id === "jose_h2") {
+        const d = this.drawCards(sideKey, 1);
+        if (d > 0) notes.push(`Rút +${d} lá bài`);
+      }
+      if (r2.id === "emily_h2" || r2.id === "parasoid_h2") {
+        const pen = r2.id === "parasoid_h2" ? 200 : 100;
+        opp.row1.forEach((u) => {
+          if (u && !isCardUnaffected(u)) u.tempPenaltyCR = (u.tempPenaltyCR || 0) + pen;
+        });
+        notes.push(`Giảm -${pen} CR toàn Hàng 1 địch`);
+      }
+      notes.push(`Triệu hồi ${spawnedTokens.length} Token (${baseTokenCR} CR) lên Hàng 1`);
+    }
+
+    card.h2ActivatedThisTurn = true;
+    card.spawnCount = (card.spawnCount || 0) + spawnedTokens.length;
+    const who = sideKey === "player" ? "Ta" : "Địch";
+    this.pushLog(`🧬 [Summon Phase • Ignition H2 ${who}: ${card.name}] ${notes.join(" • ")}!`);
+    return { ok: true, card, spawnedTokens, notes };
+  }
+
+  // ==========================================================================
+  // EFFECT PHASE: ROW 1 & ROW 3 EFFECT ACTIVATION (Only usable in Effect Phase!)
+  // ==========================================================================
+  canActivateCardEffect(zone, idx = 0, sideKey = "player") {
+    if (this.over) return { ok: false, reason: "Trận đấu đã kết thúc." };
+    if (sideKey === "player" && this.phase !== "effect") {
+      return { ok: false, reason: "Hiệu ứng Hàng 1 & Hàng 3 CHỈ được kích hoạt trong EFFECT PHASE (Pha 3)!" };
+    }
+    const s = this.getSide(sideKey);
+    const card = zone === "row3" ? s.leader : s.row1[idx];
+    if (!card) return { ok: false, reason: "Không tìm thấy lá bài." };
+    const r1 = card.row1Effect || {};
+    if (r1.isNone || r1.id === "none") {
+      return { ok: false, reason: `${card.name} có Hiệu ứng Hàng 1: None (Không có hiệu ứng).` };
+    }
+    if (card.h1ActivatedThisTurn) {
+      return { ok: false, reason: `${card.name} đã kích hoạt hiệu ứng trong Effect Phase lượt này rồi!` };
+    }
+    return { ok: true, card, r1 };
+  }
+
+  activateCardEffect(zone, idx = 0, sideKey = "player") {
+    const check = this.canActivateCardEffect(zone, idx, sideKey);
+    if (!check.ok) return check;
+
+    const s = this.getSide(sideKey);
+    const opp = this.getOpp(sideKey);
+    const card = check.card;
+    const r1 = check.r1;
+    const oppCard = zone === "row1" ? opp.row1[idx] : null;
+
+    if (sideKey === "player") {
+      this.saveTurnSnapshot(`Kích hoạt Eff ${zone.toUpperCase()}: ${card.name}`);
+    }
+
+    card.h1EffectActive = true;
+    card.h1ActivatedThisTurn = true;
+    const notes = [];
+
+    // --- 1. OVALINA H1: +180 CR all friendly units + 80 CR per card in Row 2, minus 50 CR per non-Pherone-Nexus card on Row 1 ---
+    if (card.id === "ovalina" || r1.id === "ovalina_h1") {
+      s.ovalinaH1Active = true;
+      const r2Bonus = s.row2.length * 80;
+      const nonPheroneCount = s.row1.filter((u) => u && u.fac !== "tamarite").length;
+      const pen = nonPheroneCount * 50;
+      notes.push(`+180 CR toàn quân + ${r2Bonus} CR (${s.row2.length} lá H2)`);
+      if (pen > 0) notes.push(`Phạt -${pen} CR toàn sân do có ${nonPheroneCount} lá Hàng 1 khác phe Pherone Nexus`);
+    }
+    // --- 2. MERALINA H1: Self halves CR, draws 2 cards/turn in Draw Phase; if Ragnaroir on our field, Ragnaroir gains Immunity + 250 CR ---
+    else if (card.id === "meralina" || r1.id === "meralina_h1") {
+      card.meralinaHalved = true;
+      s.meralinaDrawTwoActive = true;
+      notes.push("Bản thân giảm 1/2 CR → Mỗi Draw Phase rút 2 lá thay vì 1");
+      let ragBuffed = false;
+      s.row1.forEach((u) => {
+        if (u && u.id === "ragnaroir") {
+          u.unaffectedByOtherCards = true;
+          u.tempBuffCR = (u.tempBuffCR || 0) + 250;
+          ragBuffed = true;
+        }
+      });
+      if (s.leader?.id === "ragnaroir") {
+        s.leader.unaffectedByOtherCards = true;
+        s.leader.tempBuffCR = (s.leader.tempBuffCR || 0) + 250;
+        ragBuffed = true;
+      }
+      if (ragBuffed) notes.push("🐺 Ragnaroir trên sân nhận Kháng Hiệu Ứng + 250 CR!");
+    }
+    // --- 3. ARISIA H1: Friendly Row 1 cards cannot be destroyed in first battle; Tokens from Row 2 get +200 CR until end of next turn ---
+    else if (card.id === "arisia" || r1.id === "arisia_h1") {
+      s.arisiaTokenBuffActive = true;
+      s.row1.forEach((u) => {
+        if (u) u.firstBattleImmunity = true;
+      });
+      notes.push("🛡️ Toàn bộ thẻ Hàng 1 không thể bị tiêu diệt trong chiến đấu lần đầu • Token sinh từ Hàng 2 nhận +200 CR đến hết lượt sau!");
+    }
+    // --- 4. APHRODINA H1: Unaffected by other card effects ---
+    else if (card.id === "aphrodina" || r1.id === "aphrodina_h1") {
+      card.unaffectedByOtherCards = true;
+      card.tempPenaltyCR = 0;
+      card.halvedByEnemy = false;
+      notes.push("🛡️ Kháng tuyệt đối mọi hiệu ứng của bài khác!");
+    }
+    // --- 5. ALL OTHER LORE-DRIVEN H1 EFFECTS ---
+    else {
+      if (r1.firstBattleImmunityAllRow1) {
+        s.row1.forEach((u) => {
+          if (u) u.firstBattleImmunity = true;
+        });
+        notes.push("🛡️ Toàn Hàng 1 bất tử chiến đấu lần đầu");
+      }
+      if (r1.selfFirstBattleImmunity) {
+        card.firstBattleImmunity = true;
+        notes.push("🛡️ Bất tử chiến đấu lần đầu");
+      }
+      if (r1.drawOnEffect) {
+        const d = this.drawCards(sideKey, r1.drawOnEffect);
+        if (d > 0) notes.push(`🃏 Rút +${d} lá`);
+      }
+      if (r1.allyAllBonus) {
+        s.row1.forEach((u) => {
+          if (u) u.tempBuffCR = (u.tempBuffCR || 0) + r1.allyAllBonus;
+        });
+        notes.push(`+${r1.allyAllBonus} CR toàn Hàng 1 ta`);
+      }
+      if (r1.boostAllTokens) {
+        s.row1.forEach((u) => {
+          if (u && u.isToken) u.tempBuffCR = (u.tempBuffCR || 0) + r1.boostAllTokens;
+        });
+        notes.push(`+${r1.boostAllTokens} CR cho mọi Token phe ta`);
+      }
+      if (r1.enemyAllPenalty) {
+        opp.row1.forEach((u) => {
+          if (u && !isCardUnaffected(u)) u.tempPenaltyCR = (u.tempPenaltyCR || 0) + r1.enemyAllPenalty;
+        });
+        notes.push(`-${r1.enemyAllPenalty} CR toàn Hàng 1 địch`);
+      }
+      if (r1.oppPenalty && oppCard && !isCardUnaffected(oppCard)) {
+        oppCard.tempPenaltyCR = (oppCard.tempPenaltyCR || 0) + r1.oppPenalty;
+        notes.push(`-${r1.oppPenalty} CR vào ${oppCard.name}`);
+      }
+      if (r1.halveOppositeCR && oppCard && !isCardUnaffected(oppCard)) {
+        oppCard.halvedByEnemy = true;
+        notes.push(`Giảm 1/2 CR của ${oppCard.name}`);
+      }
+      if (r1.nullifyOppositeBuffs && oppCard && !isCardUnaffected(oppCard)) {
+        oppCard.nullifiedBuffs = true;
+        oppCard.tempBuffCR = 0;
+        notes.push(`Xóa mọi buff CR của ${oppCard.name}`);
+      }
+      if (r1.destroyEnemyToken) {
+        const tokIdx = opp.row1.findIndex((u) => u && u.isToken && !isCardUnaffected(u));
+        if (tokIdx >= 0) {
+          const destroyed = opp.row1[tokIdx];
+          opp.row1[tokIdx] = null;
+          opp.graveyard.push(destroyed);
+          notes.push(`💥 Tiêu diệt ngay Token ${destroyed.name} của địch!`);
+        }
+      }
+      if (r1.spawnCloneCR) {
+        const res = this.createAndPlaceToken(sideKey, {
+          name: `Phân Thân ${card.name.split(" ")[0]}`,
+          species: card.species,
+          race: card.race,
+          fac: card.fac,
+          cr: r1.spawnCloneCR,
+          tag: `Phân Thân (${r1.spawnCloneCR} CR)`
+        });
+        if (res.placed) notes.push(`Triệu hồi ${res.token.name} (${r1.spawnCloneCR} CR) lên Làn ${res.lane + 1}`);
+      }
+      if (notes.length === 0 && r1.bonusFlat) {
+        notes.push(`Kích hoạt ${r1.tag || "Chiến kỹ"} (+${r1.bonusFlat} CR)`);
+      }
+    }
+
+    const who = sideKey === "player" ? "Ta" : "Địch";
+    this.pushLog(`✨ [Effect Phase • ${zone.toUpperCase()} ${who}: ${card.name}] ${notes.join(" • ")}!`);
+    return { ok: true, card, notes };
+  }
+
+  activateAllEffectsInPhase(sideKey = "player") {
+    if (this.over) return { ok: false, reason: "Trận đấu đã kết thúc." };
+    if (sideKey === "player" && this.phase !== "effect") {
+      return { ok: false, reason: "Chỉ có thể kích hoạt hiệu ứng Hàng 1 & Hàng 3 trong EFFECT PHASE!" };
+    }
+    const s = this.getSide(sideKey);
+    const activated = [];
+    // Activate Row 3 Leader effect first, then all Row 1 units
+    if (!s.leader.h1ActivatedThisTurn && s.leader.row1Effect && !s.leader.row1Effect.isNone && s.leader.row1Effect.id !== "none") {
+      const r = this.activateCardEffect("row3", 0, sideKey);
+      if (r.ok) activated.push(s.leader.name);
+    }
+    for (let i = 0; i < this.maxLanes; i++) {
+      const u = s.row1[i];
+      if (u && !u.h1ActivatedThisTurn && u.row1Effect && !u.row1Effect.isNone && u.row1Effect.id !== "none") {
+        const r = this.activateCardEffect("row1", i, sideKey);
+        if (r.ok) activated.push(u.name);
+      }
+    }
+    return { ok: true, activated, notes: activated };
+  }
+
+  // ==========================================================================
+  // TRANSPARENT COMBAT CR EVALUATION (Respects Effect Phase, Unaffected & Custom Lore Rules)
+  // ==========================================================================
   evalCardCombatCR(card, oppCard = null, sideKey = "player", opts = {}) {
     if (!card) return { total: 0, base: 0, r1Bonus: 0, keywordBonus: 0, genderBonus: 0, surgeBonus: 0, laneBonus: 0, leaderAura: 0, row2Aura: 0, penalty: 0, triggeredConditionals: [] };
     const s = this.getSide(sideKey);
     const opp = this.getOpp(sideKey);
-    const oppKey = sideKey === "player" ? "enemy" : "player";
-    const ctx = this.getSideBreedingContext(sideKey);
-    const oppCtx = this.getSideBreedingContext(oppKey);
-
-    const base = (card.cr || 100) + (card.tokenBoostCR || 0);
     const isSmallScale = (card.cr || 0) <= 25 && (!oppCard || (oppCard.cr || 0) <= 25);
+    const unaffected = isCardUnaffected(card);
     const r1 = card.row1Effect || {};
-    const oppR1 = (oppCard && oppCard.row1Effect) || {};
     const laneLoc = (typeof opts.laneIdx === "number" && this.lanes[opts.laneIdx]) ? this.lanes[opts.laneIdx] : null;
 
-    const laneCancelsRacial = laneLoc && laneLoc.id === "outer_layer";
-    const oppCancelsRacial = oppR1.id === "eris_reset" || (oppCard && oppCard.id === "tr_eris_arbiter");
-    const cancelRacial = laneCancelsRacial || oppCancelsRacial;
+    let base = Math.max(10, (card.cr || 100) + (card.tokenBoostCR || 0) - (card.battleDamageTaken || 0));
+    const triggeredConditionals = [];
 
-    let r1Bonus = isSmallScale ? (r1.smallBonus || 0) : (r1.bonusFlat || 0);
+    if (unaffected) {
+      triggeredConditionals.push("🛡️ Kháng Hiệu Ứng Bài Khác");
+    }
+
+    // Meralina H1 self-halving (only when Meralina's own H1 effect was activated!)
+    if ((card.id === "meralina" || r1.halfSelfCR) && card.h1EffectActive) {
+      base = Math.max(10, Math.floor(base * 0.5));
+      triggeredConditionals.push("🌗 Meralina H1: Giảm 1/2 CR (Đổi lấy Rút 2 lá/lượt)");
+    }
+
+    // Enemy Hailey H1 halving (if not unaffected)
+    if (card.halvedByEnemy && !unaffected) {
+      base = Math.max(10, Math.floor(base * 0.5));
+      triggeredConditionals.push("❄️ Trúng Đạn Absolute Zero (-50% CR)");
+    }
+
+    let r1Bonus = 0;
     let keywordBonus = 0;
     let genderBonus = 0;
     let surgeBonus = 0;
     let laneBonus = 0;
-    const triggeredConditionals = [];
 
-    if (card.tokenBoostCR > 0) {
-      triggeredConditionals.push(`⚡ Củng Cố Token (+${card.tokenBoostCR} CR)`);
+    // H1 Effects apply when activated in Effect Phase (or previewed)
+    const effectActive = Boolean(card.h1EffectActive || opts.previewDeploy || isSmallScale);
+    if (effectActive && !r1.isNone && r1.id !== "none" && (!card.nullifiedBuffs || unaffected)) {
+      r1Bonus += isSmallScale ? (r1.smallBonus || 0) : (r1.bonusFlat || 0);
+
+      if (!isSmallScale) {
+        if (r1.perUniqueSpeciesBonus) {
+          const allUnits = [...this.player.row1, ...this.enemy.row1].filter(Boolean);
+          const uniqueSpecs = new Set(allUnits.map((u) => u.species)).size;
+          r1Bonus += uniqueSpecs * r1.perUniqueSpeciesBonus;
+          if (uniqueSpecs > 0) triggeredConditionals.push(`🌌 ${uniqueSpecs} Chủng tộc (+${uniqueSpecs * r1.perUniqueSpeciesBonus} CR)`);
+        }
+        if (r1.copyHalfEnemyLeaderCR && opp.leader) {
+          const copied = Math.round((opp.leader.cr || 500) * 0.5);
+          r1Bonus += copied;
+          triggeredConditionals.push(`📖 Sao chép 50% CR Tướng Địch (+${copied} CR)`);
+        }
+        if (r1.absorbHigherOppCR && oppCard && (oppCard.cr || 0) > base) {
+          const diff = Math.round(((oppCard.cr || 0) - base) * 0.6);
+          r1Bonus += diff;
+          triggeredConditionals.push(`⚛️ Hấp thụ chênh lệch CR (+${diff} CR)`);
+        }
+        if (r1.zarcseidSynergy && [...s.row1, ...opp.row1].some((u) => u && (u.id === "zarcseid" || u.race === "prozonian"))) {
+          r1Bonus += r1.zarcseidSynergy;
+          triggeredConditionals.push(`💞 Cộng hưởng Prozonian (+${r1.zarcseidSynergy} CR)`);
+        }
+        if (r1.veidosSynergy && (s.row1.some((u) => u && u.id === "veidos") || s.leader?.id === "veidos")) {
+          r1Bonus += r1.veidosSynergy;
+          triggeredConditionals.push(`🪓 Sát cánh cùng Veidos (+${r1.veidosSynergy} CR)`);
+        }
+      }
     }
 
-    // 1. Standardized H1 Keywords (Data-Driven)
+    if (!card.nullifiedBuffs || unaffected) {
+      r1Bonus += card.tempBuffCR || 0;
+    }
+
+    // Ovalina H1 global field aura & non-Pherone-Nexus penalty
+    if (s.ovalinaH1Active && !isSmallScale && !unaffected) {
+      const ovBonus = 180 + s.row2.length * 80;
+      const nonPheroneCount = s.row1.filter((u) => u && u.fac !== "tamarite").length;
+      const ovPen = nonPheroneCount * 50;
+      const netOv = ovBonus - ovPen;
+      r1Bonus += netOv;
+      triggeredConditionals.push(`💗 Aura Ovalina H1 (${netOv >= 0 ? "+" : ""}${netOv} CR)`);
+    }
+
+    // Arisia H1 Token buff (+200 CR to Tokens spawned from Row 2 until end of turn after summon)
+    if (s.arisiaTokenBuffActive && card.isToken && card.fromRow2Breeding && (this.turn <= (card.spawnedFromRow2Turn || 0) + 1) && !unaffected) {
+      r1Bonus += 200;
+      triggeredConditionals.push("👑 Arisia H1: Token Hàng 2 (+200 CR)");
+    }
+
+    // Standardized H1 Keywords
     const deployedNow = opts.previewDeploy || card.deployedTurn === this.turn;
     if (hasH1Keyword(card, "charge") && deployedNow) {
       const chBonus = scaleTacticalDelta(H1_KEYWORDS.charge.smallBonus, card.cr, H1_KEYWORDS.charge.scaledBonus);
       keywordBonus += chBonus;
       triggeredConditionals.push(`⚡ Xung Phong (+${chBonus} CR)`);
     }
-    if (hasH1Keyword(card, "pierce") && (opts.attackingRow3 || (oppCard && (oppCard.shieldCharges || 0) > 0))) {
+    if (hasH1Keyword(card, "pierce") && (opts.attackingRow3 || (oppCard && ((oppCard.shieldCharges || 0) > 0 || oppCard.firstBattleImmunity)))) {
       const pBonus = scaleTacticalDelta(H1_KEYWORDS.pierce.smallBonus, card.cr, H1_KEYWORDS.pierce.scaledBonus);
       keywordBonus += pBonus;
       triggeredConditionals.push(`🗡️ Xuyên Giáp (+${pBonus} CR)`);
     }
-    if ((card.shieldCharges || 0) > 0) {
-      triggeredConditionals.push(`🛡️ Khiên Bảo Hộ (${card.shieldCharges})`);
+    if ((card.shieldCharges || 0) > 0 || card.firstBattleImmunity) {
+      triggeredConditionals.push("🛡️ Bất Tử / Chặn Thua Lần Đầu");
     }
 
-    // 2. Gender Advantage: Male vs Female (+2 Tier / +120 CR)
+    // Gender Advantage: Male vs Female (+2 Tier / +120 CR)
     if (card.gender === "Male" && oppCard && oppCard.gender === "Female") {
       genderBonus = scaleTacticalDelta(2, card.cr, 120);
       triggeredConditionals.push(`♂>♀ Ưu Thế Giới Tính (+${genderBonus} CR)`);
     }
 
-    // 3. Leader Active Skills: Gene Surge (+3 Tier / +180 CR) & Faction Skill Buff
-    if (s.geneSurgeActiveThisTurn) {
+    // Leader Active Skills
+    if (s.geneSurgeActiveThisTurn && !unaffected) {
       const gBonus = scaleTacticalDelta(GENE_SURGE_SKILL.smallBonus, card.cr, GENE_SURGE_SKILL.scaledBonus);
       surgeBonus += gBonus;
       triggeredConditionals.push(`🔥 Gene Surge (+${gBonus} CR)`);
     }
-    if (s.leaderSkillBuffCR > 0) {
+    if (s.leaderSkillBuffCR > 0 && !unaffected) {
       const lBonus = isSmallScale ? 2 : s.leaderSkillBuffCR;
       surgeBonus += lBonus;
       triggeredConditionals.push(`👑 Tuyệt Kỹ Phe (+${lBonus} CR)`);
     }
 
-    if (!cancelRacial && !isSmallScale) {
-      if (r1.id === "syl_empress") {
-        const sylCount = s.row1.filter((c) => c && c.uid !== card.uid && (c.fac === "sylvarian" || (c.species || "").toLowerCase().includes("syl"))).length;
-        r1Bonus += sylCount * 80;
-        if (sylCount > 0) triggeredConditionals.push(`👑 Đồng minh Sylvarian H1 (+${sylCount * 80} CR)`);
-      } else if (r1.id === "nadirius_decree" && oppCard && (oppCard.fac === "sylvarian" || oppCard.fac === "western_nadir")) {
-        r1Bonus += 100;
-      } else if (r1.id === "predita_will" && (isNadirCard(oppCard) || opp.row2.length >= 1 || ctx.hasTokenOrBreed)) {
-        r1Bonus += 180;
-        triggeredConditionals.push(`🛡️ ĐK Predita / Token (+180 CR)`);
-      } else if (r1.id === "cr_gap_burst" && ((oppCard && Math.abs((card.cr || 0) - (oppCard.cr || 0)) >= 250) || ctx.hasRow1Token)) {
-        r1Bonus += 240;
-        triggeredConditionals.push(`⚡ ĐK Nghịch Lý / Token H1 (+240 CR)`);
-      } else if (r1.id === "supers_strike" && isMutantOrWombiote(oppCard)) {
-        r1Bonus += 140;
-      } else if (r1.id === "collector_harvest") {
-        r1Bonus += s.row2.length * 100;
-        if (ctx.hasTokenOrBreed) {
-          r1Bonus += 160;
-          triggeredConditionals.push(`🧪 ĐK Thu Thập Token/Lai (+160 CR)`);
-        }
-      } else if (r1.id === "hyper_photon") {
-        if (s.leader.fac === "tamarite" || s.leader.fac === "sylvarian") r1Bonus += 90;
-        if (ctx.hasTokenOrBreed && !card.isToken) {
-          r1Bonus += 180;
-          triggeredConditionals.push(`🌟 ĐK Tamarite Cộng Hưởng (+180 CR)`);
-        }
-      } else if (r1.id === "omni_host" && ctx.hasActiveBreed) {
-        r1Bonus += 140;
-        triggeredConditionals.push(`🧬 ĐK Buồng Lai Hàng 2 (+140 CR)`);
-      } else if (r1.id === "reformist_wave" && (ctx.totalTokensBred > 0 || ctx.hasRow1Token)) {
-        r1Bonus += 135;
-        triggeredConditionals.push(`🌀 ĐK Đã Sinh Token (+135 CR)`);
-      } else if (r1.id === "gotterfall_tactic" && (ctx.totalTokensBred > 0 || ctx.hasRow1Token)) {
-        r1Bonus += 110;
-        triggeredConditionals.push(`♟️ ĐK Chiến Lược Token (+110 CR)`);
-      } else if (r1.id === "knight_bastion" && (isNadirCard(oppCard) || isMutantOrWombiote(oppCard))) {
-        r1Bonus += 100;
-      } else if (r1.id === "solar_blitz" && opts.attackingRow3) {
-        r1Bonus += 60;
-      } else if (card.id === "tr_nad_knight" && oppCard && oppCard.fac === "western_nadir") {
-        r1Bonus += 100;
-      } else if (card.id === "tr_nad_lancer" && opts.attackingRow3) {
-        r1Bonus += 80;
-      } else if (card.id === "tr_col_stalker" && oppCard && oppCard.fac === "independent") {
-        r1Bonus += 105;
-      } else if (card.id === "tr_sal_veteran" && oppCard && oppCard.fac === "western_nadir") {
-        r1Bonus += 80;
-      } else if (card.id === "tr_tam_paragon") {
-        const tamAllies = s.row1.filter((c) => c && c.uid !== card.uid && c.fac === "tamarite").length;
-        r1Bonus += tamAllies * 90;
-      }
-
-      if (r1.condBonus && !triggeredConditionals.some((t) => t.includes(`+${r1.condBonus}`)) &&
-          !["predita_will", "cr_gap_burst", "collector_harvest", "hyper_photon", "omni_host", "reformist_wave", "gotterfall_tactic"].includes(r1.id)) {
-        if (this.isConditionMet(card, oppCard, sideKey)) {
-          r1Bonus += r1.condBonus;
-          triggeredConditionals.push(`✨ ĐK Hàng 1/2 (+${r1.condBonus} CR)`);
-        }
-      }
-
-      if (card.isToken) {
-        const hasTamAura = s.row1.some((a) => a && a.uid !== card.uid && (a.row1Effect?.id === "hyper_photon" || a.row1Effect?.id === "omni_host"));
-        if (hasTamAura) {
-          r1Bonus += 90;
-          triggeredConditionals.push("💖 Aura Thủ Lĩnh Token (+90 CR)");
-        }
-      }
-    }
-
-    // Cosmic Lane modifiers (Marvel Snap twist)
-    if (laneLoc && !isSmallScale) {
+    // Cosmic Lane modifiers
+    if (laneLoc && !isSmallScale && !unaffected) {
       if (laneLoc.id === "kronea_bastion" && card.fac === "sylvarian") laneBonus += 80;
-      else if (laneLoc.id === "predita_line" && (card.cr || 100) <= 600) laneBonus += 90;
-      else if (laneLoc.id === "abyss_rift") {
-        if (isNadirCard(card) || card.race === "demon") laneBonus += 90;
-        else if ((card.cr || 100) < 800) laneBonus -= 40;
-      }
+      else if (laneLoc.id === "pherone_nexus" && (card.fac === "tamarite" || card.isToken)) laneBonus += 90;
+      else if (laneLoc.id === "predita_line" && ((card.cr || 100) <= 600 || card.fac === "salvic")) laneBonus += 90;
+      else if (laneLoc.id === "outer_layer" && card.fac === "eris") laneBonus += 90;
+      else if (laneLoc.id === "abyss_rift" && (card.fac === "western_nadir" || card.race === "nadir" || card.race === "demon")) laneBonus += 90;
+      else if (laneLoc.id === "evernight_tower" && (card.race === "human" || card.fac === "collectors" || card.fac === "independent")) laneBonus += 85;
+      else if (laneLoc.id === "citadel_throne" && (card.gender === "Male" || card.fac === "nadirius")) laneBonus += 80;
     }
 
-    // Opposing Debuffs (respecting CR >= 800 Immunity, Hinatian Blue Blood Guard & Recover)
+    // Penalties (Ignored if card is unaffectedByOtherCards!)
     let penalty = 0;
-    const isImmuneToDebuff = (card.cr || 100) >= 800 || r1.id === "blue_blood_guard" || r1.id === "omni_titan" || hasH1Keyword(card, "recover");
-    if (!isImmuneToDebuff && !isSmallScale) {
+    if (!unaffected && !isSmallScale) {
+      penalty += card.tempPenaltyCR || 0;
       if (opp.leaderSkillEnemyPenaltyCR > 0) penalty += opp.leaderSkillEnemyPenaltyCR;
-      if (oppCard) {
-        if (oppR1.id === "abyss_terror") penalty += oppCtx.hasTokenOrBreed ? 200 : 120;
-        else if (oppR1.id === "nadir_psionic") penalty += 70;
-        else if (oppR1.id === "collector_harvest" && oppCtx.hasTokenOrBreed) penalty += 90;
-        else if (oppCard.id === "tr_wn_natheron") penalty += 100;
-        else if (oppCard.id === "tr_wn_raider" && card.fac === "sylvarian") penalty += 50;
-      }
     }
 
-    const row2Aura = isSmallScale ? 0 : this.getRow2SupportAura(sideKey);
-    const leaderAura = isSmallScale || card.uid === s.leader.uid ? 0 : this.getRow3LeaderAura(sideKey, card);
+    const row2Aura = (isSmallScale || unaffected) ? 0 : this.getRow2SupportAura(sideKey);
+    const leaderAura = (isSmallScale || unaffected || card.uid === s.leader.uid) ? 0 : this.getRow3LeaderAura(sideKey, card);
     const towerBonus = (sideKey === "enemy" && !isSmallScale)
       ? Math.round((this.difficulty - 1) * 40) + (this.gauntletFloor > 1 ? (this.gauntletFloor - 1) * 35 : 0) + (this.isBossFloor ? 120 : 0)
       : 0;
 
-    const minFloor = isSmallScale ? 1 : 40;
+    const minFloor = isSmallScale ? 1 : 20;
     const total = Math.max(minFloor, base + r1Bonus + keywordBonus + genderBonus + surgeBonus + laneBonus + leaderAura + row2Aura + towerBonus - penalty);
     return {
       total,
@@ -679,7 +1293,7 @@ export class CardBattleEngine {
       penalty,
       breakdown: {
         base,
-        "Nội tại H1": r1Bonus,
+        "Hiệu ứng H1": r1Bonus,
         "Từ khóa & ♂>♀": keywordBonus + genderBonus,
         "Kỹ năng Tướng": surgeBonus,
         "Địa hình Làn": laneBonus,
@@ -691,12 +1305,8 @@ export class CardBattleEngine {
     };
   }
 
-  getRow1Cards(sideKey) {
-    return this.getSide(sideKey).row1.filter(Boolean);
-  }
-
   // ==========================================================================
-  // LEADER ACTIVE SKILLS: "GENE SURGE" (4⚡) & FACTION SKILL (3⚡)
+  // LEADER ACTIVE SKILLS & DIRECTIVES (Usable in Effect Phase or Summon Phase)
   // ==========================================================================
   activateGeneSurge(sideKey = "player") {
     if (this.over) return { ok: false, reason: "Trận đấu đã kết thúc." };
@@ -707,16 +1317,14 @@ export class CardBattleEngine {
     if ((s.energy || 0) < GENE_SURGE_SKILL.cost) {
       return { ok: false, reason: `Cần ${GENE_SURGE_SKILL.cost}⚡ Năng lượng Gen để kích hoạt Gene Surge (Hiện có ${s.energy}⚡)!` };
     }
-
     if (sideKey === "player") {
       this.saveTurnSnapshot("Kích hoạt Gene Surge (4⚡)");
     }
-
     s.energy -= GENE_SURGE_SKILL.cost;
     s.geneSurgeUsed = true;
     s.geneSurgeActiveThisTurn = true;
     const who = sideKey === "player" ? s.leader.name : `Địch (${s.leader.name})`;
-    this.pushLog(`🔥 [${who}] Kích hoạt GENE SURGE (-4⚡) -> Toàn bàn nhận +3 Cấp (+180 CR) trong lượt này!`);
+    this.pushLog(`🔥 [${who}] Kích hoạt GENE SURGE (-4⚡) -> Toàn bàn nhận +180 CR trong lượt này!`);
     return { ok: true, skill: GENE_SURGE_SKILL, remainingEnergy: s.energy };
   }
 
@@ -731,11 +1339,9 @@ export class CardBattleEngine {
     if ((s.energy || 0) < skill.cost) {
       return { ok: false, reason: `Cần ${skill.cost}⚡ để dùng ${skill.name} (Hiện có ${s.energy}⚡)!` };
     }
-
     if (sideKey === "player") {
       this.saveTurnSnapshot(`Tuyệt kỹ ${skill.name} (${skill.cost}⚡)`);
     }
-
     s.energy -= skill.cost;
     s.leaderSkillUsed = true;
 
@@ -765,25 +1371,9 @@ export class CardBattleEngine {
       const g = this.addEnergy(sideKey, skill.energyGain);
       if (g > 0) notes.push(`Hồi +${g}⚡`);
     }
-    if (skill.breedBoostPct) {
-      s.leaderSkillBreedBoost = (s.leaderSkillBreedBoost || 0) + skill.breedBoostPct;
-      notes.push(`+${skill.breedBoostPct}% tỷ lệ Lai H2`);
-    }
     if (skill.purgeCaptive && opp.row2.length > 0) {
       const rescued = opp.row2.pop();
-      notes.push(`🔓 Giải cứu ${rescued.name} khỏi H2 địch (${opp.row2.length}/3)`);
-    }
-    if (skill.effectType === "instant_breed_or_buff") {
-      const breeder = s.row2.find((c) => c.breedingActive);
-      if (breeder) {
-        const bRes = this.spawnTokensForCaptive(sideKey, breeder, 0);
-        if (bRes.spawned.length > 0) {
-          notes.push(`🧬 Sinh ngay Token ${bRes.spawned[0].name} lên Hàng 1`);
-        }
-      } else {
-        this.addEnergy(sideKey, 1);
-        notes.push(`Hồi +1⚡`);
-      }
+      notes.push(`🔓 Giải cứu ${rescued.name} khỏi H2 địch`);
     }
 
     const who = sideKey === "player" ? s.leader.name : `Địch (${s.leader.name})`;
@@ -791,28 +1381,24 @@ export class CardBattleEngine {
     return { ok: true, skill, notes, remainingEnergy: s.energy };
   }
 
-  // ==========================================================================
-  // v13.0: OPENING HAND MULLIGAN (1/MATCH ON TURN 1) & TACTICAL DIRECTIVES
-  // ==========================================================================
   canMulligan() {
-    return !this.over && this.turn === 1 && !this.player.mulliganUsed && this.getRow1Cards("player").length === 0;
+    return !this.over && this.turn === 1 && this.phase === "summon" && !this.player.mulliganUsed && this.getRow1Cards("player").length === 0;
   }
 
   mulliganHand() {
     if (!this.canMulligan()) {
       return { ok: false, reason: "Chỉ có thể Đổi Bài Mở Màn (Mulligan) ở Lượt 1 trước khi đặt thẻ lên sân!" };
     }
-    this.saveTurnSnapshot("Đổi bài khởi đầu (Mulligan)");
-    const count = Math.max(4, this.player.hand.length);
+    this.saveTurnSnapshot("Đổi bài khởi đầu (2♂ + 2♀)");
     while (this.player.hand.length > 0) {
       this.player.deck.push(this.player.hand.pop());
     }
     this.player.deck = shuffle(this.player.deck);
-    this.drawCards("player", count);
+    this.drawOpeningHand("player");
     this.ensureTurn1PlayableHand("player");
     this.player.mulliganUsed = true;
     this.selectedHandIdx = null;
-    this.pushLog(`🔄 Đổi Bài Mở Màn (Mulligan): Xáo lại tay bài khởi đầu vào bộ bài và rút ${this.player.hand.length} lá mới!`);
+    this.pushLog(`🔄 Đổi Bài Mở Màn (Mulligan): Xáo lại bộ bài và rút tay khởi đầu mới gồm 2 ♂ Nam + 2 ♀ Nữ!`);
     return { ok: true, hand: this.player.hand };
   }
 
@@ -827,81 +1413,59 @@ export class CardBattleEngine {
     if ((s.energy || 0) < dir.cost) {
       return { ok: false, reason: `Cần ${dir.cost}⚡ Năng lượng Gen để dùng ${dir.name} (Hiện có ${s.energy}⚡)!` };
     }
-
     if (sideKey === "player") {
       this.saveTurnSnapshot(`Chỉ thị ${dir.name} (${dir.cost}⚡)`);
     }
-
     s.energy -= dir.cost;
     s.directiveUsedThisTurn = true;
     const notes = [];
 
     if (dir.id === "shield_matrix") {
-      let shieldedCount = 0;
       s.row1.forEach((u) => {
         if (!u) return;
-        shieldedCount++;
-        if ((u.shieldCharges || 0) <= 0) {
-          u.shieldCharges = 1;
-          if (!u.h1Keywords) u.h1Keywords = [];
-          if (!u.h1Keywords.includes("shield")) u.h1Keywords.push("shield");
-        } else {
-          u.tokenBoostCR = (u.tokenBoostCR || 0) + 60;
-        }
+        u.firstBattleImmunity = true;
+        u.shieldCharges = Math.max(1, u.shieldCharges || 0);
       });
-      if (shieldedCount === 0) {
-        s.leaderSkillBuffCR = (s.leaderSkillBuffCR || 0) + 60;
-        notes.push("+60 CR Hàng 1 lượt này");
-      } else {
-        notes.push(`Cấp 🛡️ Khiên / +60 CR cho ${shieldedCount} thẻ Hàng 1`);
-      }
+      notes.push("Cấp 🛡️ Khiên / Bất tử lần đầu cho toàn Hàng 1");
     } else if (dir.id === "mutagen_burst") {
-      s.leaderSkillBuffCR = (s.leaderSkillBuffCR || 0) + 90;
-      notes.push("+90 CR toàn Hàng 1");
-      const breeder = s.row2.find((c) => c.breedingActive);
-      if (breeder) {
-        const bRes = this.spawnTokensForCaptive(sideKey, breeder, 0);
-        if (bRes.spawned.length > 0) {
-          notes.push(`🧬 Sinh sớm Token ${bRes.spawned[0].name} lên Hàng 1`);
-        }
-      } else {
-        const d = this.drawCards(sideKey, 1);
-        if (d > 0) notes.push(`Rút +${d} lá`);
-      }
+      s.leaderSkillBuffCR = (s.leaderSkillBuffCR || 0) + 120;
+      const d = this.drawCards(sideKey, 1);
+      notes.push(`+120 CR toàn Hàng 1${d > 0 ? ` & Rút +${d} lá` : ""}`);
     } else if (dir.id === "tactical_rescue") {
       if (opp.row2.length > 0) {
         const rescued = opp.row2.pop();
         rescued.ownerSide = sideKey;
         rescued.breedingActive = false;
-        rescued.sireCard = null;
-        if (s.hand.length < this.maxHandSize) {
-          s.hand.push(rescued);
-        } else {
-          s.deck.unshift(rescued);
-        }
-        notes.push(`🔓 Giải cứu ${rescued.name} khỏi Hàng 2 Địch về tay (Địch còn ${opp.row2.length}/3)!`);
+        if (s.hand.length < this.maxHandSize) s.hand.push(rescued);
+        notes.push(`🔓 Giải cứu ${rescued.name} khỏi Hàng 2 Địch về tay!`);
       } else {
         const d = this.drawCards(sideKey, 2);
         notes.push(`Rút +${d} lá chiến thuật`);
       }
     }
 
-    this.pushLog(`${dir.icon} [Chỉ Thị Chiến Thuật: ${dir.name} (-${dir.cost}⚡)] ${notes.join(" • ")}!`);
+    this.pushLog(`${dir.icon} [Chỉ Thị: ${dir.name} (-${dir.cost}⚡)] ${notes.join(" • ")}!`);
     return { ok: true, directive: dir, notes, remainingEnergy: s.energy };
   }
 
   // ==========================================================================
-  // DEPLOY & RECALL (WITH ENERGY COST ⚡ & UNDO SUPPORT)
+  // SUMMON PHASE: DEPLOY & RECALL ON 5 LANES
   // ==========================================================================
   deployCardToRow1(handIdx, laneIdx) {
     if (this.over) return { ok: false, reason: "Trận đấu đã kết thúc." };
+    if (this.phase !== "summon") {
+      return { ok: false, reason: `Chỉ được triệu hồi bài từ tay trong SUMMON PHASE (Hiện đang ở ${this.phase.toUpperCase()} PHASE)!` };
+    }
     const s = this.player;
+    if (s.summonLockedOnTurn === this.turn) {
+      return { ok: false, reason: "🚫 Bạn đang bị khóa Triệu Hồi bài từ tay ở lượt này do hiệu ứng Hàng 2 của Ovalina! (Bạn vẫn có thể ấn kích hoạt Eff H2 của Ovalina!)" };
+    }
     const card = s.hand[handIdx];
     if (!card) return { ok: false, reason: "Không tìm thấy thẻ trên tay." };
     if (!this.isDraftMode && card.fac !== s.leader.fac) {
       return { ok: false, reason: `Vi phạm phe phái: Thủ lĩnh ${s.leader.name} chỉ dùng thẻ phe ${s.leader.fac}!` };
     }
-    if (laneIdx < 0 || laneIdx > 2) return { ok: false, reason: "Làn Hàng 1 không hợp lệ." };
+    if (laneIdx < 0 || laneIdx >= this.maxLanes) return { ok: false, reason: "Làn Hàng 1 không hợp lệ (1–5)." };
     if (s.row1[laneIdx]) return { ok: false, reason: `Làn ${laneIdx + 1} đang có thẻ trấn giữ.` };
 
     const cost = typeof card.cost === "number" ? card.cost : getCardEnergyCost(card.cr, card.isToken);
@@ -909,7 +1473,7 @@ export class CardBattleEngine {
       return { ok: false, reason: `Không đủ Năng lượng Gen ⚡! Cần ${cost}⚡ để đặt ${card.name} (Hiện có ${s.energy}⚡).` };
     }
 
-    this.saveTurnSnapshot(`Đặt ${card.name} vào Làn ${laneIdx + 1}`);
+    this.saveTurnSnapshot(`Triệu hồi ${card.name} vào Làn ${laneIdx + 1}`);
 
     s.energy -= cost;
     s.hand.splice(handIdx, 1);
@@ -921,13 +1485,9 @@ export class CardBattleEngine {
     this.selectedHandIdx = null;
 
     const kwNotes = [];
-    if (hasH1Keyword(card, "charge")) {
-      kwNotes.push("⚡ Xung Phong");
-    }
-    if (hasH1Keyword(card, "shield")) {
-      kwNotes.push("🛡️ Khiên");
-    }
-    if (hasH1Keyword(card, "draw") || card.id === "ojamon" || card.id === "tr_eris_keeper") {
+    if (hasH1Keyword(card, "charge")) kwNotes.push("⚡ Xung Phong");
+    if (hasH1Keyword(card, "shield") || card.firstBattleImmunity) kwNotes.push("🛡️ Chặn Thua Lần Đầu");
+    if (hasH1Keyword(card, "draw")) {
       const drawn = this.drawCards("player", 1);
       if (drawn > 0) kwNotes.push("🃏 Rút +1 thẻ");
     }
@@ -937,19 +1497,21 @@ export class CardBattleEngine {
     }
 
     const kwStr = kwNotes.length ? ` [${kwNotes.join(" • ")}]` : "";
-    this.pushLog(`🃏 Đặt ${card.name} (${card.gender === "Male" ? "♂" : "♀"} • ${cost}⚡ • CR ${card.cr}) vào Làn ${laneIdx + 1}${kwStr} (Còn ${s.energy}⚡).`);
+    this.pushLog(`🃏 [Summon Phase] Đặt ${card.name} (${card.gender === "Male" ? "♂" : "♀"} • ${cost}⚡ • CR ${card.cr}) vào Làn ${laneIdx + 1}${kwStr} (Còn ${s.energy}⚡).`);
     return { ok: true, card, laneIdx, cost, kwNotes };
   }
 
   recallFromRow1(laneIdx) {
     if (this.over) return { ok: false };
+    if (this.phase !== "summon") {
+      return { ok: false, reason: "Chỉ có thể thu hồi thẻ vừa đặt khi còn ở SUMMON PHASE!" };
+    }
     const card = this.player.row1[laneIdx];
     if (!card) return { ok: false, reason: "Làn trống." };
-    if (card.deployedTurn !== this.turn || card.fromRow2Breeding) {
+    if (card.deployedTurn !== this.turn || card.fromRow2Breeding || card.isToken) {
       return { ok: false, reason: "Thẻ từ lượt trước hoặc Token sinh từ Hàng 2 đang giữ vị trí Hàng 1." };
     }
 
-    // If last turnHistory snapshot was deploying this card, pop it cleanly so draws/energy are exact
     const lastSnap = this.turnHistory[this.turnHistory.length - 1];
     if (lastSnap && lastSnap.actionLabel.includes(card.name)) {
       return this.undoLastAction();
@@ -964,7 +1526,7 @@ export class CardBattleEngine {
   }
 
   // ==========================================================================
-  // LIVE LANE FORECAST PREVIEW ("Kết quả dự kiến của mỗi làn")
+  // LIVE 5-LANE FORECAST PREVIEW
   // ==========================================================================
   getLaneForecast(laneIdx, hypotheticalPlayerCard = null) {
     const pCard = this.player.row1[laneIdx] || hypotheticalPlayerCard;
@@ -989,44 +1551,52 @@ export class CardBattleEngine {
       : null;
 
     const sim = resolveLanePair(pCard, eCard, pEval, eEval, laneIdx);
-    const prefix = isHypothetical ? "Dự kiến nếu đặt: " : "Dự kiến: ";
+    const prefix = isHypothetical ? "Nếu đặt: " : "Dự kiến: ";
 
     switch (sim.outcome) {
       case "player_win":
-        if (sim.triggeredBreed) {
+        if (sim.loserIsToken) {
           return {
             ...sim,
-            badgeClass: "breed-win",
-            label: `💘 ${prefix}♂ Thắng ♀ (+${sim.pTotal - sim.eTotal}) → Bắt & Lai H2!`,
-            detail: `${pCard.name} (${sim.pTotal}) bắt ${eCard.name} (${sim.eTotal}) sang Hàng 2 sinh Token!`
+            badgeClass: "win",
+            label: `💥 ${prefix}Diệt Token Địch (+${sim.overkill} sát thương H3)`,
+            detail: `Token địch biến mất & Hàng 3 địch chịu ${sim.overkill} sát thương tràn!`
           };
         }
         return {
           ...sim,
-          badgeClass: "win",
-          label: `🏆 ${prefix}Thắng Làn (+${sim.pTotal - sim.eTotal}) → Bắt Tù Binh!`,
-          detail: `${pCard.name} (${sim.pTotal}) áp đảo ${eCard.name} (${sim.eTotal})`
+          badgeClass: sim.triggeredBreed ? "breed-win" : "win",
+          label: `🏆 ${prefix}Thắng (+${sim.pTotal - sim.eTotal}) → Đưa vào H2 Ta!`,
+          detail: `${pCard.name} (${sim.pTotal}) bắt ${eCard.name} (${sim.eTotal}) sang Hàng 2`
         };
       case "enemy_shield_block":
         return {
           ...sim,
           badgeClass: "shield",
-          label: `🛡️ ${prefix}Phá Khiên Địch (${sim.pTotal} > ${sim.eTotal})`,
-          detail: `Địch mất Khiên bảo hộ ở lượt này (dùng thẻ Xuyên Giáp để bắt thẳng!)`
+          label: `🛡️ ${prefix}Phá Bất Tử/Khiên Địch (${sim.pTotal} > ${sim.eTotal})`,
+          detail: "Địch mất trạng thái chặn thua lần đầu ở lượt này"
         };
       case "player_shield_block":
         return {
           ...sim,
           badgeClass: "shield",
-          label: `🛡️ ${prefix}Khiên Ta Chặn Thua (${sim.pTotal} < ${sim.eTotal})`,
-          detail: `Khiên sẽ vỡ để giữ ${pCard.name} trụ lại Hàng 1!`
+          label: `🛡️ ${prefix}Chặn Thua Lần Đầu (${sim.pTotal} < ${sim.eTotal})`,
+          detail: `${pCard.name} kích hoạt Bất Tử Lần Đầu / Khiên để trụ lại Hàng 1!`
         };
       case "enemy_win":
+        if (sim.loserIsToken) {
+          return {
+            ...sim,
+            badgeClass: "lose",
+            label: `⚠️ ${prefix}Token Ta Vỡ (-${sim.overkill} vào Hàng 3 Ta!)`,
+            detail: `Token biến mất và Hàng 3 của bạn phải gánh ${sim.overkill} sát thương!`
+          };
+        }
         return {
           ...sim,
           badgeClass: "lose",
-          label: `⚠️ ${prefix}Thua Làn (-${sim.eTotal - sim.pTotal})${sim.triggeredBreed ? " • Nguy cơ bị Lai H2!" : ""}`,
-          detail: `${eCard.name} (${sim.eTotal}) đang mạnh hơn ${pCard.name} (${sim.pTotal})`
+          label: `⚠️ ${prefix}Thua Làn (-${sim.eTotal - sim.pTotal}) → Bị bắt sang H2 Địch`,
+          detail: `${eCard.name} (${sim.eTotal}) mạnh hơn ${pCard.name} (${sim.pTotal})`
         };
       case "tie":
         return {
@@ -1040,327 +1610,160 @@ export class CardBattleEngine {
           ...sim,
           badgeClass: "win",
           label: `⚡ ${prefix}Trấn Giữ (${sim.pTotal} CR) • Uy Hiếp H3`,
-          detail: "Địch chưa có thẻ cản — nếu cả 3 làn địch trống sẽ đánh thẳng Thủ lĩnh H3!"
+          detail: "Nếu Hàng 1 địch trống sẽ đánh thẳng Thủ lĩnh Hàng 3!"
         };
       case "enemy_hold":
         return {
           ...sim,
           badgeClass: "lose",
-          label: `🚨 Địch Chiếm Làn (${sim.eTotal} CR) — Hãy Đặt Thẻ Chặn!`,
-          detail: "Đặt thẻ Nam (♂) nếu địch là Nữ (♀) để nhận +2 Cấp (+120 CR)!"
+          label: `🚨 Địch Chiếm Làn (${sim.eTotal} CR) — Hãy Chặn!`,
+          detail: "Đặt thẻ chặn để tránh Hàng 3 bị uy hiếp!"
         };
       default:
         return { lane: laneIdx, outcome: "empty", badgeClass: "neutral", label: "Làn Trống", detail: "" };
     }
   }
 
-  // Compute exact Row 2 auto-breeding chance for an active Male-captured-Female pair:
-  // Tamarite = 100%; all others strictly 0-99% (including Row 2 symbiosis boosts)!
-  getEffectiveBreedChance(captive, sideKey = null) {
-    const resolvedSide = sideKey || (this.enemy.row2.includes(captive) ? "enemy" : "player");
-    const side = this.getSide(resolvedSide);
-    const r2 = captive.row2Effect || {};
-    if (r2.tier === "tamarite") return 100;
-
-    let chance = typeof r2.breedChance === "number" ? r2.breedChance : 55;
-    const sire = captive.sireCard;
-    if ((captive.cr || 0) >= 800 && r2.tier === "sovereign" && sire && (sire.cr >= 800 || sire.id === "dick")) {
-      chance = 82;
-    } else if (sire && sire.id === "dick") {
-      chance = Math.min(95, chance + 25);
-    }
-
-    const ctx = this.getSideBreedingContext(resolvedSide);
-    const otherSymbiosis = side.row2.reduce(
-      (sum, other) => (other.uid !== captive.uid ? sum + (other.row2Effect?.symbiosisR2Boost || 0) : sum),
-      0
-    );
-    chance += otherSymbiosis + (side.leaderSkillBreedBoost || 0);
-    if (ctx.hasDick && sire?.id !== "dick" && !(captive.row2Effect?.symbiosisR2Boost > 0)) {
-      chance += 15;
-    }
-
-    const lane = typeof captive.captureLane === "number" ? this.lanes[captive.captureLane] : null;
-    if (lane && lane.id === "pherone_nexus") {
-      chance += 12;
-    }
-
-    // ★ Star Mastery boost (+3% per star on Sire or Captive)
-    chance += ((captive.starLevel || 0) + (sire?.starLevel || 0)) * 3;
-
-    return Math.max(0, Math.min(99, chance));
-  }
-
-  spawnTokensForCaptive(sideKey, captive, forcedRoll = null) {
-    const side = this.getSide(sideKey);
-    const ctx = this.getSideBreedingContext(sideKey);
-    const r2 = captive.row2Effect || {};
-    const sire = captive.sireCard || side.leader;
-    const chance = this.getEffectiveBreedChance(captive, sideKey);
-    const roll = forcedRoll !== null ? forcedRoll : Math.random() * 100;
-
-    if (roll >= chance) {
-      return { spawned: [], chance, missed: true };
-    }
-
-    const morph = r2.omniWomb
-      ? OMNI_VARIANTS[Math.floor(Math.random() * OMNI_VARIANTS.length)]
-      : null;
-
-    const countToSpawn = morph && morph.key === "twin" ? 2 : 1;
-    const created = [];
-
-    for (let k = 0; k < countToSpawn; k++) {
-      let tokenCR = (sire.cr * 0.45 + captive.cr * 0.55) * (r2.crMult || 0.9);
-      if (r2.gapMutation && Math.abs((sire.cr || 0) - (captive.cr || 0)) >= 200) {
-        tokenCR += 160;
-      }
-      if (morph) tokenCR += morph.crBonus;
-
-      const effectivePenaltyPct = ctx.hasDick ? 0 : (r2.crPenaltyPct || 0);
-      if (effectivePenaltyPct > 0) {
-        tokenCR = tokenCR * (1 - effectivePenaltyPct / 100);
-      }
-
-      const finalCR = Math.max(25, Math.round(tokenCR));
-      const raceKey = (captive.race || sire.race || "hybrid").toLowerCase();
-      const styleA = RACE_STYLE[sire.race] || { aura: "#38bdf8" };
-      const styleB = RACE_STYLE[captive.race] || { aura: "#f472b6" };
-
-      const suffix = morph ? morph.title : (r2.tier === "tamarite" ? "Tamarite" : (effectivePenaltyPct >= 20 ? "Yếu Gen" : "Hậu Duệ"));
-      const gender = Math.random() < 0.5 ? "Male" : "Female";
-
-      const sireFirst = String(sire?.name || "Chiến Binh").split(" ")[0];
-      const capFirst = String(captive?.name || "Tù Binh").split(" ")[0];
-      const sireSpec = String(sire?.species || "Alien").split(" ")[0];
-      const capSpec = String(captive?.species || "Alien").split(" ")[0];
-
-      const tokenObj = {
-        id: `tok_${this.turn}_${this.uidCounter}`,
-        isToken: true,
-        name: `${sireFirst}×${capFirst} [${suffix}]`,
-        fac: side.leader.fac,
-        species: morph ? `Omni-Token (${capSpec})` : `Token (${sireSpec} × ${capSpec})`,
-        race: raceKey,
-        gender,
-        cr: finalCR,
-        cost: 1,
-        h: Number((((sire.h || 1.8) + (captive.h || 1.75)) / 2).toFixed(2)),
-        auraA: styleA.aura,
-        auraB: styleB.aura,
-        parentsLabel: `${sire?.name || sireFirst} ♂ × ${captive?.name || capFirst} ♀`,
-        mutated: r2.tier === "tamarite" || Boolean(r2.omniWomb),
-        h1Keywords: r2.tier === "tamarite" ? ["charge", "recover"] : ["charge"],
-        h2Keywords: ["spawn_token"],
-        row1Effect: morph
-          ? { id: morph.r1Id, tag: morph.tag, bonusFlat: morph.crBonus, desc: morph.desc }
-          : (r2.tier === "tamarite"
-            ? { id: "hyper_photon", tag: "Token Tamarite (+110 CR)", bonusFlat: 110, desc: "Hàng 1: Token huyết thống Tamarite +110 CR chiến đấu & kích hoạt ĐK cho đồng minh!" }
-            : (r2.blueBlood
-              ? { id: "blue_blood_guard", tag: "Máu Xanh Miễn Virus (+70 CR)", bonusFlat: 70, desc: "Hàng 1: +70 CR & kháng trừ CR." }
-              : { id: "frontline_valor", tag: effectivePenaltyPct >= 20 ? "Token Suy Yếu (+20 CR)" : "Token Lai Chiến (+55 CR)", bonusFlat: effectivePenaltyPct >= 20 ? 20 : 55, desc: "Hàng 1: Token sinh từ Hàng 2 trực chiến & thỏa ĐK cho các lá khác." })),
-        row2Effect: {
-          id: "tok_r2",
-          tier: r2.tier === "tamarite" ? "tamarite" : "alien",
-          breedChance: r2.tier === "tamarite" ? 100 : 55,
-          crAura: Math.max(30, Math.round(finalCR * 0.12)),
-          crMult: 0.85,
-          crPenaltyPct: effectivePenaltyPct,
-          tag: r2.tier === "tamarite" ? "Token Tamarite (100%)" : "Hậu Duệ Thế Hệ Sau (55%)",
-          desc: `Hàng 2: +${Math.max(30, Math.round(finalCR * 0.12))} CR hỗ trợ Hàng 1.`
-        }
-      };
-
-      const inst = makeInstance(hybridToCard(tokenObj), sideKey, this.uidCounter++);
-      inst.fromRow2Breeding = true;
-      inst.parentsLabel = tokenObj.parentsLabel;
-      inst.debuffCanceledByDick = ctx.hasDick && (r2.crPenaltyPct || 0) > 0;
-
-      const candidateOrder = [captive.captureLane, 0, 1, 2].filter((idx, i, arr) => idx >= 0 && idx <= 2 && arr.indexOf(idx) === i);
-      const targetLane = candidateOrder.find((idx) => side.row1[idx] === null);
-
-      if (targetLane !== undefined) {
-        inst.deployedTurn = this.turn;
-        inst.spawnedZone = "row1";
-        inst.spawnedLane = targetLane;
-        side.row1[targetLane] = inst;
-      } else {
-        const allies = side.row1.filter(Boolean).sort((a, b) => a.cr - b.cr);
-        const targetAlly = allies[0];
-        if (targetAlly) {
-          const boost = Math.max(45, Math.round(finalCR * 0.35));
-          targetAlly.tokenBoostCR = (targetAlly.tokenBoostCR || 0) + boost;
-          inst.spawnedZone = "row1_boost";
-          inst.boostedAllyName = targetAlly.name;
-          inst.boostAmount = boost;
-        }
-      }
-
-      side.totalTokensBred = (side.totalTokensBred || 0) + 1;
-      captive.spawnCount = (captive.spawnCount || 0) + 1;
-      created.push(inst);
-    }
-
-    return { spawned: created, chance, missed: false };
+  getEffectiveBreedChance(captive) {
+    const r2 = captive?.row2Effect || {};
+    if (r2.isNone || r2.id === "none") return 0;
+    return 100; // In v14.0, Row 2 effects are deterministic Yu-Gi-Oh Ignition effects activated in Summon Phase!
   }
 
   // ==========================================================================
-  // SMART TACTICAL AI (Prioritizes Player Lanes, Pre-calculates Win/Loss, Saves ⚡)
+  // SMART TACTICAL AI FOR 5 LANES (Summon Phase + Row 2 Ignition + Effect Phase)
   // ==========================================================================
-  aiDeployRow1() {
+  aiExecuteTurnPhases() {
     const e = this.enemy;
     const deployedMoves = [];
-    const emptyLanes = [0, 1, 2].filter((idx) => e.row1[idx] === null);
 
-    // 1. Prioritize lanes where Player has deployed a card
-    const occupiedByPlayer = emptyLanes.filter((idx) => this.player.row1[idx] !== null);
-    const otherEmpty = emptyLanes.filter((idx) => this.player.row1[idx] === null);
-    const laneOrder = [...occupiedByPlayer, ...otherEmpty];
-
-    for (const laneIdx of laneOrder) {
-      const affordable = e.hand
-        .map((c, idx) => ({ card: c, idx, cost: c.cost || getCardEnergyCost(c.cr, c.isToken) }))
-        .filter((item) => item.cost <= e.energy);
-
-      if (affordable.length === 0) break;
-
-      const pCard = this.player.row1[laneIdx];
-      let bestPick = null;
-      let bestScore = -999999;
-
-      for (const item of affordable) {
-        const c = item.card;
-        const eEval = this.evalCardCombatCR(c, pCard, "enemy", { laneIdx, previewDeploy: true });
-        if (pCard) {
-          const pEval = this.evalCardCombatCR(pCard, c, "player", { laneIdx });
-          const sim = resolveLanePair(pCard, c, pEval, eEval, laneIdx);
-          if (sim.outcome === "enemy_win") {
-            // Winning the lane is highest priority; prefer efficient win + Male hunting Female!
-            const huntBonus = sim.triggeredBreed ? 450 : 0;
-            const efficiency = 1200 - (eEval.total - pEval.total) - item.cost * 60;
-            const score = 10000 + huntBonus + efficiency;
-            if (score > bestScore) {
-              bestScore = score;
-              bestPick = item;
-            }
-          } else if (sim.outcome === "player_shield_block") {
-            // Popping player's shield with a cheap card is good
-            const score = 2200 - item.cost * 150;
-            if (score > bestScore) {
-              bestScore = score;
-              bestPick = item;
-            }
-          } else if (sim.outcome === "tie" || sim.outcome === "enemy_shield_block") {
-            const score = 1500 - item.cost * 120;
-            if (score > bestScore) {
-              bestScore = score;
-              bestPick = item;
-            }
-          } else {
-            // Would lose this lane! Penalize heavily (especially feeding a Female card to Player Male)
-            const feedPenalty = (pCard.gender === "Male" && c.gender === "Female") ? -4000 : -1500;
-            const score = feedPenalty - item.cost * 200;
-            if (score > bestScore) {
-              bestScore = score;
-              bestPick = item;
-            }
-          }
-        } else {
-          // Uncontested lane: deploy if we have no board presence or spare energy
-          const currentBoardCount = this.getRow1Cards("enemy").length;
-          const wantsToSaveEnergy = currentBoardCount >= 1 && e.energy <= 2 && item.cost >= 2;
-          const score = wantsToSaveEnergy ? -500 : (eEval.total + (hasH1Keyword(c, "draw") ? 120 : 0) - item.cost * 45);
-          if (score > bestScore) {
-            bestScore = score;
-            bestPick = item;
-          }
-        }
+    // 1. AI Summon Phase: Activate any available Enemy Row 2 Ignition effects first!
+    for (let r2Idx = 0; r2Idx < e.row2.length; r2Idx++) {
+      const cap = e.row2[r2Idx];
+      if (cap && !cap.h2ActivatedThisTurn && cap.row2Effect && !cap.row2Effect.isNone && cap.row2Effect.id !== "none") {
+        this.activateRow2Ignition(r2Idx, "enemy");
       }
-
-      // Smart ⚡ Saving: If best move in this lane has negative tactical value AND AI already has >=1 unit on Row 1, save ⚡!
-      const currentEnemyFront = this.getRow1Cards("enemy").length;
-      if (!bestPick || (bestScore < 0 && currentEnemyFront >= 1)) {
-        continue;
-      }
-
-      const chosen = e.hand.splice(bestPick.idx, 1)[0];
-      e.energy -= bestPick.cost;
-      chosen.deployedTurn = this.turn;
-      if (hasH1Keyword(chosen, "shield") && (chosen.shieldCharges || 0) <= 0) {
-        chosen.shieldCharges = 1;
-      }
-      e.row1[laneIdx] = chosen;
-      if (hasH1Keyword(chosen, "draw")) this.drawCards("enemy", 1);
-      if (hasH1Keyword(chosen, "recover")) this.addEnergy("enemy", 1);
-
-      deployedMoves.push({ lane: laneIdx, card: chosen, cost: bestPick.cost });
-      this.pushLog(`👁️ Địch đặt ${chosen.name} (${chosen.gender === "Male" ? "♂" : "♀"} • ${bestPick.cost}⚡ • CR ${chosen.cr}) vào Làn ${laneIdx + 1} (Còn ${e.energy}⚡).`);
     }
 
-    // 2. Smart AI Active Skill Check (Gene Surge 4⚡ or Faction Skill 3⚡)
-    const contestedLanes = [0, 1, 2].filter((i) => this.player.row1[i] && e.row1[i]);
-    if (contestedLanes.length > 0) {
-      if (!e.geneSurgeUsed && e.energy >= GENE_SURGE_SKILL.cost) {
-        // Check if +180 CR flips any contested lane
-        const flipsLane = contestedLanes.some((i) => {
-          const pE = this.evalCardCombatCR(this.player.row1[i], e.row1[i], "player", { laneIdx: i }).total;
-          const eE = this.evalCardCombatCR(e.row1[i], this.player.row1[i], "enemy", { laneIdx: i }).total;
-          return eE <= pE && (eE + GENE_SURGE_SKILL.scaledBonus) > pE;
-        });
-        if (flipsLane || (this.isBossFloor && contestedLanes.length >= 2)) {
-          this.activateGeneSurge("enemy");
+    // 2. AI Summon Phase: Deploy cards from hand onto the 5 lanes (unless locked by Ovalina H2!)
+    if (e.summonLockedOnTurn === this.turn) {
+      this.pushLog(`🔒 [AI Summon Phase] Địch bị khóa Triệu Hồi lượt này do hiệu ứng Hàng 2 của Ovalina!`);
+    } else {
+      const allLanes = [0, 1, 2, 3, 4];
+      const emptyLanes = allLanes.filter((idx) => e.row1[idx] === null);
+      const occupiedByPlayer = emptyLanes.filter((idx) => this.player.row1[idx] !== null);
+      const otherEmpty = emptyLanes.filter((idx) => this.player.row1[idx] === null);
+      const laneOrder = [...occupiedByPlayer, ...otherEmpty];
+
+      for (const laneIdx of laneOrder) {
+        const affordable = e.hand
+          .map((c, idx) => ({ card: c, idx, cost: c.cost || getCardEnergyCost(c.cr, c.isToken) }))
+          .filter((item) => item.cost <= e.energy);
+
+        if (affordable.length === 0) break;
+
+        const pCard = this.player.row1[laneIdx];
+        let bestPick = null;
+        let bestScore = -999999;
+
+        for (const item of affordable) {
+          const c = item.card;
+          const eEval = this.evalCardCombatCR(c, pCard, "enemy", { laneIdx, previewDeploy: true });
+          if (pCard) {
+            const pEval = this.evalCardCombatCR(pCard, c, "player", { laneIdx });
+            const sim = resolveLanePair(pCard, c, pEval, eEval, laneIdx);
+            if (sim.outcome === "enemy_win") {
+              const score = 10000 + (sim.loserIsToken ? sim.overkill : 400) - item.cost * 50;
+              if (score > bestScore) {
+                bestScore = score;
+                bestPick = item;
+              }
+            } else if (sim.outcome === "player_shield_block" || sim.outcome === "tie") {
+              const score = 1800 - item.cost * 120;
+              if (score > bestScore) {
+                bestScore = score;
+                bestPick = item;
+              }
+            } else {
+              const score = -2000 - item.cost * 150;
+              if (score > bestScore) {
+                bestScore = score;
+                bestPick = item;
+              }
+            }
+          } else {
+            const currentBoardCount = this.getRow1Cards("enemy").length;
+            const wantsToSaveEnergy = currentBoardCount >= 2 && e.energy <= 2 && item.cost >= 2;
+            const score = wantsToSaveEnergy ? -500 : (eEval.total - item.cost * 40);
+            if (score > bestScore) {
+              bestScore = score;
+              bestPick = item;
+            }
+          }
         }
-      } else if (!e.leaderSkillUsed) {
-        const eSkill = getLeaderSkillForCard(e.leader);
-        if (e.energy >= eSkill.cost && (contestedLanes.length >= 2 || this.difficulty >= 1.25)) {
-          this.activateLeaderSkill("enemy");
+
+        const currentEnemyFront = this.getRow1Cards("enemy").length;
+        if (!bestPick || (bestScore < 0 && currentEnemyFront >= 2)) {
+          continue;
         }
+
+        const chosen = e.hand.splice(bestPick.idx, 1)[0];
+        e.energy -= bestPick.cost;
+        chosen.deployedTurn = this.turn;
+        if (hasH1Keyword(chosen, "shield") && (chosen.shieldCharges || 0) <= 0) {
+          chosen.shieldCharges = 1;
+        }
+        e.row1[laneIdx] = chosen;
+        if (hasH1Keyword(chosen, "draw")) this.drawCards("enemy", 1);
+        if (hasH1Keyword(chosen, "recover")) this.addEnergy("enemy", 1);
+
+        deployedMoves.push({ lane: laneIdx, card: chosen, cost: bestPick.cost });
+        this.pushLog(`👁️ [AI Summon] Địch đặt ${chosen.name} (${chosen.gender === "Male" ? "♂" : "♀"} • ${bestPick.cost}⚡ • CR ${chosen.cr}) vào Làn ${laneIdx + 1}.`);
       }
+    }
+
+    // 3. AI Effect Phase: Activate all Enemy Row 1 & Row 3 Effects!
+    this.activateAllEffectsInPhase("enemy");
+
+    // 4. AI Leader Active Skills check
+    const contestedLanes = [0, 1, 2, 3, 4].filter((i) => this.player.row1[i] && e.row1[i]);
+    if (contestedLanes.length > 0 && !e.geneSurgeUsed && e.energy >= GENE_SURGE_SKILL.cost) {
+      const flipsLane = contestedLanes.some((i) => {
+        const pE = this.evalCardCombatCR(this.player.row1[i], e.row1[i], "player", { laneIdx: i }).total;
+        const eE = this.evalCardCombatCR(e.row1[i], this.player.row1[i], "enemy", { laneIdx: i }).total;
+        return eE <= pE && (eE + GENE_SURGE_SKILL.scaledBonus) > pE;
+      });
+      if (flipsLane) this.activateGeneSurge("enemy");
     }
 
     return deployedMoves;
   }
 
-  // Apply H2 Keywords when a Female card is captured by a Male card into Winner's Row 2
-  applyH2CaptureKeywords(winnerSideKey, captiveCard, sireCard = null) {
-    const loser = this.getOpp(winnerSideKey);
-    const notes = [];
-
-    if (hasH2Keyword(captiveCard, "bonus_draw") || hasH2Keyword(sireCard, "bonus_draw")) {
-      const d = this.drawCards(winnerSideKey, 1);
-      if (d > 0) notes.push("📚 H2 Rút Thêm +1 lá");
-    }
-    if ((hasH2Keyword(captiveCard, "purge_capture") || hasH2Keyword(sireCard, "purge_capture")) && !captiveCard.purgeUsed && loser.row2.length > 0) {
-      captiveCard.purgeUsed = true;
-      const freed = loser.row2.pop();
-      notes.push(`🔓 H2 Gỡ 1 Điểm Bắt (${freed.name})`);
-    }
-    return notes;
-  }
-
   // ==========================================================================
-  // TURN CLASH RESOLUTION (Pure State Update + Full Step Data for UI Animation)
+  // BATTLE PHASE & END PHASE -> NEXT TURN DRAW PHASE RESOLUTION
   // ==========================================================================
   resolveClashTurn() {
     if (this.over) return { ok: false, over: true, winner: this.winner };
 
     const pHasAnyFront = this.getRow1Cards("player").length > 0;
-    const pCanAffordAny = this.player.hand.some((c) => (c.cost || 1) <= this.player.energy);
-    if (!pHasAnyFront && pCanAffordAny) {
-      return { ok: false, reason: "Hãy kéo-thả hoặc chọn ít nhất 1 thẻ đủ ⚡ đặt ra Hàng 1 trước khi Giao Chiến!" };
+    const pCanAffordAny = this.player.summonLockedOnTurn !== this.turn && this.player.hand.some((c) => (c.cost || 1) <= this.player.energy);
+    if (!pHasAnyFront && pCanAffordAny && this.phase === "summon") {
+      return { ok: false, reason: "Hãy đặt ít nhất 1 thẻ từ tay lên Hàng 1 (5 làn) trước khi bước vào Battle Phase!" };
     }
 
-    // Clear per-turn Undo history once clash begins
+    this.phase = "battle";
     this.turnHistory = [];
     this.lastNewTokens = [];
 
-    // 1. Enemy deploys into open Enemy Row 1 lanes
-    const aiDeploys = this.aiDeployRow1();
+    // 1. AI executes its Summon & Effect phases
+    const aiDeploys = this.aiExecuteTurnPhases();
 
     const laneResults = [];
+    let playerRow3OverkillDamage = 0;
+    let enemyRow3OverkillDamage = 0;
 
-    // 2. Sequential Vertical Lane Clashes (Lanes 0 -> 1 -> 2)
-    for (let i = 0; i < 3; i++) {
+    // 2. Sequential Vertical Lane Clashes across all 5 Lanes (Lanes 0 -> 1 -> 2 -> 3 -> 4)
+    for (let i = 0; i < this.maxLanes; i++) {
       const pCard = this.player.row1[i];
       const eCard = this.enemy.row1[i];
 
@@ -1370,50 +1773,48 @@ export class CardBattleEngine {
         const res = resolveLanePair(pCard, eCard, pEval, eEval, i);
 
         if (res.outcome === "enemy_shield_block") {
-          eCard.shieldCharges = Math.max(0, (eCard.shieldCharges || 1) - 1);
+          if (eCard.firstBattleImmunity) eCard.firstBattleImmunity = false;
+          else eCard.shieldCharges = Math.max(0, (eCard.shieldCharges || 1) - 1);
           if (res.winnerRecoverEnergy) this.addEnergy("player", res.winnerRecoverEnergy);
-          this.pushLog(`🛡️ Làn ${i + 1}: ${pCard.name} (${res.pTotal}) thắng điểm nhưng ${eCard.name} (${res.eTotal}) kích hoạt KHIÊN chặn thua & trụ lại Hàng 1!`);
+          this.pushLog(`🛡️ Làn ${i + 1}: ${pCard.name} (${res.pTotal}) thắng điểm nhưng ${eCard.name} (${res.eTotal}) kích hoạt Bất Tử Lần Đầu/Khiên & trụ lại Hàng 1!`);
           laneResults.push(res);
         } else if (res.outcome === "player_shield_block") {
-          pCard.shieldCharges = Math.max(0, (pCard.shieldCharges || 1) - 1);
+          if (pCard.firstBattleImmunity) pCard.firstBattleImmunity = false;
+          else pCard.shieldCharges = Math.max(0, (pCard.shieldCharges || 1) - 1);
           if (res.winnerRecoverEnergy) this.addEnergy("enemy", res.winnerRecoverEnergy);
-          this.pushLog(`🛡️ Làn ${i + 1}: ${pCard.name} (${res.pTotal}) kích hoạt KHIÊN Bảo Hộ chặn đòn của ${eCard.name} (${res.eTotal}) & trụ lại Hàng 1!`);
+          this.pushLog(`🛡️ Làn ${i + 1}: ${pCard.name} (${res.pTotal}) kích hoạt Bất Tử Lần Đầu/Khiên chặn đòn của ${eCard.name} (${res.eTotal}) & trụ lại Hàng 1!`);
           laneResults.push(res);
         } else if (res.outcome === "player_win") {
           this.enemy.row1[i] = null;
-          eCard.ownerSide = "captured_by_player";
-          eCard.captureLane = i;
           if (res.winnerRecoverEnergy) this.addEnergy("player", res.winnerRecoverEnergy);
 
-          let h2Notes = [];
-          if (res.triggeredBreed) {
-            eCard.breedingActive = true;
-            eCard.sireCard = pCard;
-            h2Notes = this.applyH2CaptureKeywords("player", eCard, pCard);
-            const h2Str = h2Notes.length ? ` [${h2Notes.join(" • ")}]` : "";
-            this.pushLog(`💗 Làn ${i + 1}: ${pCard.name} (♂ ${res.pTotal}) thắng ${eCard.name} (♀ ${res.eTotal})${res.pierced ? " [🗡️ Xuyên Khiên]" : ""} -> Đưa sang Hàng 2 & kích hoạt Lai Tạo!${h2Str} (${this.player.row2.length + 1}/3)`);
+          const capInfo = this.onCardPlacedIntoRow2("player", eCard, pCard, i);
+          if (capInfo.vanishedToken) {
+            // Weak Token destroyed -> disappears and overkill hits Enemy Row 3 Representative!
+            const chip = Math.round(res.overkill * 0.65);
+            enemyRow3OverkillDamage += chip;
+            this.enemy.leader.battleDamageTaken = (this.enemy.leader.battleDamageTaken || 0) + chip;
+            this.pushLog(`💨 Làn ${i + 1}: ${pCard.name} (${res.pTotal}) đánh tan Token ${eCard.name} (${res.eTotal}) -> Token biến mất & Hàng 3 Địch ăn ${chip} sát thương tràn!`);
           } else {
-            this.pushLog(`🏆 Làn ${i + 1}: ${pCard.name} (${res.pTotal} CR) thắng ${eCard.name} (${res.eTotal} CR)${res.pierced ? " [🗡️ Xuyên Khiên]" : ""} -> Bắt vào Hàng 2 ta! (${this.player.row2.length + 1}/3)`);
+            const extraNotes = capInfo.notes.length ? ` [${capInfo.notes.join(" • ")}]` : "";
+            this.pushLog(`🏆 Làn ${i + 1}: ${pCard.name} (${res.pTotal} CR) thắng ${eCard.name} (${res.eTotal} CR) -> Đưa vào Hàng 2 Ta (${this.player.row2.length}/${this.maxRow2})!${extraNotes}`);
           }
-          this.player.row2.push(eCard);
-          laneResults.push({ ...res, h2Notes });
+          laneResults.push({ ...res, h2Notes: capInfo.notes });
         } else if (res.outcome === "enemy_win") {
           this.player.row1[i] = null;
-          pCard.ownerSide = "captured_by_enemy";
-          pCard.captureLane = i;
           if (res.winnerRecoverEnergy) this.addEnergy("enemy", res.winnerRecoverEnergy);
 
-          let h2Notes = [];
-          if (res.triggeredBreed) {
-            pCard.breedingActive = true;
-            pCard.sireCard = eCard;
-            h2Notes = this.applyH2CaptureKeywords("enemy", pCard, eCard);
-            this.pushLog(`💢 Làn ${i + 1}: ${eCard.name} (♂ ${res.eTotal}) thắng ${pCard.name} (♀ ${res.pTotal})${res.pierced ? " [🗡️ Xuyên Khiên]" : ""} -> Gửi sang Hàng 2 Địch & lai tạo! (${this.enemy.row2.length + 1}/3)`);
+          const capInfo = this.onCardPlacedIntoRow2("enemy", pCard, eCard, i);
+          if (capInfo.vanishedToken) {
+            const chip = Math.round(res.overkill * 0.65);
+            playerRow3OverkillDamage += chip;
+            this.player.leader.battleDamageTaken = (this.player.leader.battleDamageTaken || 0) + chip;
+            this.pushLog(`💥 Làn ${i + 1}: Token ${pCard.name} (${res.pTotal}) bị ${eCard.name} (${res.eTotal}) đánh bay -> Token biến mất & Thủ lĩnh Hàng 3 của bạn phải ăn ${chip} sát thương!`);
           } else {
-            this.pushLog(`💥 Làn ${i + 1}: ${eCard.name} (${res.eTotal} CR) áp đảo ${pCard.name} (${res.pTotal} CR)${res.pierced ? " [🗡️ Xuyên Khiên]" : ""} -> Đưa vào Hàng 2 Địch! (${this.enemy.row2.length + 1}/3)`);
+            const extraNotes = capInfo.notes.length ? ` [${capInfo.notes.join(" • ")}]` : "";
+            this.pushLog(`💢 Làn ${i + 1}: ${eCard.name} (${res.eTotal} CR) thắng ${pCard.name} (${res.pTotal} CR) -> Đưa vào Hàng 2 Địch (${this.enemy.row2.length}/${this.maxRow2})!${extraNotes}`);
           }
-          this.enemy.row2.push(pCard);
-          laneResults.push({ ...res, h2Notes });
+          laneResults.push({ ...res, h2Notes: capInfo.notes });
         } else {
           this.pushLog(`⚖️ Làn ${i + 1}: ${pCard.name} hòa ${eCard.name} tại ${res.pTotal} CR — giữ nguyên vị trí.`);
           laneResults.push(res);
@@ -1431,29 +1832,47 @@ export class CardBattleEngine {
 
     this.lastLaneResults = laneResults;
 
-    // 3. Check Immediate 3-Capture Win/Loss Condition (3/3)
-    if (this.player.row2.length >= 3) {
+    // 3. Check Row 2 Capture Win/Loss Condition (3+ or 5 captures)
+    const captureWinTarget = 3;
+    if (this.player.row2.length >= captureWinTarget) {
       this.over = true;
       this.winner = "player";
       this.winReason = "capture_3";
-      this.pushLog(`🎉 CHIẾN THẮNG! Đã bắt đủ 3/3 thẻ đối thủ vào Hàng 2!`);
+      this.pushLog(`🎉 CHIẾN THẮNG! Đã bắt giữ ${this.player.row2.length} lá bài thật của đối thủ vào Hàng 2!`);
       return { ok: true, aiDeploys, laneResults, newTokens: this.lastNewTokens, over: true, winner: "player", winReason: "capture_3" };
     }
-    if (this.enemy.row2.length >= 3) {
+    if (this.enemy.row2.length >= captureWinTarget) {
       this.over = true;
       this.winner = "enemy";
       this.winReason = "capture_3";
-      this.pushLog(`💀 THẤT BẠI! Bạn đã mất 3/3 thẻ vào Hàng 2 đối phương!`);
+      this.pushLog(`💀 THẤT BẠI! Bạn đã mất ${this.enemy.row2.length} lá bài vào Hàng 2 đối phương!`);
       return { ok: true, aiDeploys, laneResults, newTokens: this.lastNewTokens, over: true, winner: "enemy", winReason: "capture_3" };
     }
 
-    // 4. Row 3 Outer Representative Breach Check (Only when Row 1 is completely empty!)
+    // 4. Row 3 Outer Representative Breach Check (When Row 1 is empty OR worn down by Token overkill!)
     const pRow1Cards = this.getRow1Cards("player");
     const eRow1Cards = this.getRow1Cards("enemy");
 
+    const eRepEval = this.evalCardCombatCR(this.enemy.leader, pRow1Cards[0] || null, "enemy");
+    const pRepEval = this.evalCardCombatCR(this.player.leader, eRow1Cards[0] || null, "player");
+
+    if (enemyRow3OverkillDamage > 0 && (this.enemy.leader.cr - (this.enemy.leader.battleDamageTaken || 0)) <= 0) {
+      this.over = true;
+      this.winner = "player";
+      this.winReason = "leader_breach";
+      this.pushLog(`👑 HẠ GỤC THỦ LĨNH HÀNG 3 ĐỊCH (Sát thương xuyên Token)! -> CHIẾN THẮNG!`);
+      return { ok: true, aiDeploys, laneResults, over: true, winner: "player", winReason: "leader_breach" };
+    }
+    if (playerRow3OverkillDamage > 0 && (this.player.leader.cr - (this.player.leader.battleDamageTaken || 0)) <= 0) {
+      this.over = true;
+      this.winner = "enemy";
+      this.winReason = "leader_breach";
+      this.pushLog(`💀 GAME OVER! Các Token yếu vỡ trận khiến Thủ lĩnh Hàng 3 ${this.player.leader.name} ăn đủ sát thương và gục ngã!`);
+      return { ok: true, aiDeploys, laneResults, over: true, winner: "enemy", winReason: "leader_breach" };
+    }
+
     if (eRow1Cards.length === 0 && pRow1Cards.length > 0) {
       const totalPAtk = pRow1Cards.reduce((s, c) => s + this.evalCardCombatCR(c, this.enemy.leader, "player", { attackingRow3: true }).total, 0);
-      const eRepEval = this.evalCardCombatCR(this.enemy.leader, pRow1Cards[0], "enemy");
       this.pushLog(`⚡ Hàng 1 địch TRỐNG! Tổng CR Hàng 1 (${totalPAtk}) công phá ${this.enemy.leader.name} Hàng 3 (${eRepEval.total} CR)!`);
       if (totalPAtk > eRepEval.total) {
         this.over = true;
@@ -1462,13 +1881,13 @@ export class CardBattleEngine {
         this.pushLog(`👑 HẠ GỤC THỦ LĨNH HÀNG 3! (${totalPAtk} > ${eRepEval.total}) -> CHIẾN THẮNG!`);
         return { ok: true, aiDeploys, laneResults, over: true, winner: "player", winReason: "leader_breach", row3Attack: { totalPAtk, repCR: eRepEval.total } };
       } else {
-        this.pushLog(`🛡️ Thủ lĩnh Hàng 3 ${this.enemy.leader.name} (${eRepEval.total} CR) phòng thủ thành công!`);
+        this.enemy.leader.battleDamageTaken = (this.enemy.leader.battleDamageTaken || 0) + Math.round(totalPAtk * 0.5);
+        this.pushLog(`🛡️ Thủ lĩnh Hàng 3 ${this.enemy.leader.name} gắng gượng chống đỡ (mất ${Math.round(totalPAtk * 0.5)} CR)!`);
       }
     }
 
     if (pRow1Cards.length === 0 && eRow1Cards.length > 0) {
       const totalEAtk = eRow1Cards.reduce((s, c) => s + this.evalCardCombatCR(c, this.player.leader, "enemy", { attackingRow3: true }).total, 0);
-      const pRepEval = this.evalCardCombatCR(this.player.leader, eRow1Cards[0], "player");
       this.pushLog(`⚠️ Hàng 1 bạn TRỐNG! Tổng CR địch (${totalEAtk}) công kích ${this.player.leader.name} Hàng 3 (${pRepEval.total} CR)!`);
       if (totalEAtk > pRepEval.total) {
         this.over = true;
@@ -1477,65 +1896,72 @@ export class CardBattleEngine {
         this.pushLog(`💀 GAME OVER! Thủ lĩnh Hàng 3 ${this.player.leader.name} thất thủ (${totalEAtk} > ${pRepEval.total})!`);
         return { ok: true, aiDeploys, laneResults, over: true, winner: "enemy", winReason: "leader_breach", row3Attack: { totalEAtk, repCR: pRepEval.total } };
       } else {
-        this.pushLog(`💪 Thủ lĩnh ${this.player.leader.name} (${pRepEval.total} CR) đẩy lùi đợt tổng công kích!`);
+        this.player.leader.battleDamageTaken = (this.player.leader.battleDamageTaken || 0) + Math.round(totalEAtk * 0.5);
+        this.pushLog(`💪 Thủ lĩnh ${this.player.leader.name} trụ vững nhưng chịu ${Math.round(totalEAtk * 0.5)} sát thương bào mòn!`);
       }
     }
 
-    // 5A. END OF TURN: Auto-Breed every active Male×Female pair sitting in Row 2 directly onto ROW 1!
+    // 5. END PHASE -> Clean up single-turn buffs, advance Turn, and execute next turn's DRAW PHASE!
+    this.phase = "end";
     for (const sideKey of ["player", "enemy"]) {
-      const side = this.getSide(sideKey);
-      for (const cap of side.row2) {
-        if (!cap.breedingActive) continue;
-        const breedRes = this.spawnTokensForCaptive(sideKey, cap);
-        if (breedRes.spawned.length > 0) {
-          for (const tok of breedRes.spawned) {
-            if (sideKey === "player") this.lastNewTokens.push(tok);
-            const sideLbl = sideKey === "player" ? "Ta" : "Địch";
-            const debuffNote = tok.debuffCanceledByDick
-              ? " [Dick Xóa Debuff!]"
-              : (cap.row2Effect?.crPenaltyPct >= 20 ? ` [-${cap.row2Effect.crPenaltyPct}% CR]` : "");
-            if (tok.spawnedZone === "row1_boost") {
-              this.pushLog(`⚡ [H2→Củng Cố H1 ${sideLbl} • ${breedRes.chance}%] ${cap.sireCard?.name || "?"} ♂ × ${cap.name} ♀ hợp nhất +${tok.boostAmount} CR cho ${tok.boostedAllyName} (H1 đầy)!`);
-            } else {
-              this.pushLog(`🧬 [H2→Hàng 1 Làn ${tok.spawnedLane + 1} ${sideLbl} • ${breedRes.chance}%] ${cap.sireCard?.name || "?"} ♂ × ${cap.name} ♀ sinh Token ${tok.name} (CR ${tok.cr})${debuffNote} lên thẳng HÀNG 1!`);
-            }
-          }
-        } else {
-          const sideLbl = sideKey === "player" ? "Ta" : "Địch";
-          this.pushLog(`🎲 [Hàng 2 ${sideLbl} • ${breedRes.chance}%] ${cap.name} lượt này chưa sinh được Token lên Hàng 1.`);
-        }
-      }
+      const s = this.getSide(sideKey);
+      s.geneSurgeActiveThisTurn = false;
+      s.directiveUsedThisTurn = false;
+      s.leaderSkillBuffCR = 0;
+      s.leaderSkillEnemyPenaltyCR = 0;
+      s.ovalinaH1Active = false;
+      s.leader.h1ActivatedThisTurn = false;
+      s.leader.h1EffectActive = false;
+      s.row1.forEach((u) => {
+        if (!u) return;
+        u.h1ActivatedThisTurn = false;
+        u.h1EffectActive = false;
+        u.tempBuffCR = 0;
+        u.tempPenaltyCR = 0;
+        u.nullifiedBuffs = false;
+        u.halvedByEnemy = false;
+      });
+      s.row2.forEach((c) => {
+        c.h2ActivatedThisTurn = false;
+      });
     }
-
-    // 5B. END OF TURN: Clear single-turn skill buffs, gain +1⚡ Gene Energy (up to 8⚡), and Draw 2 Cards!
-    this.player.geneSurgeActiveThisTurn = false;
-    this.enemy.geneSurgeActiveThisTurn = false;
-    this.player.directiveUsedThisTurn = false;
-    this.enemy.directiveUsedThisTurn = false;
-    this.player.leaderSkillBuffCR = 0;
-    this.enemy.leaderSkillBuffCR = 0;
-    this.player.leaderSkillEnemyPenaltyCR = 0;
-    this.enemy.leaderSkillEnemyPenaltyCR = 0;
-
-    this.addEnergy("player", 1);
-    this.addEnergy("enemy", 1);
-
-    const pDrawn = this.drawCards("player", 2);
-    const eDrawn = this.drawCards("enemy", 2);
-
-    // Prevent energy deadlock if player has 0 cards on Row 1 and cheapest card in hand costs > player.energy
-    if (this.getRow1Cards("player").length === 0 && this.player.hand.length > 0 && !this.player.hand.some((c) => (c.cost || 1) <= this.player.energy)) {
-      this.addEnergy("player", 1);
-    }
-    if (this.getRow1Cards("enemy").length === 0 && this.enemy.hand.length > 0 && !this.enemy.hand.some((c) => (c.cost || 1) <= this.enemy.energy)) {
-      this.addEnergy("enemy", 1);
-    }
-
-    this.pushLog(`⚡ Hết Lượt ${this.turn}: +1⚡ Năng lượng Gen (Ta ${this.player.energy}/${this.player.maxEnergy}⚡) & rút +${pDrawn} lá (Địch +${eDrawn}).`);
 
     this.turn++;
 
-    // 6. Stalemate safeguard only if both sides completely exhausted hand + deck
+    // 6. NEXT TURN DRAW PHASE: +1⚡ Energy & Draw 1 card (or 2 cards if Meralina H1 is on field!)
+    this.phase = "draw";
+    this.addEnergy("player", 1);
+    this.addEnergy("enemy", 1);
+
+    const pHasMeralinaDraw =
+      this.player.meralinaDrawTwoActive ||
+      this.player.row1.some((u) => u && u.id === "meralina") ||
+      this.player.leader?.id === "meralina";
+    const eHasMeralinaDraw =
+      this.enemy.meralinaDrawTwoActive ||
+      this.enemy.row1.some((u) => u && u.id === "meralina") ||
+      this.enemy.leader?.id === "meralina";
+
+    const pDrawTarget = pHasMeralinaDraw ? 2 : 1;
+    const eDrawTarget = eHasMeralinaDraw ? 2 : 1;
+    const pDrawn = this.drawCards("player", pDrawTarget);
+    const eDrawn = this.drawCards("enemy", eDrawTarget);
+
+    this.player.meralinaDrawTwoActive = false;
+    this.enemy.meralinaDrawTwoActive = false;
+
+    if (this.getRow1Cards("player").length === 0 && this.player.hand.length > 0 && !this.player.hand.some((c) => (c.cost || 1) <= this.player.energy)) {
+      this.addEnergy("player", 1);
+    }
+
+    const meralinaNote = pHasMeralinaDraw ? " [Hiệu ứng Meralina: Rút 2 lá!]" : "";
+    const lockNote = this.player.summonLockedOnTurn === this.turn ? " ⚠️ [Khóa Triệu Hồi lượt này do Ovalina H2!]" : "";
+    this.pushLog(`🌅 [Lượt ${this.turn} • DRAW → SUMMON PHASE] +1⚡ (Ta ${this.player.energy}/${this.player.maxEnergy}⚡) & rút +${pDrawn} lá${meralinaNote}${lockNote}.`);
+
+    // Enter Summon Phase for the new turn!
+    this.phase = "summon";
+
+    // 7. Stalemate safeguard
     const stalemate = this.turn > this.maxTurns || (
       this.player.hand.length === 0 && this.player.deck.length === 0 &&
       this.enemy.hand.length === 0 && this.enemy.deck.length === 0
@@ -1547,8 +1973,8 @@ export class CardBattleEngine {
       if (this.player.row2.length !== this.enemy.row2.length) {
         this.winner = this.player.row2.length > this.enemy.row2.length ? "player" : "enemy";
       } else {
-        const pTotal = this.getRow1Cards("player").reduce((s, c) => s + c.cr, this.player.leader.cr);
-        const eTotal = this.getRow1Cards("enemy").reduce((s, c) => s + c.cr, this.enemy.leader.cr);
+        const pTotal = this.getRow1Cards("player").reduce((s, c) => s + c.cr, this.player.leader.cr - (this.player.leader.battleDamageTaken || 0));
+        const eTotal = this.getRow1Cards("enemy").reduce((s, c) => s + c.cr, this.enemy.leader.cr - (this.enemy.leader.battleDamageTaken || 0));
         this.winner = pTotal >= eTotal ? "player" : "enemy";
       }
       this.pushLog(`⌛ Hết bài chiến thuật — phân định chung cuộc (${this.winner === "player" ? "Thắng" : "Thua"})!`);

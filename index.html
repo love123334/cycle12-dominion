@@ -216,18 +216,21 @@
           </div>
         </aside>
 
-        <!-- CENTER STAGE: ENEMY HAND (TOP END) • 3-LANE BATTLEFIELD (CENTER) • PLAYER HAND (BOTTOM END) -->
+        <!-- CENTER STAGE: ENEMY HAND & 5-PHASE BAR (TOP END) • 5-LANE BATTLEFIELD (CENTER) • PLAYER HAND (BOTTOM END) -->
         <div class="tcg-center-stage">
-          <!-- TOP END: ENEMY HAND (FACE-DOWN CARDS) + LIVE TURN TICKER -->
+          <!-- TOP END: ENEMY HAND (FACE-DOWN CARDS) + 5-PHASE BAR + LIVE TURN TICKER -->
           <div class="tcg-top-hand-zone">
             <div class="enemy-hand-strip">
-              <span class="badge enemy-hand-badge" id="duel-e-hand-count">🃏 Tay Địch: 4 lá</span>
-              <div class="enemy-hand-fan" id="duel-e-hand"></div>
+              <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
+                <span class="badge enemy-hand-badge" id="duel-e-hand-count">🃏 Tay Địch: 4 lá</span>
+                <div class="enemy-hand-fan" id="duel-e-hand"></div>
+              </div>
+              <div class="duel-phase-bar" id="duel-phase-bar"></div>
+              <div id="duel-log-latest" class="duel-log-ticker" title="Ấn nút Nhật Ký bên phải để xem toàn bộ lịch sử">Chọn hoặc kéo-thả thẻ bài ở tay dưới vào 5 làn trung tâm!</div>
             </div>
-            <div id="duel-log-latest" class="duel-log-ticker" title="Ấn nút Nhật Ký bên phải để xem toàn bộ lịch sử">Chọn hoặc kéo-thả thẻ bài ở tay dưới vào 1–3 làn trung tâm!</div>
           </div>
 
-          <!-- CENTER BATTLEFIELD: ENEMY ROW 1 • 3 COSMIC LANES • PLAYER ROW 1 -->
+          <!-- CENTER BATTLEFIELD: ENEMY ROW 1 (5 LANES) • 5 COSMIC LANES • PLAYER ROW 1 (5 LANES) -->
           <div class="snap-lane-arena">
             <div class="board-row enemy-r1" id="duel-e-row1"></div>
             <div class="lane-location-row" id="duel-lanes-bar"></div>
@@ -240,34 +243,35 @@
           </div>
         </div>
 
-        <!-- RIGHT SIDE WING: ENEMY DECK PILE (TOP) • TURN/ENERGY/CLASH DOCK (CENTER) • PLAYER DECK PILE (BOTTOM) -->
+        <!-- RIGHT SIDE WING: ENEMY DECK PILE (TOP) • TURN/PHASE/ENERGY/CLASH DOCK (CENTER) • PLAYER DECK PILE (BOTTOM) -->
         <aside class="tcg-perimeter-right">
-          <div class="tcg-deck-pile enemy" id="duel-e-deck-pile" title="Bộ bài rút của Địch (+2 lá mỗi lượt)">
+          <div class="tcg-deck-pile enemy" id="duel-e-deck-pile" title="Bộ bài rút &amp; Mộ bài của Địch">
             <div class="deck-stack-visual enemy">
               <span class="deck-stack-icon">🎴</span>
               <strong id="duel-e-deck-count">12</strong>
             </div>
-            <div class="deck-pile-label">Bộ Bài Địch</div>
+            <div class="deck-pile-label">Deck Địch • 🪦 Mộ: <span id="duel-e-grave-count">0</span></div>
           </div>
 
           <div class="duel-mid-strip tcg-turn-orb-dock">
             <span class="badge" id="duel-turn-badge" style="color:var(--gold);">Lượt 1</span>
-            <span class="badge energy-orb-pill" id="duel-energy-badge" title="Năng lượng Gen hiện tại (+1⚡ mỗi lượt, tối đa 8⚡)">⚡ 3/8 Năng Lượng</span>
-            <button class="btn-gold btn-clash-orb" id="btn-resolve-clash">⚔️ GIAO CHIẾN</button>
+            <span class="badge energy-orb-pill" id="duel-energy-badge" title="Năng lượng Gen hiện tại (+1⚡ mỗi lượt, tối đa 8⚡)">⚡ 4/8 Năng Lượng</span>
+            <button type="button" class="btn-primary btn-phase-step" id="btn-next-phase" title="Chuyển từ Summon Phase sang Effect Phase và kích hoạt hiệu ứng Hàng 1/Hàng 3">✨ Sang Effect Phase</button>
+            <button class="btn-gold btn-clash-orb" id="btn-resolve-clash">⚔️ BATTLE PHASE</button>
             <div class="tcg-dock-subbtns">
-              <button type="button" class="btn-glass btn-compact" id="btn-mulligan-duel" title="Đổi bài khởi đầu (Lượt 1 trước khi đặt thẻ: xáo lại tay bài & rút 4 lá mới)">🔄 Đổi Bài</button>
-              <button type="button" class="btn-accent btn-compact" id="btn-tactical-directive" title="Phát động Chỉ Thị Chiến Thuật tức thời (Khiên Quang Năng 1⚡ / Đột Biến 2⚡ / Giải Cứu 2⚡)">⚡ Chỉ Thị</button>
+              <button type="button" class="btn-glass btn-compact" id="btn-mulligan-duel" title="Đổi bài khởi đầu (Lượt 1 trước khi đặt thẻ: xáo lại tay bài &amp; rút 2♂ + 2♀ mới)">🔄 Đổi Bài</button>
+              <button type="button" class="btn-accent btn-compact" id="btn-tactical-directive" title="Phát động Chỉ Thị Chiến Thuật tức thời">⚡ Chỉ Thị</button>
               <button type="button" class="btn-glass btn-compact" id="btn-undo-duel" disabled title="Hoàn tác thao tác trong lượt trước khi Giao Chiến">↩️ Hoàn Tác</button>
               <button type="button" class="btn-glass btn-compact" id="btn-open-duel-log" title="Xem toàn bộ nhật ký giao chiến &amp; lai tạo">📜 Nhật Ký</button>
             </div>
           </div>
 
-          <div class="tcg-deck-pile player" id="duel-p-deck-pile" title="Bộ bài rút của Bạn (+2 lá mỗi lượt)">
+          <div class="tcg-deck-pile player" id="duel-p-deck-pile" title="Bộ bài rút &amp; Mộ bài của Bạn">
             <div class="deck-stack-visual player">
               <span class="deck-stack-icon">📚</span>
               <strong id="duel-p-deck-num">12</strong>
             </div>
-            <div class="deck-pile-label" id="duel-p-deck-count">Bộ bài: 12 (+2/lượt)</div>
+            <div class="deck-pile-label" id="duel-p-deck-count">Deck: 12 • 🪦 Mộ: 0</div>
           </div>
         </aside>
       </div>

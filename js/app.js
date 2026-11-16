@@ -16,6 +16,7 @@ import {
   getFactionCardPool,
   buildFactionDeck,
   validateDeckForLeader,
+  checkDeckLegality,
   getCardPriceInfo,
   CARD_PACKS,
   H1_KEYWORDS,
@@ -27,7 +28,7 @@ import {
 } from "./data/cards.js";
 import { buildHistoryCutscenes } from "./data/cutscenes.js";
 import { GameState, ACHIEVEMENTS, TCG_QUESTS } from "./game/state.js";
-import { CardBattleEngine, TACTICAL_DIRECTIVES } from "./game/card_engine.js";
+import { CardBattleEngine, TACTICAL_DIRECTIVES, DUEL_PHASES } from "./game/card_engine.js";
 import {
   detectAIStatus,
   getStoredAIKeys,
@@ -1419,6 +1420,27 @@ class Cycle12App {
       this.playAnimatedClashTurn();
     });
 
+    document.getElementById("btn-next-phase")?.addEventListener("click", () => {
+      if (!this.duelEngine || this.duelEngine.over || this.isResolvingClash) return;
+      const eng = this.duelEngine;
+      if (eng.phase === "summon") {
+        const res = eng.setPhase("effect");
+        if (res.ok) {
+          SFX.choice();
+          this.renderDuelUI();
+          this.showToast("✨ EFFECT PHASE (H1 & H3)", "Bấm vào thẻ trên Hàng 1 / Hàng 3 để kích hoạt hiệu ứng, hoặc bấm '✨ Kích Hoạt Tất Cả Eff H1/H3' rồi Giao Chiến!");
+        }
+      } else if (eng.phase === "effect") {
+        const res = eng.activateAllEffectsInPhase("player");
+        SFX.victory();
+        this.renderDuelUI();
+        this.showToast(
+          "✨ Đã Kích Hoạt Hiệu Ứng H1/H3!",
+          res.notes && res.notes.length ? res.notes.join(" • ") : "Tất cả hiệu ứng Hàng 1 & Hàng 3 hợp lệ đã được kích hoạt. Bấm ⚔️ GIAO CHIẾN để vào Battle Phase!"
+        );
+      }
+    });
+
     document.getElementById("btn-undo-duel")?.addEventListener("click", () => {
       if (!this.duelEngine || this.duelEngine.over || this.isResolvingClash) return;
       const res = this.duelEngine.undoLastAction();
@@ -1813,8 +1835,9 @@ class Cycle12App {
 
       const battleView = document.getElementById("duel-battle-view");
       const laneResList = res.laneResults || [];
+      const maxLanes = eng.maxLanes || 5;
 
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < maxLanes; i++) {
         const lr = laneResList[i];
         if (!lr || lr.outcome === "empty") continue;
 
@@ -1898,11 +1921,17 @@ class Cycle12App {
     const legalOwned = isDraftMode
       ? sourceCards.filter((id) => Boolean(resolveCard(id, this.game.hybrids || [])))
       : validateDeckForLeader(sourceCards, pId, this.game.hybrids || [], this.game.collection);
+    const legality = checkDeckLegality(legalOwned, this.game.hybrids || []);
+    if (!isDraftMode && legalOwned.length > 0 && !legality.ok) {
+      this.showToast("⚠️ Bộ Bài Chưa Hợp Lệ", `${legality.reason} — Hệ thống tạm bổ sung thẻ mặc định của phe để đủ ≥2 ♂ Nam & ≥2 ♀ Nữ.`);
+    }
     const ownedPoolDeck = buildFactionDeck(pId, this.game.hybrids || [], this.game.collection);
-    // Keep custom Story battles resilient even if player owns < 6 cards of an alternate story lead
-    const activeDeck = legalOwned.length >= 6
+    // Keep custom Story battles resilient even if player owns < 6 cards of an alternate story lead, and enforce >=2 Male + >=2 Female legality
+    const activeDeck = (legalOwned.length >= 6 && legality.ok)
       ? legalOwned
-      : (ownedPoolDeck.length >= 6 ? ownedPoolDeck : buildFactionDeck(pId, this.game.hybrids || [], null));
+      : ((ownedPoolDeck.length >= 6 && checkDeckLegality(ownedPoolDeck, this.game.hybrids || []).ok)
+        ? ownedPoolDeck
+        : buildFactionDeck(pId, this.game.hybrids || [], null));
 
     const effDifficulty = buffMult > 1 ? Math.min(difficulty, 0.85) : difficulty;
     this.lastMatchParams = { kind, playerCharId, enemyId, buffMult, modeLabel, gauntletFloor, difficulty, isDraftMode, customDeckIds };
@@ -3278,10 +3307,12 @@ class Cycle12App {
 
     document.getElementById("duel-e-img").src = getCardPortrait(eLeader);
     document.getElementById("duel-e-name").innerHTML = `${ESC(eLeader.name)} <span class="gender-pill ${eLeader.gender === "Male" ? "male" : "female"}">${eLeader.gender === "Male" ? "♂" : "♀"}</span>${eng.isBossFloor ? ` <span class="badge" style="color:#fbbf24;border-color:#fbbf24;">👑 BOSS</span>` : ""}`;
-    document.getElementById("duel-e-meta").textContent = `${eLeader.species} • Phe ${eFacName} • H1: ${eLeader.row1Effect?.tag || ""}`;
+    document.getElementById("duel-e-meta").textContent = `${eLeader.species} • Phe ${eFacName} • H1/H3: ${eLeader.row1Effect?.tag || "None"}`;
     document.getElementById("duel-e-row3-cr").textContent = `⚔️ CR Hàng 3: ${eRow3Eval.total} (Gốc ${eLeader.cr})`;
-    document.getElementById("duel-e-row3-state").textContent = eFrontCount > 0 ? `🛡️ Hàng 1 Bảo Hộ (${eFrontCount} lá)` : "⚡ LỘ DIỆN — Tổng CR H1 đánh thẳng Hàng 3!";
-    document.getElementById("duel-e-captives").textContent = `🔒 Bắt: ${eng.enemy.row2.length}/3`;
+    document.getElementById("duel-e-row3-state").textContent = eFrontCount > 0 ? `🛡️ Hàng 1 Bảo Hộ (${eFrontCount}/5 lá)` : "⚡ LỘ DIỆN — Tổng CR H1 đánh thẳng Hàng 3!";
+    document.getElementById("duel-e-captives").textContent = `🔒 H2: ${eng.enemy.row2.length}/5 (3=Thắng)`;
+    const eGraveEl = document.getElementById("duel-e-grave-count");
+    if (eGraveEl) eGraveEl.textContent = `${eng.enemy.graveyard?.length || 0}`;
     const eEnergyBadge = document.getElementById("duel-e-energy-badge");
     if (eEnergyBadge) eEnergyBadge.textContent = `⚡ ${eng.enemy.energy}/${eng.enemy.maxEnergy}`;
     const eHandCountEl = document.getElementById("duel-e-hand-count");
@@ -3295,13 +3326,77 @@ class Cycle12App {
 
     document.getElementById("duel-p-img").src = getCardPortrait(pLeader);
     document.getElementById("duel-p-name").innerHTML = `${ESC(pLeader.name)} <span class="gender-pill ${pLeader.gender === "Male" ? "male" : "female"}">${pLeader.gender === "Male" ? "♂" : "♀"}</span>`;
-    document.getElementById("duel-p-meta").textContent = `${pLeader.species} • Phe ${pFacName} • H1: ${pLeader.row1Effect?.tag || ""}`;
+    const r3IsNone = Boolean(pLeader.row1Effect?.isNone || pLeader.row1Effect?.id === "none");
+    const r3EffBtnHtml = (!eng.over && eng.phase === "effect")
+      ? (r3IsNone
+        ? ` <span class="badge" style="color:#94a3b8;">H3: None</span>`
+        : (pLeader.h1ActivatedThisTurn
+          ? ` <span class="badge" style="color:#4ade80;">✓ Đã Bật Eff H3</span>`
+          : ` <button type="button" class="btn-gold btn-compact r3-eff-trigger-btn" id="btn-activate-r3-eff">✨ Bật Eff H3</button>`))
+      : "";
+    document.getElementById("duel-p-meta").innerHTML = `${ESC(pLeader.species)} • Phe ${ESC(pFacName)} • H3: ${ESC(pLeader.row1Effect?.tag || "None")}${r3EffBtnHtml}`;
+    document.getElementById("btn-activate-r3-eff")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (this.isResolvingClash || eng.over) return;
+      const res = eng.activateCardEffect("row3", 0, "player");
+      if (res.ok) {
+        SFX.choice();
+        this.renderDuelUI();
+        this.showToast(`✨ Hiệu Ứng H3: ${pLeader.name}`, res.notes?.join(" • ") || pLeader.row1Effect?.desc || "Đã kích hoạt!");
+      } else {
+        SFX.alert();
+        this.showToast("Chưa thể bật Eff H3", res.reason);
+      }
+    });
     document.getElementById("duel-p-row3-cr").textContent = `⚔️ CR Hàng 3: ${pRow3Eval.total} (Gốc ${pLeader.cr})`;
-    document.getElementById("duel-p-row3-state").textContent = pFrontCount > 0 ? `🛡️ Hàng 1 Bảo Hộ (${pFrontCount} lá)` : "⚠️ HÀNG 1 TRỐNG — Hàng 3 bị uy hiếp!";
-    document.getElementById("duel-p-captives").textContent = `🔒 Bắt: ${eng.player.row2.length}/3`;
+    document.getElementById("duel-p-row3-state").textContent = pFrontCount > 0 ? `🛡️ Hàng 1 Bảo Hộ (${pFrontCount}/5 lá)` : "⚠️ HÀNG 1 TRỐNG — Hàng 3 bị uy hiếp!";
+    document.getElementById("duel-p-captives").textContent = `🔒 H2: ${eng.player.row2.length}/5 (3=Thắng)`;
     const pDeckNumEl = document.getElementById("duel-p-deck-num");
     if (pDeckNumEl) pDeckNumEl.textContent = `${eng.player.deck.length}`;
-    document.getElementById("duel-p-deck-count").textContent = `Bộ bài: ${eng.player.deck.length} (+2/lượt)`;
+    const pGraveEl = document.getElementById("duel-p-grave-count");
+    if (pGraveEl) pGraveEl.textContent = `🪦 Mộ: ${eng.player.graveyard?.length || 0}`;
+    document.getElementById("duel-p-deck-count").textContent = `Bộ bài: ${eng.player.deck.length} (+1/lượt)`;
+
+    // 5-Phase Indicator Bar (Draw -> Summon -> Effect -> Battle -> End)
+    const phaseBarEl = document.getElementById("duel-phase-bar");
+    if (phaseBarEl) {
+      phaseBarEl.innerHTML = DUEL_PHASES.map((p) => {
+        const isCurrent = eng.phase === p.id;
+        const canClick = !eng.over && !this.isResolvingClash && (
+          (p.id === "effect" && eng.phase === "summon") ||
+          (p.id === "battle" && (eng.phase === "summon" || eng.phase === "effect"))
+        );
+        return `<button type="button" class="phase-step-pill ${isCurrent ? "active" : ""} ${canClick ? "clickable" : ""}" data-phase-step="${p.id}" title="${ESC(p.desc)}" ${canClick ? "" : "disabled"}>${ESC(p.short)}</button>`;
+      }).join("");
+      phaseBarEl.querySelectorAll("[data-phase-step]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          if (this.isResolvingClash || eng.over) return;
+          const stepId = btn.dataset.phaseStep;
+          if (stepId === "effect" && eng.phase === "summon") {
+            eng.setPhase("effect");
+            SFX.choice();
+            this.renderDuelUI();
+            this.showToast("✨ EFFECT PHASE (H1 & H3)", "Bấm nút ✨ trên thẻ Hàng 1 / Hàng 3 để kích hoạt hiệu ứng!");
+          } else if (stepId === "battle") {
+            this.playAnimatedClashTurn();
+          }
+        });
+      });
+    }
+
+    const nextPhaseBtn = document.getElementById("btn-next-phase");
+    if (nextPhaseBtn) {
+      nextPhaseBtn.disabled = Boolean(eng.over || this.isResolvingClash);
+      if (eng.phase === "summon") {
+        nextPhaseBtn.textContent = "✨ Sang Effect Phase (H1/H3)";
+        nextPhaseBtn.classList.remove("phase-effect-ready");
+      } else if (eng.phase === "effect") {
+        nextPhaseBtn.textContent = "✨ Bật Toàn Bộ Eff H1/H3";
+        nextPhaseBtn.classList.add("phase-effect-ready");
+      } else {
+        nextPhaseBtn.textContent = `⏳ ${eng.phase.toUpperCase()} PHASE`;
+      }
+    }
 
     // Energy Orb & Turn Bar
     const energyBadge = document.getElementById("duel-energy-badge");
@@ -3381,35 +3476,50 @@ class Cycle12App {
       `;
     }
 
-    // Row 2 Captives & Automatic Male×Female Breeding Zones (spawn Token -> Row 1)
+    // Row 2 Captives & Summon Phase Ignition Effects (spawn Token -> Row 1)
     const renderRow2Chips = (sideKey, list, emptyMsg, isEnemy) => {
-      if (!list.length) return `<span class="muted" style="font-size:11px;">${emptyMsg}</span>`;
+      if (!list.length) return `<span class="muted" style="font-size:12px;">${emptyMsg}</span>`;
       const sCtx = eng.getSideBreedingContext(sideKey);
       return list.map((c, idx) => {
         const isBreeding = Boolean(c.breedingActive);
         const effPct = isBreeding ? eng.getEffectiveBreedChance(c, sideKey) : 0;
         const r2 = c.row2Effect || {};
+        const isNone = Boolean(r2.isNone || r2.id === "none");
         const dblLit = Boolean(r2.doubleIfTokenBred && (sCtx.hasRow1Token || sCtx.totalTokensBred > 0));
         const symLit = Boolean(r2.symbiosisR2Boost && isBreeding);
-        const effAura = (r2.crAura || 40) * (dblLit ? 2 : 1);
+        const effAura = isNone ? 0 : (r2.crAura || 40) * (dblLit ? 2 : 1);
         const penBadge = r2.crPenaltyPct
           ? (sCtx.hasDick ? ` • <span style="color:#6ee7b7;">Dick Xóa -${r2.crPenaltyPct}%</span>` : ` • <span style="color:#fda4af;">-${r2.crPenaltyPct}% CR</span>`)
           : "";
         const symBadge = r2.symbiosisR2Boost ? ` • <span style="color:#e9d5ff;">+${r2.symbiosisR2Boost}% H2</span>` : "";
         const dblBadge = dblLit ? ` <span style="color:#fde047;">[✅ ×2: +${effAura} CR]</span>` : "";
-        const subText = isBreeding
-          ? `🔥 Lai ${effPct}%→H1 (♂ ${ESC(c.sireCard?.name || "Nam")}) • 🪙x${c.spawnCount || 0}${penBadge}${symBadge}${dblBadge}`
-          : `🔒 Tù binh • H2: +${effAura} CR (${ESC(r2.tag || "")})${dblBadge}`;
+        const subText = isNone
+          ? `⚪ H2: None (Không có hiệu ứng Hàng 2)`
+          : (isBreeding
+            ? `🔥 H2: ${ESC(r2.tag || "Sinh Token")} (${effPct}%→H1 • ♂ ${ESC(c.sireCard?.name || "Nam")}) • 🪙x${c.spawnCount || 0}${penBadge}${symBadge}${dblBadge}`
+            : `🔒 H2: ${ESC(r2.tag || `+${effAura} CR`)} (+${effAura} CR)${dblBadge}`);
+        const igniteBtnHtml = !isEnemy
+          ? (isNone
+            ? `<span class="r2-state-pill none">H2: None</span>`
+            : (c.h2ActivatedThisTurn
+              ? `<span class="r2-state-pill used">✓ Đã Kích Hoạt H2</span>`
+              : (eng.phase === "summon" && !eng.over
+                ? `<button type="button" class="btn-gold btn-compact btn-r2-ignition" data-r2-ignite="${idx}" title="Summon Phase Ignition: Bấm để kích hoạt hiệu ứng Hàng 2 của ${ESC(c.name)}!">⚡ Kích Hoạt H2</button>`
+                : `<span class="r2-state-pill wait">⏳ Dùng ở Summon Phase</span>`)))
+          : "";
         return `
-          <div class="row2-captive-chip ${isBreeding ? "breeding-chamber" : ""} ${(dblLit || symLit) ? "cond-lit" : ""}"
+          <div class="row2-captive-chip ${isBreeding ? "breeding-chamber" : ""} ${(dblLit || symLit || c.h2ActivatedThisTurn) ? "cond-lit" : ""}"
                data-zoom-host="1" data-inspect-side="${sideKey}" data-inspect-zone="row2" data-inspect-idx="${idx}"
                title="${ESC(r2.desc || "")}">
             <img src="${getCardPortrait(c)}" alt="${ESC(c.name)}" />
             <div style="flex:1;min-width:0;">
-              <strong>${ESC(c.name)}</strong>
-              <span class="gender-pill ${c.gender === "Male" ? "male" : "female"}">${c.gender === "Male" ? "♂" : "♀"}</span>
-              <span class="muted">(${ESC(c.species)})</span>
-              <div style="font-size:10px;color:${isBreeding ? "#f9a8d4" : (isEnemy ? "#fda4af" : "#bae6fd")};">${subText}</div>
+              <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;">
+                <strong>${ESC(c.name)}</strong>
+                <span class="gender-pill ${c.gender === "Male" ? "male" : "female"}">${c.gender === "Male" ? "♂" : "♀"}</span>
+                <span class="muted">(${ESC(c.species)})</span>
+              </div>
+              <div style="font-size:11.5px;color:${isBreeding ? "#f9a8d4" : (isEnemy ? "#fda4af" : "#bae6fd")};">${subText}</div>
+              ${igniteBtnHtml ? `<div style="margin-top:3px;">${igniteBtnHtml}</div>` : ""}
             </div>
             <button type="button" class="card-zoom-mini" data-zoom-trigger="1" title="Phóng to đọc đủ thông số &amp; H2">🔍</button>
           </div>
@@ -3421,9 +3531,25 @@ class Cycle12App {
     const eRow2El = document.getElementById("duel-e-row2");
     eRow2El.innerHTML = renderRow2Chips("enemy", eng.enemy.row2, "Chưa bắt được thẻ nào (Địch bắt 3 lá = Bạn thua!)", true);
 
-    document.getElementById("duel-p-row2-aura").textContent = `Hỗ trợ H1 & Sinh Token→H1: +${eng.getRow2SupportAura("player")} CR`;
+    document.getElementById("duel-p-row2-aura").textContent = `Hỗ trợ H1 & Ignition H2 (Summon Phase): +${eng.getRow2SupportAura("player")} CR`;
     const pRow2El = document.getElementById("duel-p-row2");
-    pRow2El.innerHTML = renderRow2Chips("player", eng.player.row2, "Trống — Thẻ Nam thắng Nữ sẽ đưa vào đây lai & sinh Token lên HÀNG 1!", false);
+    pRow2El.innerHTML = renderRow2Chips("player", eng.player.row2, "Trống — Thẻ Nam thắng Nữ đưa vào đây (Bấm ⚡ Kích Hoạt H2 ở Summon Phase!)", false);
+    pRow2El.querySelectorAll("[data-r2-ignite]").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (this.isResolvingClash || eng.over) return;
+        const r2Idx = Number(btn.dataset.r2Ignite);
+        const res = eng.activateRow2Ignition(r2Idx, "player");
+        if (res.ok) {
+          SFX.breed();
+          this.renderDuelUI();
+          this.showToast("🧬 KÍCH HOẠT HIỆU ỨNG HÀNG 2!", (res.notes && res.notes.length) ? res.notes.join(" • ") : "Đã kích hoạt hiệu ứng Hàng 2!");
+        } else {
+          SFX.alert();
+          this.showToast("Chưa thể kích hoạt H2", res.reason);
+        }
+      });
+    });
 
     const activeHandCard = (this.draggedHandIdx !== null && eng.player.hand[this.draggedHandIdx])
       ? eng.player.hand[this.draggedHandIdx]
@@ -3549,7 +3675,7 @@ class Cycle12App {
       }
       const eOpp = eng.enemy.row1[i];
       const evalCR = eng.evalCardCombatCR(u, eOpp, "player", { laneIdx: i });
-      const canRecall = u.deployedTurn === eng.turn && !eng.over && !u.fromRow2Breeding;
+      const canRecall = u.deployedTurn === eng.turn && !eng.over && !u.fromRow2Breeding && eng.phase === "summon";
       const isM = u.gender === "Male";
       const accent = FACTIONS[u.fac]?.color || "#38bdf8";
       const facShort = FACTIONS[u.fac]?.short || u.fac;
@@ -3562,13 +3688,21 @@ class Cycle12App {
         : (u.isToken ? `<span class="token-pill">🪙 TOKEN</span>` : "");
       const uCost = Number(u.cost || getCardEnergyCost(u.cr, u.isToken));
       const deployAnimCls = justDeployedLane === i ? "anim-card-deploy" : "";
+      const r1IsNone = Boolean(u.row1Effect?.isNone || u.row1Effect?.id === "none");
+      const effPhaseBadge = (!eng.over && eng.phase === "effect")
+        ? (r1IsNone
+          ? `<span class="r1-eff-state-pill none">H1: None</span>`
+          : (u.h1ActivatedThisTurn
+            ? `<span class="r1-eff-state-pill used">✓ Đã Dùng Eff H1</span>`
+            : `<span class="r1-eff-trigger-pill" data-r1-activate="${i}" role="button" tabindex="0">✨ Dùng Eff H1</span>`))
+        : (u.h1ActivatedThisTurn ? `<span class="r1-eff-state-pill used">✓ Eff H1</span>` : "");
       return `
         <div class="board-slot" data-lane="${i}">
-          <button type="button" class="tcg-unit-card ${this.getCardRarityClass(u)} ${canRecall ? "ready" : ""} ${u.isToken ? "is-token" : ""} ${condLit ? "cond-lit" : ""} ${deployAnimCls}"
+          <button type="button" class="tcg-unit-card ${this.getCardRarityClass(u)} ${(canRecall || (eng.phase === "effect" && !r1IsNone && !u.h1ActivatedThisTurn)) ? "ready" : ""} ${u.isToken ? "is-token" : ""} ${(condLit || u.h1ActivatedThisTurn) ? "cond-lit" : ""} ${deployAnimCls}"
                   style="--card-accent:${accent};"
                   data-recall-lane="${i}"
                   data-zoom-host="1" data-inspect-side="player" data-inspect-zone="row1" data-inspect-idx="${i}"
-                  title="${canRecall ? "Bấm để thu hồi về tay (hoàn lại ⚡) trước khi Giao Chiến" : ESC(u.row1Effect?.desc || "")}">
+                  title="${eng.phase === "effect" ? "Effect Phase: Bấm để kích hoạt hiệu ứng Hàng 1!" : (canRecall ? "Summon Phase: Bấm để thu hồi về tay (hoàn lại ⚡)" : ESC(u.row1Effect?.desc || ""))}">
             <span class="card-foil-sweep"></span>
             <span class="card-zoom-trigger" data-zoom-trigger="1" role="button" tabindex="0" title="Phóng to hoặc nhấn giữ để đọc toàn bộ thông số &amp; hiệu ứng">🔍</span>
             <span class="card-cost-gem">${uCost}⚡</span>
@@ -3584,7 +3718,7 @@ class Cycle12App {
               </div>
               <div class="unit-meta-line">${ESC(u.species)} • ${ESC(facShort)} ${renderUnitActiveKws(u, eOpp)}</div>
               <div class="unit-cr-delta player">Gốc ${u.cr} → ${evalCR.total} ${dangerTag}</div>
-              <div class="unit-eff-tag ${condLit ? "cond-active" : ""}">${canRecall ? `↩️ Thu (+${uCost}⚡) • ` : ""}${condLit ? "✅ " : "⚔️ "}${ESC(u.row1Effect?.tag || "Trực chiến")}</div>
+              <div class="unit-eff-tag ${(condLit || u.h1ActivatedThisTurn) ? "cond-active" : ""}">${canRecall ? `↩️ Thu (+${uCost}⚡) • ` : ""}${(condLit || u.h1ActivatedThisTurn) ? "✅ " : "⚔️ "}${ESC(u.row1Effect?.tag || "None")} ${effPhaseBadge}</div>
             </div>
           </button>
         </div>
@@ -3643,7 +3777,20 @@ class Cycle12App {
       btn.addEventListener("click", (e) => {
         if (e.target.closest("[data-zoom-trigger]")) return;
         if (this.isResolvingClash) return;
-        const res = eng.recallFromRow1(Number(btn.dataset.recallLane));
+        const laneIdx = Number(btn.dataset.recallLane);
+        if (eng.phase === "effect" || e.target.closest("[data-r1-activate]")) {
+          const res = eng.activateCardEffect("row1", laneIdx, "player");
+          if (res.ok) {
+            SFX.choice();
+            this.renderDuelUI();
+            this.showToast(`✨ Hiệu Ứng H1 Làn ${laneIdx + 1}`, (res.notes && res.notes.length) ? res.notes.join(" • ") : "Đã kích hoạt hiệu ứng Hàng 1!");
+          } else if (res.reason) {
+            SFX.alert();
+            this.showToast("Chưa thể kích hoạt Eff H1", res.reason);
+          }
+          return;
+        }
+        const res = eng.recallFromRow1(laneIdx);
         if (res.ok) {
           SFX.click();
           this.renderDuelUI();
@@ -4025,6 +4172,12 @@ class Cycle12App {
           }).join("")}
         </div>
         <div class="deck-stat-pills">
+          ${(() => {
+            const leg = checkDeckLegality(deck, hybrids);
+            return leg.ok
+              ? `<span class="badge" style="color:#4ade80;border-color:rgba(74,222,128,0.6);">✅ Hợp Lệ (≥2♂ &amp; ≥2♀)</span>`
+              : `<span class="badge" style="color:#fda4af;border-color:rgba(248,113,113,0.7);">⚠️ Chưa Hợp Lệ: Cần ≥2 ♂ Nam &amp; ≥2 ♀ Nữ</span>`;
+          })()}
           <span class="badge" style="color:#60a5fa;">♂ Nam: ${maleCount}</span>
           <span class="badge" style="color:#f472b6;">♀ Nữ: ${femaleCount}</span>
           <span class="badge" style="color:#fde047;">⚔️ CR TB: ${avgCR}</span>
