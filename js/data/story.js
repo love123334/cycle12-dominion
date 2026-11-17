@@ -2042,8 +2042,9 @@ export const CHAPTERS = [
           }
         },
         end: {
-          title: "🏆 QUÁN QUÂN TCG TOÀN VŨ TRỤ — ĐẠI HOÀN MỸ 19 CHƯƠNG!",
-          summary: "+6,000 Credits, +350 Ảnh hưởng, +180 Mảnh Gen & Tăng +1★ Tinh Anh cho Thủ lĩnh của bạn!"
+          title: "🏆 QUÁN QUÂN TCG TOÀN VŨ TRỤ — SẴN SÀNG BƯỚC VÀO CÁC BIẾN CỐ MỚI!",
+          summary: "+6,000 Credits, +350 Ảnh hưởng, +180 Mảnh Gen & Tăng +1★ Tinh Anh cho Thủ lĩnh của bạn!",
+          nextChapter: "ch19_father_problems"
         }
       },
       ch18_honorable_finalist: {
@@ -2057,7 +2058,269 @@ export const CHAPTERS = [
         },
         end: {
           title: "🥈 Á QUÂN GIẢI ĐẤU TUYỆT ĐỈNH GAIASTRA",
-          summary: "+2,500 Credits & +90 Mảnh Gen! Bạn có thể Cường Hóa ★ thẻ bài và tái đấu bất cứ lúc nào!"
+          summary: "+2,500 Credits & +90 Mảnh Gen! Nhấn tiếp để bước vào Chương XIX: Rắc Rối Của Người Cha & Cuộc Nổi Dậy Metallia.",
+          nextChapter: "ch19_father_problems"
+        }
+      }
+    }
+  },
+  {
+    id: "ch19_father_problems",
+    num: "CHƯƠNG XIX",
+    title: "Father's Problems & Biến Cố Metallia",
+    subtitle: "Evernight ↔ Đại Công Xưởng Metallia",
+    sector: "sol",
+    leadChar: "kim",
+    summary: "Hande Ersoy sinh con cùng Xal Kor khiến Felicia đối chất cha mình về mộng khôi phục Đế chế Kryptonian. Tại châu Âu, Kim Santos — người thừa kế nhà Santos — dẹp loạn công nhân Metallia để tạo chỗ đứng trong Đế chế Sylvarian.",
+    nodes: {
+      start: {
+        sector: "sol",
+        leftChar: "hande", rightChar: "felicia", leftMood: "neutral", rightMood: "tense",
+        speaker: "narrator",
+        text: "Bế đứa trẻ trên tay, Hande Ersoy nhớ lại đêm định mệnh một năm trước khi báo cáo với Eleanor và gặp Xal Kor. Cánh cửa bật mở — Felicia Laurent bước vào phòng cha mình và chết lặng khi thấy Hande vẫn còn ở đó.",
+        next: "ch19_confront"
+      },
+      ch19_confront: {
+        sector: "sol",
+        leftChar: "felicia", rightChar: "xalkor", leftMood: "combat", rightMood: "secret",
+        speaker: "felicia",
+        text: "\"Cha chỉ vừa mới được thả ra thôi đấy, Xal Kor! Cha có định dùng đứa trẻ này để khôi phục Đế chế Kryptonian một lần nữa không?!\"",
+        next: "ch19_kim_metallia"
+      },
+      ch19_kim_metallia: {
+        sector: "sol",
+        leftChar: "kim", rightChar: "jose", leftMood: "smug", rightMood: "happy",
+        speaker: "narrator",
+        text: "Cùng lúc đó, Kim Santos được cha là Jose Santos phái tới Đại Công Xưởng Metallia để mở rộng địa bàn và bắt mối ngoại giao với chính quyền Sylvarian — nhưng đoàn của cô bất ngờ rơi thẳng vào giữa cuộc nổi dậy của công nhân nhà máy.",
+        choices: [
+          {
+            label: "⚔️ Trấn áp cuộc nổi dậy Metallia & lập công trước Sylvarian",
+            hint: "+2,000 Credits • +100 Ảnh hưởng • Kim Santos mở rộng thế lực tại Đế chế",
+            effects: (g) => {
+              g.addRes(g.playerFaction, "credits", 2000);
+              g.addRes(g.playerFaction, "influence", 100);
+              g.addAffinity("kim", 25);
+              g.addAffinity("hande", 15);
+            },
+            battle: {
+              playerId: "kim",
+              enemyId: "kale",
+              stageId: "sol",
+              winNext: "ch19_end",
+              loseNext: "ch19_end"
+            }
+          },
+          {
+            label: "🤝 Điều tra bí mật gia đình Xal Kor – Hande & thu thập tình báo",
+            hint: "+200 Nghiên cứu • +25 Độ tin cậy với Hande & Felicia",
+            effects: (g) => {
+              g.addRes(g.playerFaction, "research", 200);
+              g.addAffinity("hande", 25);
+              g.addAffinity("felicia", 20);
+            },
+            next: "ch19_end"
+          }
+        ]
+      },
+      ch19_end: {
+        sector: "sol",
+        leftChar: "kim", rightChar: "hande", leftMood: "happy", rightMood: "happy",
+        speaker: "kim",
+        text: "\"Thứ vốn chỉ là một chuyến đi ngoại giao cho cha, giờ đã trở thành bàn đạp để chính ta đặt dấu ấn ngay trong lòng lãnh thổ Đế chế Sylvarian.\"",
+        end: {
+          title: "Hoàn thành Chương XIX — Father's Problems",
+          summary: "Đã mở khóa tuyến truyện Kim Santos tại Metallia & Hande Ersoy – Xal Kor. Tiếp theo: Chương XX — Brand New Issue.",
+          nextChapter: "ch20_brand_new_issue"
+        }
+      }
+    }
+  },
+  {
+    id: "ch20_brand_new_issue",
+    num: "CHƯƠNG XX",
+    title: "Brand New Issue: Hang Động Pherone Nexus",
+    subtitle: "Global Icon ↔ Hang Ngầm Pregnomorph",
+    sector: "sol",
+    leadChar: "bryce",
+    summary: "Bryce Dallas chiêu mộ Evelina, Grace và Chunlina quay phim tài liệu về hang bí mật của Pregnomorph. Họ ghi được hình ảnh Ovalina trước khi bị truy đuổi; Chunlina tự nguyện ở lại, còn Sharapova dọn bẫy Dream Pig & Tamalin ngoài trực thăng.",
+    nodes: {
+      start: {
+        sector: "sol",
+        leftChar: "bryce", rightChar: "evelina", leftMood: "combat", rightMood: "happy",
+        speaker: "bryce",
+        text: "\"Nghe kỹ đây: hang ngầm Pherone Nexus là điểm mù lớn nhất trên Trái Đất. Chỉ cần quay được bằng chứng bên trong, bộ phim tài liệu này sẽ làm rung chuyển cả Global Icon lẫn Kronea!\"",
+        next: "ch20_cave"
+      },
+      ch20_cave: {
+        sector: "sol",
+        leftChar: "ovalina", rightChar: "chunliva", leftMood: "smug", rightMood: "tense",
+        speaker: "narrator",
+        text: "Dưới ánh đèn quay run rẩy, nhóm phóng viên vừa kịp ghi lại bóng dáng cao lớn của Ovalina trước khi hàng đàn Pregnomorph ập tới! Trước lối thoát, Chunlina Wong bất ngờ dừng bước — ký ức xưa cùng pheromone khiến cô chọn ở lại hang sâu.",
+        next: "ch20_chopper"
+      },
+      ch20_chopper: {
+        sector: "sol",
+        leftChar: "bryce", rightChar: "julia", leftMood: "tense", rightMood: "combat",
+        speaker: "julia",
+        text: "\"Nhanh lên máy bay! Tôi vừa phải quét sạch hàng tá bẫy của Dream Pigs và Tamalin quanh bãi đáp rồi — nếu Arisia xem được cuốn băng này của cô, Pherone Nexus và Meralina sẽ gặp đại họa đấy, Bryce!\"",
+        choices: [
+          {
+            label: "🎬 Giữ nguyên băng tài liệu & xuất bản trên Global Icon",
+            hint: "+2,500 Credits • +120 Ảnh hưởng • Nguy cơ lộ bí mật Pherone Nexus",
+            effects: (g) => {
+              g.addRes(g.playerFaction, "credits", 2500);
+              g.addRes(g.playerFaction, "influence", 120);
+              g.addAffinity("bryce", 30);
+              g.addTension(10);
+            },
+            battle: {
+              playerId: "bryce",
+              enemyId: "ovalina",
+              stageId: "sol",
+              winNext: "ch20_end",
+              loseNext: "ch20_end"
+            }
+          },
+          {
+            label: "🔒 Niêm phong đoạn phim về Ovalina để bảo vệ Meralina",
+            hint: "+30 Độ tin cậy với Meralina & Ovalina • -5% Căng thẳng",
+            effects: (g) => {
+              g.addAffinity("meralina", 30);
+              g.addAffinity("ovalina", 25);
+              g.addTension(-5);
+            },
+            next: "ch20_end"
+          }
+        ]
+      },
+      ch20_end: {
+        sector: "sol",
+        leftChar: "bryce", rightChar: "grace", leftMood: "smug", rightMood: "happy",
+        speaker: "bryce",
+        text: "\"Một người đã ở lại dưới lòng đất, nhưng những thước phim này sẽ khiến cả thiên hà phải nhìn lại điều đang ẩn giấu dưới chân Đế chế.\"",
+        end: {
+          title: "Hoàn thành Chương XX — Brand New Issue",
+          summary: "Đã hoàn tất biến cố phim tài liệu Pherone Nexus của Bryce Dallas. Tiếp theo: Chương XXI — Dual War.",
+          nextChapter: "ch21_dual_war"
+        }
+      }
+    }
+  },
+  {
+    id: "ch21_dual_war",
+    num: "CHƯƠNG XXI",
+    title: "Dual War: Chiến Tranh Hai Mặt Trận",
+    subtitle: "Salvic Union ↔ Fremde Protectorae",
+    sector: "zero",
+    leadChar: "sofie",
+    summary: "Một ngày trước Quốc khánh Salvic Union, Overlord bất ngờ xâm lược và bắt Sharon Frost; Arisia từ chối cứu viện vì Hiệp ước Cursew, còn Magnatere bị trói tay chỉ gửi được vài sư đoàn tình nguyện. Cùng lúc, Arisia đưa quân vào Fremde Protectorae khiêu khích Ceasaria Kaiser.",
+    nodes: {
+      start: {
+        sector: "zero",
+        leftChar: "sofie", rightChar: "overlord", leftMood: "tense", rightMood: "smug",
+        speaker: "narrator",
+        text: "Chỉ một ngày trước lễ Quốc khánh Salvic Union, Overlord vu khống một nhóm Nadiran đi tìm Aphrodina là kẻ phản bội để chọc thủng biên giới! Tuyến đầu do Sharon Frost trấn giữ sụp đổ và cô bị bắt giữ.",
+        next: "ch21_pact_trap"
+      },
+      ch21_pact_trap: {
+        sector: "zero",
+        leftChar: "sofie", rightChar: "magnatere", leftMood: "tense", rightMood: "tense",
+        speaker: "magnatere",
+        text: "\"Arisia viện dẫn Hiệp ước Cursew bí mật để từ chối tham chiến! Điều khoản liên minh ba bên đang khóa tay ta — Nadirius chỉ có thể gửi vài sư đoàn tình nguyện sang tiếp ứng cho cô, Sofie!\"",
+        next: "ch21_fremde"
+      },
+      ch21_fremde: {
+        sector: "fremde",
+        leftChar: "arisia", rightChar: "ceasaria", leftMood: "smug", rightMood: "combat",
+        speaker: "arisia",
+        text: "\"Đúng như tính toán: Ceasaria Kaiser nóng nảy đã mắc bẫy ra đòn trước! Toàn quân Sylvarian — tổng phản công vào Fremde Protectorae ngay lập tức!\"",
+        choices: [
+          {
+            label: "⚔️ Ra trận tại chiến tuyến Salvic hoặc Fremde Protectorae",
+            hint: "+3,000 Credits • +150 Ảnh hưởng • Khai hỏa Dual War",
+            effects: (g) => {
+              g.addRes(g.playerFaction, "credits", 3000);
+              g.addRes(g.playerFaction, "influence", 150);
+              g.addTension(15);
+            },
+            battle: {
+              playerId: "__PROTAGONIST__",
+              enemyId: "ceasaria",
+              stageId: "fremde",
+              winNext: "ch21_end",
+              loseNext: "ch21_end"
+            }
+          }
+        ]
+      },
+      ch21_end: {
+        sector: "fremde",
+        leftChar: "avalanche", rightChar: "atomina", leftMood: "smug", rightMood: "neutral",
+        speaker: "narrator",
+        text: "Dư luận Fremde Protectorae nhanh chóng quay lưng với Ceasaria. Ngay cả Atomina Evres và phe Alterian trung lập cũng chuyển sang ủng hộ nhà ngoại giao khôn khéo Avalanche Prine.",
+        end: {
+          title: "Hoàn thành Chương XXI — Dual War",
+          summary: "Cả Salvic Union lẫn Fremde Protectorae đều bốc cháy. Tiếp theo: Chương XXII — Deep Implode & Ký Sinh Trùng Dưới CR 1000.",
+          nextChapter: "ch22_deep_implode_change"
+        }
+      }
+    }
+  },
+  {
+    id: "ch22_deep_implode_change",
+    num: "CHƯƠNG XXII",
+    title: "Deep Implode & Something Change",
+    subtitle: "Fremde • Ixalia • Salvic Union • Pháo Đài Western Nadir",
+    sector: "western_abyss",
+    leadChar: "arisia",
+    summary: "Conquistor đánh bại Ceasaria Kaiser; Avalanche Prine cưới Mary và nắm Fremde Protectorae. Ixalcian sáp nhập vào Đế chế; Hyouya đánh lui Cipheron; The Collectors sụp đổ khi Hailey biến mất. Kil Kimius mời quân Sylvarian vào Salvic, còn Overlord bí mật cấy ký sinh trùng bóng tối lên Arisia.",
+    nodes: {
+      start: {
+        sector: "fremde",
+        leftChar: "conquistor", rightChar: "mary", leftMood: "combat", rightMood: "neutral",
+        speaker: "narrator",
+        text: "Bị hội đồng cô lập, Ceasaria Kaiser thất bại trong trận quyết đấu trước Conquistor Claudius và bị giam vào ngục riêng. Avalanche Prine trở thành lãnh đạo mới của Fremde Protectorae và kết hôn cùng Mary Karelia-Batson để giữ yên vùng đệm cho Kronea.",
+        next: "ch22_ixalia_salvic"
+      },
+      ch22_ixalia_salvic: {
+        sector: "zero",
+        leftChar: "hyouya", rightChar: "kil", leftMood: "combat", rightMood: "secret",
+        speaker: "narrator",
+        text: "Lo sợ chung số phận, Ixalcian ký hiệp ước sáp nhập trong khi Qiyana bí mật cử Glinda sang Hinata liên minh ngầm với Malocri. Trên mặt trận Salvic, Hyouya dùng kẽ hở hiệp ước đánh lui Cipheron, còn trên Trái Đất, thỏa thuận ngầm giữa Etharos và Mr. Mind khiến Hailey biến mất cùng sự sụp đổ của The Collectors. Lợi dụng bất ổn, Kil Kimius mời quân Sylvarian vào Salvic Union 'gìn giữ hòa bình', đẩy Sofie vào thế hai mặt trận.",
+        next: "ch22_parasite"
+      },
+      ch22_parasite: {
+        sector: "western_abyss",
+        leftChar: "arisia", rightChar: "overlord", leftMood: "neutral", rightMood: "smug",
+        speaker: "overlord",
+        text: "\"Ngươi thấy Tsunadia nói đúng chứ, Nữ hoàng? Lạnh lùng bỏ mặc cả người thân Brigitte Grok... Nhưng khoảnh khắc ngươi vừa ngồi xuống chiếc ghế trong pháo đài này, thứ ký sinh trùng bóng tối từ linh hồn phụ thân ta — vô hình với mọi kẻ dưới CR 1000 — đã lặng lẽ bước vào tâm trí và cơ thể ngươi rồi, Arisia!\"",
+        choices: [
+          {
+            label: "⚔️ Quyết chiến định đoạt cục diện Kỷ nguyên Age of Dominion!",
+            hint: "+5,000 Credits • +300 Ảnh hưởng • +150 Mảnh Gen",
+            effects: (g) => {
+              g.addRes(g.playerFaction, "credits", 5000);
+              g.addRes(g.playerFaction, "influence", 300);
+              g.cardDust = (g.cardDust || 0) + 150;
+            },
+            battle: {
+              playerId: "__PROTAGONIST__",
+              enemyId: "overlord",
+              stageId: "western_abyss",
+              winNext: "ch22_finale",
+              loseNext: "ch22_finale"
+            }
+          }
+        ]
+      },
+      ch22_finale: {
+        sector: "western_abyss",
+        leftChar: "__PROTAGONIST__", rightChar: "tsunadia", leftMood: "smug", rightMood: "secret",
+        speaker: "narrator",
+        text: "Một âm mưu xuyên thấu cả ngai vàng Sylvarian đã âm thầm khởi động dưới lòng pháo đài Western Nadir. Mọi quân cờ của Cycle 12: Age of Dominion đều đã vào vị trí cho cuộc đối đầu tối hậu!",
+        end: {
+          title: "🌌 HOÀN THÀNH TOÀN BỘ 23 CHƯƠNG CANON — AGE OF DOMINION!",
+          summary: "Đã cập nhật trọn vẹn cốt truyện từ các file rawdoc (từ Khởi Nguyên tới Dual War, Deep Implode & Something Change)."
         }
       }
     }

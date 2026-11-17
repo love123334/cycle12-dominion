@@ -317,12 +317,12 @@ export const CHAR_BY_ID = Object.fromEntries(CHARACTERS.map(c => [c.id, c]));
 
 // Quan hệ đã chuẩn hóa (chỉ quan hệ xã hội/chính trị)
 export const RELATIONS = [
-  { type: "Hôn nhân", items: ["Magnatere × Hyouya Singularity", "Malocri Caranter × July Arum & Jorduyn Havenlus (hôn nhân chính trị)", "Jokar Seid × Mina Lascivana", "Emily Violet × String (cộng sinh Wombiote)"] },
-  { type: "Hẹn hò", items: ["Veidos Caranter × Yulina Claudius", "Perplexa Gemini × Evelina Rivers", "Avalanche Prine × Mary Karelia-Batson"] },
+  { type: "Hôn nhân", items: ["Magnatere × Hyouya Singularity", "Malocri Caranter × July Arum & Jorduyn Havenlus (hôn nhân chính trị)", "Jokar Seid × Mina Lascivana", "Emily Violet × String (cộng sinh Wombiote)", "Avalanche Prine × Mary Karelia-Batson (kết hôn sau Deep Implode)"] },
+  { type: "Hẹn hò", items: ["Veidos Caranter × Yulina Claudius", "Perplexa Gemini × Evelina Rivers", "Xal Kor × Hande Ersoy (đã có 1 con chung)"] },
   { type: "Người cũ", items: ["Depek Seekon × Glinda Grande & Qiyana Paige", "Hoornyxr × Ellie Lionheart"] },
-  { type: "Để ý / đơn phương", items: ["Overlord → Arisia Grok (sau Hiệp ước Cursew)", "Brigitte Grok → Zarcseid Copilus", "Ojamon Cursew ↔ Pussiri Deltanal", "Cipheron → Elita Singularity", "Bill Greedle → Sarah Foxx", "Parasoid → Felicia Laurent"] },
-  { type: "Gia đình", items: ["Ikyphone & Impregnita → Overlord, Magnatere, Tsunadia, Gold, Dick Pierce, Cipheron", "Vagina Clitoris → Ovalina, Uterussa, Cockary", "Elita & Hyouya Singularity (chị em)", "Meralina & Veidos Caranter (chị em); Ragnaroir (con của Meralina)", "Xal Kor → Felicia → Perplexa (cha: Etharos)", "July Arum → Jorduyn", "Bill Greedle → Trang Greedle-Le", "Kelvos Grok & Arisia Grok (anh em)"] },
-  { type: "Chính trị", items: ["Ojamon: gián điệp của Arisia trong Reformists, nhưng chơi nước đôi", "Carnavex: tham vọng ngai vàng, Arisia biết rõ", "Malocri: có tên trong danh sách 'gửi lời hỏi thăm' của Arisia", "April ← Cockary: rò rỉ vị trí chung của Meralina"] }
+  { type: "Để ý / đơn phương", items: ["Overlord → Arisia Grok (sau Hiệp ước Cursew & gài ký sinh trùng)", "Brigitte Grok → Zarcseid Copilus", "Ojamon Cursew ↔ Pussiri Deltanal", "Cipheron → Elita Singularity", "Bill Greedle → Sarah Foxx", "Parasoid → Felicia Laurent", "Inga Blina ↔ Sentrion Breed (ẩn giấu tại Future Corp)"] },
+  { type: "Gia đình", items: ["Ikyphone & Impregnita → Overlord, Magnatere, Tsunadia, Gold, Dick Pierce, Cipheron", "Vagina Clitoris → Ovalina, Uterussa, Cockary", "Elita & Hyouya Singularity (chị em)", "Meralina & Veidos Caranter (chị em); Ragnaroir (con của Meralina)", "Xal Kor → Felicia (mẹ kế: Hande Ersoy) → Perplexa (cha: Etharos)", "July Arum → Jorduyn", "Bill Greedle → Trang Greedle-Le", "Jose Santos → Kim Santos (người thừa kế)", "Kelvos Grok & Arisia Grok (anh em)"] },
+  { type: "Chính trị", items: ["Ojamon: gián điệp của Arisia trong Reformists, nhưng chơi nước đôi", "Carnavex: tham vọng ngai vàng, Arisia biết rõ", "Malocri: có tên trong danh sách 'gửi lời hỏi thăm' của Arisia", "April ← Cockary: rò rỉ vị trí chung của Meralina", "Kil Kimius: mời quân Sylvarian vào Salvic Union để 'gìn giữ hòa bình'", "Qiyana & Glinda → Malocri: liên minh ngầm Ixalcian–Hinata"] }
 ];
 
 export const RACE_STYLE = {
