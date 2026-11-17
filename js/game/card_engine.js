@@ -287,6 +287,8 @@ export class CardBattleEngine {
     this.gameStateRef = gameStateRef;
     this.uidCounter = 1;
     this.turn = 1;
+    this.activeSide = "player";
+    this.battleDoneThisTurn = false;
     this.phase = "summon"; // Turn 1 begins in Summon Phase right after Opening Hand (2♂ + 2♀) is drawn!
     this.maxTurns = 28;
     this.log = [];
@@ -1636,14 +1638,9 @@ export class CardBattleEngine {
     if (laneIdx < 0 || laneIdx >= this.maxLanes) return { ok: false, reason: "Làn Hàng 1 không hợp lệ (1–5)." };
     if (s.row1[laneIdx]) return { ok: false, reason: `Làn ${laneIdx + 1} đang có thẻ trấn giữ.` };
 
-    const cost = typeof card.cost === "number" ? card.cost : getCardEnergyCost(card.cr, card.isToken);
-    if ((s.energy || 0) < cost) {
-      return { ok: false, reason: `Không đủ Năng lượng Gen ⚡! Cần ${cost}⚡ để đặt ${card.name} (Hiện có ${s.energy}⚡).` };
-    }
-
     this.saveTurnSnapshot(`Triệu hồi ${card.name} vào Làn ${laneIdx + 1}`);
 
-    s.energy -= cost;
+    // v15.0: Summoning cards in Summon Phase does NOT consume Energy!
     s.hand.splice(handIdx, 1);
     card.deployedTurn = this.turn;
     if (hasH1Keyword(card, "shield") && (card.shieldCharges || 0) <= 0) {
@@ -1665,8 +1662,8 @@ export class CardBattleEngine {
     }
 
     const kwStr = kwNotes.length ? ` [${kwNotes.join(" • ")}]` : "";
-    this.pushLog(`🃏 [Summon Phase] Đặt ${card.name} (${card.gender === "Male" ? "♂" : "♀"} • ${cost}⚡ • CR ${card.cr}) vào Làn ${laneIdx + 1}${kwStr} (Còn ${s.energy}⚡).`);
-    return { ok: true, card, laneIdx, cost, kwNotes };
+    this.pushLog(`🃏 [Summon Phase] Triệu hồi ${card.name} (${card.gender === "Male" ? "♂" : "♀"} • CR ${card.cr}) vào Làn ${laneIdx + 1}${kwStr}.`);
+    return { ok: true, card, laneIdx, cost: 0, kwNotes };
   }
 
   recallFromRow1(laneIdx) {
@@ -1686,11 +1683,9 @@ export class CardBattleEngine {
     }
 
     this.player.row1[laneIdx] = null;
-    const refund = typeof card.cost === "number" ? card.cost : getCardEnergyCost(card.cr, card.isToken);
-    this.addEnergy("player", refund);
     this.player.hand.push(card);
-    this.pushLog(`↩️ Thu hồi ${card.name} từ Làn ${laneIdx + 1} về tay (+${refund}⚡).`);
-    return { ok: true, card, refund };
+    this.pushLog(`↩️ Thu hồi ${card.name} từ Làn ${laneIdx + 1} về tay.`);
+    return { ok: true, card, refund: 0 };
   }
 
   // ==========================================================================
@@ -1832,9 +1827,7 @@ export class CardBattleEngine {
       const laneOrder = [...occupiedByPlayer, ...otherEmpty];
 
       for (const laneIdx of laneOrder) {
-        const affordable = e.hand
-          .map((c, idx) => ({ card: c, idx, cost: c.cost || getCardEnergyCost(c.cr, c.isToken) }))
-          .filter((item) => item.cost <= e.energy);
+        const affordable = e.hand.map((c, idx) => ({ card: c, idx, cost: 0 }));
 
         if (affordable.length === 0) break;
 
@@ -1884,7 +1877,6 @@ export class CardBattleEngine {
         }
 
         const chosen = e.hand.splice(bestPick.idx, 1)[0];
-        e.energy -= bestPick.cost;
         chosen.deployedTurn = this.turn;
         if (hasH1Keyword(chosen, "shield") && (chosen.shieldCharges || 0) <= 0) {
           chosen.shieldCharges = 1;
@@ -1893,8 +1885,8 @@ export class CardBattleEngine {
         if (hasH1Keyword(chosen, "draw")) this.drawCards("enemy", 1);
         if (hasH1Keyword(chosen, "recover")) this.addEnergy("enemy", 1);
 
-        deployedMoves.push({ lane: laneIdx, card: chosen, cost: bestPick.cost });
-        this.pushLog(`👁️ [AI Summon] Địch đặt ${chosen.name} (${chosen.gender === "Male" ? "♂" : "♀"} • ${bestPick.cost}⚡ • CR ${chosen.cr}) vào Làn ${laneIdx + 1}.`);
+        deployedMoves.push({ lane: laneIdx, card: chosen, cost: 0 });
+        this.pushLog(`👁️ [AI Summon] Địch đặt ${chosen.name} (${chosen.gender === "Male" ? "♂" : "♀"} • CR ${chosen.cr}) vào Làn ${laneIdx + 1}.`);
       }
     }
 
@@ -1916,29 +1908,33 @@ export class CardBattleEngine {
   }
 
   // ==========================================================================
-  // BATTLE PHASE & END PHASE -> NEXT TURN DRAW PHASE RESOLUTION
+  // YU-GI-OH TURN FLOW:
+  // Turn 1 Player 1: Draw -> Summon & H2 -> Effect -> End Phase (NO Battle Phase!)
+  // Turn 1 Player 2 (AI): Draw -> Summon & H2 -> Effect -> Battle Phase -> End Phase
+  // Turn 2+ Player 1: Draw -> Summon & H2 -> Effect -> Battle Phase -> End Phase
   // ==========================================================================
-  resolveClashTurn() {
-    if (this.over) return { ok: false, over: true, winner: this.winner };
-
-    const pHasAnyFront = this.getRow1Cards("player").length > 0;
-    const pCanAffordAny = this.player.summonLockedOnTurn !== this.turn && this.player.hand.some((c) => (c.cost || 1) <= this.player.energy);
-    if (!pHasAnyFront && pCanAffordAny && this.phase === "summon") {
-      return { ok: false, reason: "Hãy đặt ít nhất 1 thẻ từ tay lên Hàng 1 (5 làn) trước khi bước vào Battle Phase!" };
+  canEnterBattlePhase() {
+    if (this.over) return { ok: false, reason: "Trận đấu đã kết thúc." };
+    if (this.turn === 1 && this.activeSide === "player") {
+      return {
+        ok: false,
+        reason: "Lượt 1 của Player 1 KHÔNG CÓ Battle Phase! Hãy bấm '⏭️ END PHASE' để chuyển sang lượt Địch."
+      };
     }
+    if (this.battleDoneThisTurn) {
+      return {
+        ok: false,
+        reason: "Bạn đã hoàn thành Battle Phase ở lượt này! Hãy bấm '⏭️ END PHASE' để kết thúc lượt."
+      };
+    }
+    return { ok: true };
+  }
 
-    this.phase = "battle";
-    this.turnHistory = [];
-    this.lastNewTokens = [];
-
-    // 1. AI executes its Summon & Effect phases
-    const aiDeploys = this.aiExecuteTurnPhases();
-
+  runLaneClashes() {
     const laneResults = [];
     let playerRow3OverkillDamage = 0;
     let enemyRow3OverkillDamage = 0;
 
-    // 2. Sequential Vertical Lane Clashes across all 5 Lanes (Lanes 0 -> 1 -> 2 -> 3 -> 4)
     for (let i = 0; i < this.maxLanes; i++) {
       const pCard = this.player.row1[i];
       const eCard = this.enemy.row1[i];
@@ -1981,7 +1977,6 @@ export class CardBattleEngine {
 
           const capInfo = this.onCardPlacedIntoRow2("player", eCard, pCard, i);
           if (capInfo.vanishedToken) {
-            // Weak Token destroyed -> disappears and overkill hits Enemy Row 3 Representative!
             const chip = Math.round(res.overkill * 0.65);
             enemyRow3OverkillDamage += chip;
             this.enemy.leader.battleDamageTaken = (this.enemy.leader.battleDamageTaken || 0) + chip;
@@ -2029,27 +2024,26 @@ export class CardBattleEngine {
 
     this.lastLaneResults = laneResults;
 
-    // 3. Check Row 2 Capture Win/Loss Condition (3+ or 5 captures)
+    // Row 2 Capture Win/Loss Condition (3 captures)
     const captureWinTarget = 3;
     if (this.player.row2.length >= captureWinTarget) {
       this.over = true;
       this.winner = "player";
       this.winReason = "capture_3";
       this.pushLog(`🎉 CHIẾN THẮNG! Đã bắt giữ ${this.player.row2.length} lá bài thật của đối thủ vào Hàng 2!`);
-      return { ok: true, aiDeploys, laneResults, newTokens: this.lastNewTokens, over: true, winner: "player", winReason: "capture_3" };
+      return { laneResults, over: true, winner: "player", winReason: "capture_3" };
     }
     if (this.enemy.row2.length >= captureWinTarget) {
       this.over = true;
       this.winner = "enemy";
       this.winReason = "capture_3";
       this.pushLog(`💀 THẤT BẠI! Bạn đã mất ${this.enemy.row2.length} lá bài vào Hàng 2 đối phương!`);
-      return { ok: true, aiDeploys, laneResults, newTokens: this.lastNewTokens, over: true, winner: "enemy", winReason: "capture_3" };
+      return { laneResults, over: true, winner: "enemy", winReason: "capture_3" };
     }
 
-    // 4. Row 3 Outer Representative Breach Check (When Row 1 is empty OR worn down by Token overkill!)
+    // Row 3 Outer Representative Breach Check
     const pRow1Cards = this.getRow1Cards("player");
     const eRow1Cards = this.getRow1Cards("enemy");
-
     const eRepEval = this.evalCardCombatCR(this.enemy.leader, pRow1Cards[0] || null, "enemy");
     const pRepEval = this.evalCardCombatCR(this.player.leader, eRow1Cards[0] || null, "player");
 
@@ -2058,14 +2052,14 @@ export class CardBattleEngine {
       this.winner = "player";
       this.winReason = "leader_breach";
       this.pushLog(`👑 HẠ GỤC THỦ LĨNH HÀNG 3 ĐỊCH (Sát thương xuyên Token)! -> CHIẾN THẮNG!`);
-      return { ok: true, aiDeploys, laneResults, over: true, winner: "player", winReason: "leader_breach" };
+      return { laneResults, over: true, winner: "player", winReason: "leader_breach" };
     }
     if (playerRow3OverkillDamage > 0 && (this.player.leader.cr - (this.player.leader.battleDamageTaken || 0)) <= 0) {
       this.over = true;
       this.winner = "enemy";
       this.winReason = "leader_breach";
-      this.pushLog(`💀 GAME OVER! Các Token yếu vỡ trận khiến Thủ lĩnh Hàng 3 ${this.player.leader.name} ăn đủ sát thương và gục ngã!`);
-      return { ok: true, aiDeploys, laneResults, over: true, winner: "enemy", winReason: "leader_breach" };
+      this.pushLog(`💀 GAME OVER! Các Token yếu vỡ trận khiến Thủ lĩnh Hàng 3 ${this.player.leader.name} gục ngã!`);
+      return { laneResults, over: true, winner: "enemy", winReason: "leader_breach" };
     }
 
     if (eRow1Cards.length === 0 && pRow1Cards.length > 0) {
@@ -2076,7 +2070,7 @@ export class CardBattleEngine {
         this.winner = "player";
         this.winReason = "leader_breach";
         this.pushLog(`👑 HẠ GỤC THỦ LĨNH HÀNG 3! (${totalPAtk} > ${eRepEval.total}) -> CHIẾN THẮNG!`);
-        return { ok: true, aiDeploys, laneResults, over: true, winner: "player", winReason: "leader_breach", row3Attack: { totalPAtk, repCR: eRepEval.total } };
+        return { laneResults, over: true, winner: "player", winReason: "leader_breach" };
       } else {
         this.enemy.leader.battleDamageTaken = (this.enemy.leader.battleDamageTaken || 0) + Math.round(totalPAtk * 0.5);
         this.pushLog(`🛡️ Thủ lĩnh Hàng 3 ${this.enemy.leader.name} gắng gượng chống đỡ (mất ${Math.round(totalPAtk * 0.5)} CR)!`);
@@ -2091,80 +2085,105 @@ export class CardBattleEngine {
         this.winner = "enemy";
         this.winReason = "leader_breach";
         this.pushLog(`💀 GAME OVER! Thủ lĩnh Hàng 3 ${this.player.leader.name} thất thủ (${totalEAtk} > ${pRepEval.total})!`);
-        return { ok: true, aiDeploys, laneResults, over: true, winner: "enemy", winReason: "leader_breach", row3Attack: { totalEAtk, repCR: pRepEval.total } };
+        return { laneResults, over: true, winner: "enemy", winReason: "leader_breach" };
       } else {
         this.player.leader.battleDamageTaken = (this.player.leader.battleDamageTaken || 0) + Math.round(totalEAtk * 0.5);
         this.pushLog(`💪 Thủ lĩnh ${this.player.leader.name} trụ vững nhưng chịu ${Math.round(totalEAtk * 0.5)} sát thương bào mòn!`);
       }
     }
 
-    // 5. END PHASE -> Clean up single-turn buffs, advance Turn, and execute next turn's DRAW PHASE!
-    this.phase = "end";
-    for (const sideKey of ["player", "enemy"]) {
-      const s = this.getSide(sideKey);
-      s.geneSurgeActiveThisTurn = false;
-      s.directiveUsedThisTurn = false;
-      s.leaderSkillBuffCR = 0;
-      s.leaderSkillEnemyPenaltyCR = 0;
-      s.ovalinaH1Active = false;
-      s.leader.h1ActivatedThisTurn = false;
-      s.leader.h1EffectActive = false;
-      s.row1.forEach((u) => {
-        if (!u) return;
-        u.h1ActivatedThisTurn = false;
-        u.h1EffectActive = false;
-        u.tempBuffCR = 0;
-        u.tempPenaltyCR = 0;
-        u.nullifiedBuffs = false;
-        u.halvedByEnemy = false;
-        u.cannotAttackThisTurn = false;
-      });
-      s.row2.forEach((c) => {
-        c.h2ActivatedThisTurn = false;
-      });
+    return { laneResults, over: false };
+  }
+
+  cleanupEndPhaseForSide(sideKey) {
+    const s = this.getSide(sideKey);
+    s.geneSurgeActiveThisTurn = false;
+    s.directiveUsedThisTurn = false;
+    s.leaderSkillBuffCR = 0;
+    s.leaderSkillEnemyPenaltyCR = 0;
+    s.ovalinaH1Active = false;
+    s.leader.h1ActivatedThisTurn = false;
+    s.leader.h1EffectActive = false;
+    s.row1.forEach((u) => {
+      if (!u) return;
+      u.h1ActivatedThisTurn = false;
+      u.h1EffectActive = false;
+      u.tempBuffCR = 0;
+      u.tempPenaltyCR = 0;
+      u.nullifiedBuffs = false;
+      u.halvedByEnemy = false;
+      u.cannotAttackThisTurn = false;
+    });
+    s.row2.forEach((c) => {
+      c.h2ActivatedThisTurn = false;
+    });
+  }
+
+  executePlayerBattlePhase() {
+    const chk = this.canEnterBattlePhase();
+    if (!chk.ok) return chk;
+    this.phase = "battle";
+    this.turnHistory = [];
+    this.lastNewTokens = [];
+    const res = this.runLaneClashes();
+    this.battleDoneThisTurn = true;
+    if (!res.over) {
+      this.phase = "end";
+      this.pushLog(`⚔️ [Lượt ${this.turn} • Battle Phase] Giao chiến hoàn tất → Chuyển sang END PHASE. Hãy bấm '⏭️ END PHASE' để kết thúc lượt!`);
     }
+    return { ok: true, ...res };
+  }
 
+  endPlayerTurn() {
+    if (this.over) return { ok: false, over: true, winner: this.winner };
+
+    // 1. Player 1 End Phase
+    this.phase = "end";
+    this.turnHistory = [];
+    this.cleanupEndPhaseForSide("player");
+    this.pushLog(`⏭️ [Lượt ${this.turn} • Player 1 End Phase] Kết thúc lượt Bạn → Chuyển lượt cho Địch (Player 2)!`);
+
+    // 2. Player 2 (Enemy) Turn: Draw -> Summon & H2 -> Effect -> Battle Phase -> End Phase
+    this.activeSide = "enemy";
+    const eHasMeralina =
+      this.enemy.meralinaDrawTwoActive ||
+      this.enemy.row1.some((u) => u && u.id === "meralina") ||
+      this.enemy.leader?.id === "meralina";
+    const eDrawTarget = eHasMeralina ? 2 : 1;
+    const eDrawn = this.drawCards("enemy", eDrawTarget);
+    this.enemy.meralinaDrawTwoActive = false;
+
+    const aiDeploys = this.aiExecuteTurnPhases();
+    // Player 2 DOES have Battle Phase even on Turn 1!
+    const enemyBattle = this.runLaneClashes();
+    if (enemyBattle.over) {
+      return { ok: true, aiDeploys, laneResults: enemyBattle.laneResults, over: true, winner: enemyBattle.winner, winReason: enemyBattle.winReason };
+    }
+    this.cleanupEndPhaseForSide("enemy");
+
+    // 3. Advance to Next Turn -> Player 1 Draw Phase -> Summon Phase
     this.turn++;
-
-    // 6. NEXT TURN DRAW PHASE: +1⚡ Energy & Draw 1 card (or 2 cards if Meralina H1 is on field!)
+    this.activeSide = "player";
+    this.battleDoneThisTurn = false;
     this.phase = "draw";
-    this.addEnergy("player", 1);
-    this.addEnergy("enemy", 1);
 
     const pHasMeralinaDraw =
       this.player.meralinaDrawTwoActive ||
       this.player.row1.some((u) => u && u.id === "meralina") ||
       this.player.leader?.id === "meralina";
-    const eHasMeralinaDraw =
-      this.enemy.meralinaDrawTwoActive ||
-      this.enemy.row1.some((u) => u && u.id === "meralina") ||
-      this.enemy.leader?.id === "meralina";
-
     const pDrawTarget = pHasMeralinaDraw ? 2 : 1;
-    const eDrawTarget = eHasMeralinaDraw ? 2 : 1;
     const pDrawn = this.drawCards("player", pDrawTarget);
-    const eDrawn = this.drawCards("enemy", eDrawTarget);
-
     this.player.meralinaDrawTwoActive = false;
-    this.enemy.meralinaDrawTwoActive = false;
-
-    if (this.getRow1Cards("player").length === 0 && this.player.hand.length > 0 && !this.player.hand.some((c) => (c.cost || 1) <= this.player.energy)) {
-      this.addEnergy("player", 1);
-    }
 
     const meralinaNote = pHasMeralinaDraw ? " [Hiệu ứng Meralina: Rút 2 lá!]" : "";
     const lockNote = this.player.summonLockedOnTurn === this.turn ? " ⚠️ [Khóa Triệu Hồi lượt này do Ovalina H2!]" : "";
-    this.pushLog(`🌅 [Lượt ${this.turn} • DRAW → SUMMON PHASE] +1⚡ (Ta ${this.player.energy}/${this.player.maxEnergy}⚡) & rút +${pDrawn} lá${meralinaNote}${lockNote}.`);
-
-    // Enter Summon Phase for the new turn!
+    this.pushLog(`🌅 [Lượt ${this.turn} • DRAW → SUMMON PHASE] Rút +${pDrawn} lá${meralinaNote}${lockNote}.`);
     this.phase = "summon";
 
-    // 7. Stalemate safeguard
     const stalemate = this.turn > this.maxTurns || (
       this.player.hand.length === 0 && this.player.deck.length === 0 &&
       this.enemy.hand.length === 0 && this.enemy.deck.length === 0
     );
-
     if (stalemate) {
       this.over = true;
       this.winReason = "tiebreak";
@@ -2176,9 +2195,19 @@ export class CardBattleEngine {
         this.winner = pTotal >= eTotal ? "player" : "enemy";
       }
       this.pushLog(`⌛ Hết bài chiến thuật — phân định chung cuộc (${this.winner === "player" ? "Thắng" : "Thua"})!`);
-      return { ok: true, aiDeploys, laneResults, over: true, winner: this.winner, winReason: "tiebreak", newTokens: this.lastNewTokens, playerDraws: pDrawn, enemyDraws: eDrawn };
+      return { ok: true, aiDeploys, laneResults: enemyBattle.laneResults, over: true, winner: this.winner, winReason: "tiebreak", newTokens: this.lastNewTokens, playerDraws: pDrawn, enemyDraws: eDrawn };
     }
 
-    return { ok: true, aiDeploys, laneResults, over: false, newTokens: this.lastNewTokens, playerDraws: pDrawn, enemyDraws: eDrawn };
+    return { ok: true, aiDeploys, laneResults: enemyBattle.laneResults, over: false, newTokens: this.lastNewTokens, playerDraws: pDrawn, enemyDraws: eDrawn };
+  }
+
+  resolveClashTurn() {
+    if (this.over) return { ok: false, over: true, winner: this.winner };
+    if (this.turn >= 2 && !this.battleDoneThisTurn) {
+      const bRes = this.executePlayerBattlePhase();
+      if (!bRes.ok) return bRes;
+      if (bRes.over) return bRes;
+    }
+    return this.endPlayerTurn();
   }
 }

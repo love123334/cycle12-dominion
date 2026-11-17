@@ -1420,6 +1420,11 @@ class Cycle12App {
       this.playAnimatedClashTurn();
     });
 
+    document.getElementById("btn-end-phase")?.addEventListener("click", () => {
+      if (!this.duelEngine || this.duelEngine.over || this.isResolvingClash) return;
+      this.playEndPhaseTurn();
+    });
+
     document.getElementById("btn-next-phase")?.addEventListener("click", () => {
       if (!this.duelEngine || this.duelEngine.over || this.isResolvingClash) return;
       const eng = this.duelEngine;
@@ -1806,15 +1811,66 @@ class Cycle12App {
     setTimeout(() => pop.remove(), 1100);
   }
 
+  async animateLaneResults(res) {
+    const eng = this.duelEngine;
+    if (!eng) return;
+    const battleView = document.getElementById("duel-battle-view");
+    const laneResList = res.laneResults || [];
+    const maxLanes = eng.maxLanes || 5;
+
+    for (let i = 0; i < maxLanes; i++) {
+      const lr = laneResList[i];
+      if (!lr || lr.outcome === "empty") continue;
+
+      const pSlot = document.querySelector(`#duel-p-row1 .board-slot[data-lane="${i}"]`);
+      const eSlot = document.querySelector(`#duel-e-row1 .board-slot[data-lane="${i}"]`);
+      const laneChip = document.querySelectorAll("#duel-lanes-bar .lane-loc-chip")[i];
+
+      pSlot?.classList.add("lane-resolving", "anim-lunge-up");
+      eSlot?.classList.add("lane-resolving", "anim-lunge-down");
+      laneChip?.classList.add("lane-resolving");
+
+      SFX.cardHit();
+      if (battleView) {
+        battleView.classList.remove("arena-shake");
+        void battleView.offsetWidth;
+        battleView.classList.add("arena-shake");
+      }
+
+      const flashEl = document.createElement("div");
+      flashEl.className = "lane-impact-flash";
+      laneChip?.appendChild(flashEl);
+
+      if (lr.outcome === "player_win") {
+        this.spawnLaneFloatPop(i, `🏆 THẮNG LÀN ${i + 1} (${lr.pTotal} vs ${lr.eTotal})`, "win");
+      } else if (lr.outcome === "enemy_win") {
+        this.spawnLaneFloatPop(i, `💥 THUA LÀN ${i + 1} (${lr.pTotal} vs ${lr.eTotal})`, "loss");
+      } else if (lr.outcome === "player_shield_block" || lr.outcome === "enemy_shield_block") {
+        this.spawnLaneFloatPop(i, `🛡️ KHIÊN CHẶN! (${lr.pTotal} vs ${lr.eTotal})`, "tie");
+      } else if (lr.outcome === "tie") {
+        this.spawnLaneFloatPop(i, `⚖️ HÒA LÀN ${i + 1} (${lr.pTotal})`, "tie");
+      } else if (lr.outcome === "player_hold") {
+        this.spawnLaneFloatPop(i, `🔥 TRẤN GIỮ LÀN ${i + 1} (${lr.pTotal} CR)`, "win");
+      } else if (lr.outcome === "enemy_hold") {
+        this.spawnLaneFloatPop(i, `⚠️ ĐỊCH TRẤN GIỮ (${lr.eTotal} CR)`, "loss");
+      }
+
+      await new Promise((r) => setTimeout(r, 240));
+      pSlot?.classList.remove("lane-resolving", "anim-lunge-up");
+      eSlot?.classList.remove("lane-resolving", "anim-lunge-down");
+      laneChip?.classList.remove("lane-resolving");
+      flashEl.remove();
+    }
+  }
+
   async playAnimatedClashTurn() {
     if (!this.duelEngine || this.duelEngine.over || this.isResolvingClash) return;
     const eng = this.duelEngine;
 
-    const pHasCard = eng.player.row1.some(Boolean);
-    const eHasCard = eng.enemy.row1.some(Boolean);
-    if (!pHasCard && !eHasCard && eng.player.hand.length > 0) {
+    const chk = eng.canEnterBattlePhase();
+    if (!chk.ok) {
       SFX.alert();
-      this.showToast("Chưa thể giao chiến", "Hãy đặt ít nhất 1 lá bài từ tay lên Hàng 1 (Chiến tuyến) trước khi Giao Chiến!");
+      this.showToast("Chưa thể vào Battle Phase", chk.reason);
       return;
     }
 
@@ -1823,90 +1879,53 @@ class Cycle12App {
     if (resolveBtn) resolveBtn.disabled = true;
 
     try {
-      // Execute the turn resolution in the pure engine first, then play sequential lane animations (Lane 1 -> 2 -> 3)
-      const res = eng.resolveClashTurn();
+      const res = eng.executePlayerBattlePhase();
       if (!res.ok) {
         SFX.alert();
-        this.showToast("Chưa thể giao chiến", res.reason || "Đặt thẻ ra Hàng 1 trước khi đấu!");
-        this.isResolvingClash = false;
-        if (resolveBtn) resolveBtn.disabled = false;
+        this.showToast("Chưa thể giao chiến", res.reason || "Không thể vào Battle Phase.");
         return;
       }
 
-      const battleView = document.getElementById("duel-battle-view");
-      const laneResList = res.laneResults || [];
-      const maxLanes = eng.maxLanes || 5;
+      await this.animateLaneResults(res);
 
-      for (let i = 0; i < maxLanes; i++) {
-        const lr = laneResList[i];
-        if (!lr || lr.outcome === "empty") continue;
-
-        const pSlot = document.querySelector(`#duel-p-row1 .board-slot[data-lane="${i}"]`);
-        const eSlot = document.querySelector(`#duel-e-row1 .board-slot[data-lane="${i}"]`);
-        const laneChip = document.querySelectorAll("#duel-lanes-bar .lane-loc-chip")[i];
-
-        pSlot?.classList.add("lane-resolving", "anim-lunge-up");
-        eSlot?.classList.add("lane-resolving", "anim-lunge-down");
-        laneChip?.classList.add("lane-resolving");
-
-        SFX.cardHit();
-        if (battleView) {
-          battleView.classList.remove("arena-shake");
-          void battleView.offsetWidth;
-          battleView.classList.add("arena-shake");
-        }
-
-        // Flash impact + floating CR numbers
-        const flashEl = document.createElement("div");
-        flashEl.className = "lane-impact-flash";
-        laneChip?.appendChild(flashEl);
-
-        if (lr.outcome === "player_win") {
-          this.spawnLaneFloatPop(i, `🏆 THẮNG LÀN ${i + 1} (${lr.pTotal} vs ${lr.eTotal})`, "win");
-        } else if (lr.outcome === "enemy_win") {
-          this.spawnLaneFloatPop(i, `💥 THUA LÀN ${i + 1} (${lr.pTotal} vs ${lr.eTotal})`, "loss");
-        } else if (lr.outcome === "player_shield_block" || lr.outcome === "enemy_shield_block") {
-          this.spawnLaneFloatPop(i, `🛡️ KHIÊN CHẶN! (${lr.pTotal} vs ${lr.eTotal})`, "tie");
-        } else if (lr.outcome === "tie") {
-          this.spawnLaneFloatPop(i, `⚖️ HÒA LÀN ${i + 1} (${lr.pTotal})`, "tie");
-        } else if (lr.outcome === "player_hold") {
-          this.spawnLaneFloatPop(i, `🔥 TRẤN GIỮ LÀN ${i + 1} (${lr.pTotal} CR)`, "win");
-        } else if (lr.outcome === "enemy_hold") {
-          this.spawnLaneFloatPop(i, `⚠️ ĐỊCH TRẤN GIỮ (${lr.eTotal} CR)`, "loss");
-        }
-
-        await new Promise((r) => setTimeout(r, 270));
-        pSlot?.classList.remove("lane-resolving", "anim-lunge-up");
-        eSlot?.classList.remove("lane-resolving", "anim-lunge-down");
-        laneChip?.classList.remove("lane-resolving");
-        flashEl.remove();
+      this.renderDuelUI();
+      if (eng.over) {
+        this.showDuelOutcome();
+      } else {
+        this.showToast("⚔️ Xong Battle Phase!", "Hãy bấm '⏭️ END PHASE' bên phải để kết thúc lượt và chuyển sang lượt Địch.");
       }
+    } finally {
+      this.isResolvingClash = false;
+      this.renderDuelUI();
+    }
+  }
+
+  async playEndPhaseTurn() {
+    if (!this.duelEngine || this.duelEngine.over || this.isResolvingClash) return;
+    const eng = this.duelEngine;
+    this.isResolvingClash = true;
+    try {
+      const res = eng.endPlayerTurn();
+      if (!res.ok) return;
+
+      await this.animateLaneResults(res);
 
       if (res.newTokens && res.newTokens.length) {
         SFX.breed();
         res.newTokens.forEach((tok) => this.game.recordTokenBred(tok));
         this.game.saveToSlot("auto");
         this.checkAndToastAchievements();
-        const tokenNotes = res.newTokens.map((t) =>
-          t.spawnedZone === "row1_boost"
-            ? `${t.boostedAllyName} +${t.boostAmount} CR (H1 đầy)`
-            : `${t.name} (CR ${t.cr}) → Hàng 1 Làn ${(t.spawnedLane ?? 0) + 1}`
-        );
-        this.showToast(
-          "🧬 Hàng 2 Sinh Token Lên Hàng 1!",
-          `${tokenNotes.join(" • ")} • Đã thỏa ĐK hiệu ứng H1/H2!`
-        );
       }
 
       this.renderDuelUI();
       if (eng.over) {
         this.showDuelOutcome();
+      } else {
+        this.showToast(`🌅 Lượt ${eng.turn} — Lượt Bạn`, `Địch đã xong Battle Phase! Bạn vừa rút +${res.playerDraws || 1} lá và đang ở Summon Phase.`);
       }
     } finally {
       this.isResolvingClash = false;
-      if (resolveBtn && this.duelEngine && !this.duelEngine.over) {
-        resolveBtn.disabled = false;
-      }
+      this.renderDuelUI();
     }
   }
 
@@ -3362,11 +3381,14 @@ class Cycle12App {
     if (phaseBarEl) {
       phaseBarEl.innerHTML = DUEL_PHASES.map((p) => {
         const isCurrent = eng.phase === p.id;
+        const isBattleLockedT1 = p.id === "battle" && eng.turn === 1;
         const canClick = !eng.over && !this.isResolvingClash && (
           (p.id === "effect" && eng.phase === "summon") ||
-          (p.id === "battle" && (eng.phase === "summon" || eng.phase === "effect"))
+          (p.id === "battle" && !isBattleLockedT1 && !eng.battleDoneThisTurn && (eng.phase === "summon" || eng.phase === "effect")) ||
+          (p.id === "end" && eng.phase !== "end")
         );
-        return `<button type="button" class="phase-step-pill ${isCurrent ? "active" : ""} ${canClick ? "clickable" : ""}" data-phase-step="${p.id}" title="${ESC(p.desc)}" ${canClick ? "" : "disabled"}>${ESC(p.short)}</button>`;
+        const label = isBattleLockedT1 ? "4. Battle (Khóa L1)" : p.short;
+        return `<button type="button" class="phase-step-pill ${isCurrent ? "active" : ""} ${canClick ? "clickable" : ""}" data-phase-step="${p.id}" title="${ESC(p.desc)}" ${canClick ? "" : "disabled"}>${ESC(label)}</button>`;
       }).join("");
       phaseBarEl.querySelectorAll("[data-phase-step]").forEach((btn) => {
         btn.addEventListener("click", () => {
@@ -3379,6 +3401,8 @@ class Cycle12App {
             this.showToast("✨ EFFECT PHASE (H1 & H3)", "Bấm nút ✨ trên thẻ Hàng 1 / Hàng 3 để kích hoạt hiệu ứng!");
           } else if (stepId === "battle") {
             this.playAnimatedClashTurn();
+          } else if (stepId === "end") {
+            this.playEndPhaseTurn();
           }
         });
       });
@@ -3386,7 +3410,7 @@ class Cycle12App {
 
     const nextPhaseBtn = document.getElementById("btn-next-phase");
     if (nextPhaseBtn) {
-      nextPhaseBtn.disabled = Boolean(eng.over || this.isResolvingClash);
+      nextPhaseBtn.disabled = Boolean(eng.over || this.isResolvingClash || (eng.phase !== "summon" && eng.phase !== "effect"));
       if (eng.phase === "summon") {
         nextPhaseBtn.textContent = "✨ Sang Effect Phase (H1/H3)";
         nextPhaseBtn.classList.remove("phase-effect-ready");
@@ -3395,13 +3419,42 @@ class Cycle12App {
         nextPhaseBtn.classList.add("phase-effect-ready");
       } else {
         nextPhaseBtn.textContent = `⏳ ${eng.phase.toUpperCase()} PHASE`;
+        nextPhaseBtn.classList.remove("phase-effect-ready");
       }
     }
 
-    // Energy Orb & Turn Bar
+    const battleBtn = document.getElementById("btn-resolve-clash");
+    if (battleBtn) {
+      const canBattle = eng.canEnterBattlePhase();
+      battleBtn.disabled = Boolean(eng.over || this.isResolvingClash || !canBattle.ok);
+      if (eng.turn === 1 && eng.activeSide === "player") {
+        battleBtn.textContent = "🚫 BATTLE (Lượt 1 Khóa)";
+        battleBtn.title = "Lượt 1 Player 1 không có Battle Phase! Hãy bấm ⏭️ END PHASE để chuyển lượt cho Địch.";
+      } else if (eng.battleDoneThisTurn) {
+        battleBtn.textContent = "✓ Đã Xong Battle";
+        battleBtn.title = "Đã hoàn thành Battle Phase lượt này! Bấm ⏭️ END PHASE.";
+      } else {
+        battleBtn.textContent = "⚔️ BATTLE PHASE";
+        battleBtn.title = "Vào Battle Phase: Giao chiến 5 làn!";
+      }
+    }
+
+    const endPhaseBtn = document.getElementById("btn-end-phase");
+    if (endPhaseBtn) {
+      endPhaseBtn.disabled = Boolean(eng.over || this.isResolvingClash);
+      const shouldEndHighlight = eng.phase === "end" || (eng.turn === 1 && eng.phase === "effect");
+      endPhaseBtn.classList.toggle("phase-effect-ready", shouldEndHighlight);
+      endPhaseBtn.textContent = eng.turn === 1 ? "⏭️ END PHASE (Sang Địch)" : "⏭️ END PHASE";
+    }
+
+    // Turn & Summon Status (No Energy Cost!)
     const energyBadge = document.getElementById("duel-energy-badge");
     if (energyBadge) {
-      energyBadge.innerHTML = `⚡ <strong>${eng.player.energy}/${eng.player.maxEnergy}</strong> Năng Lượng Gen`;
+      energyBadge.innerHTML = `✨ Triệu Hồi: <strong>Miễn Phí</strong>`;
+    }
+    const turnBadgeEl = document.getElementById("duel-turn-badge");
+    if (turnBadgeEl) {
+      turnBadgeEl.textContent = `Lượt ${eng.turn} • ${eng.activeSide === "player" ? "Lượt Bạn" : "Lượt Địch"}`;
     }
     const undoBtn = document.getElementById("btn-undo-duel");
     if (undoBtn) {
@@ -3800,16 +3853,15 @@ class Cycle12App {
       });
     });
 
-    // Player Hand (TCG Upright Cards with Energy Cost, Keywords, Drag & Drop + Touch Drag + Click)
+    // Player Hand (TCG Upright Cards — Free Summon in Summon Phase, Drag & Drop + Touch Drag + Click)
     const handEl = document.getElementById("duel-p-hand");
     const openLane = eng.player.row1.findIndex((s) => s === null);
     const previewOpp = openLane >= 0 ? eng.enemy.row1[openLane] : eng.enemy.row1[0];
     handEl.innerHTML = eng.player.hand.map((c, idx) => {
-      const cardCost = Number(c.cost || getCardEnergyCost(c.cr, c.isToken));
-      const canAfford = !eng.over && openLane >= 0 && eng.player.energy >= cardCost;
+      const canSummon = !eng.over && openLane >= 0 && eng.phase === "summon" && eng.player.summonLockedOnTurn !== eng.turn;
       return this.renderTCGCardHTML(c, {
-        playable: canAfford,
-        draggable: !eng.over && eng.player.energy >= cardCost,
+        playable: canSummon,
+        draggable: !eng.over && eng.phase === "summon",
         selected: eng.selectedHandIdx === idx,
         condMet: eng.isConditionMet(c, previewOpp, "player"),
         zoomAttrs: `data-zoom-host="1" data-zoom-card="${ESC(c.id)}"`,
