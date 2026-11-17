@@ -168,7 +168,7 @@ export const CHARACTERS = [
   C("cynthia", "Cynthia Rosahilda", "F", "human", "Người", "independent", "Nhà thám hiểm", "evernight", 30, 1.76, 100, "23",
     "#d6d3d1", "#78350f", "#f59e0b", "Nhà thám hiểm",
     "Ưa phiêu lưu, ngớ ngẩn. Sức mạnh đỉnh cao của con người.",
-    ["Sức Mạnh Đỉnh Cao", "Liều Lĩnh", "Phiêu Lưu"]),
+    ["Sức Mạnh Đỉnh Cao", "Liều Lĩnh", "Phiêu Lưu"], { portrait: "assets/portraits/cynthia.jpg" }),
   C("emily", "Emily Violet", "F", "human", "Người + cộng sinh Wombiote", "sylvarian", "Super Reporter Girls", "global_icon", 30, 1.69, 105, "25",
     "#fde047", "#38bdf8", "#a855f7", "Phóng viên chính",
     "Phóng viên chính, tự phụ. Cộng sinh với Wombiote tên String từ năm 18 tuổi, khi String cứu cô khỏi một Dream Pig trong rừng sâu — vì vậy cô không bao giờ trục xuất nó. Tuổi trẻ bất tử, hồi phục.",
