@@ -1,4 +1,4 @@
-const CACHE_NAME = "cycle12-dominion-v14.4";
+const CACHE_NAME = "cycle12-dominion-v14.5";
 
 const PRECACHE_ASSETS = [
   "./",
@@ -29,9 +29,10 @@ const PRECACHE_ASSETS = [
   "./assets/portraits/arisia.jpeg",
   "./assets/portraits/atomina.png",
   "./assets/portraits/brigitte.jpeg",
+  "./assets/portraits/bryce.png",
   "./assets/portraits/ceasaria.jpeg",
   "./assets/portraits/chunliva.jpeg",
-  "./assets/portraits/cynthia.jpg",
+  "./assets/portraits/cynthia.png",
   "./assets/portraits/dejaylah.jpeg",
   "./assets/portraits/eleanor.jpeg",
   "./assets/portraits/elita.png",
@@ -43,14 +44,14 @@ const PRECACHE_ASSETS = [
   "./assets/portraits/glinda.png",
   "./assets/portraits/grace.jpeg",
   "./assets/portraits/hailey.jpeg",
-  "./assets/portraits/hande.jpg",
+  "./assets/portraits/hande.png",
   "./assets/portraits/hyouya.jpeg",
   "./assets/portraits/inga.jpeg",
   "./assets/portraits/jane.jpeg",
   "./assets/portraits/jorduyn.jpeg",
   "./assets/portraits/julia.jpeg",
   "./assets/portraits/july.jpeg",
-  "./assets/portraits/kim.jpg",
+  "./assets/portraits/kim.png",
   "./assets/portraits/kyaria.jpeg",
   "./assets/portraits/mary.jpeg",
   "./assets/portraits/meralina.png",

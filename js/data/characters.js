@@ -168,7 +168,7 @@ export const CHARACTERS = [
   C("cynthia", "Cynthia Rosahilda", "F", "human", "Người", "independent", "Nhà thám hiểm", "evernight", 30, 1.76, 100, "23",
     "#d6d3d1", "#78350f", "#f59e0b", "Nhà thám hiểm",
     "Ưa phiêu lưu, ngớ ngẩn. Sức mạnh đỉnh cao của con người.",
-    ["Sức Mạnh Đỉnh Cao", "Liều Lĩnh", "Phiêu Lưu"], { portrait: "assets/portraits/cynthia.jpg" }),
+    ["Sức Mạnh Đỉnh Cao", "Liều Lĩnh", "Phiêu Lưu"], { portrait: "assets/portraits/cynthia.png" }),
   C("emily", "Emily Violet", "F", "human", "Người + cộng sinh Wombiote", "sylvarian", "Super Reporter Girls", "global_icon", 30, 1.69, 105, "25",
     "#fde047", "#38bdf8", "#a855f7", "Phóng viên chính",
     "Phóng viên chính, tự phụ. Cộng sinh với Wombiote tên String từ năm 18 tuổi, khi String cứu cô khỏi một Dream Pig trong rừng sâu — vì vậy cô không bao giờ trục xuất nó. Tuổi trẻ bất tử, hồi phục.",
@@ -302,15 +302,15 @@ export const CHARACTERS = [
   C("kim", "Kim Santos", "F", "human", "Người", "independent", "Con gái Jose Santos (Vander)", "vander", 170, 1.62, 116, "23",
     "#ec4899", "#38bdf8", "#f59e0b", "Người thừa kế Santos",
     "Con gái của Jose Santos (Brazil–Hàn Quốc), mềm mỏng nhưng tự tin. Sở hữu Pregnomorph Serum ver III, chuẩn bị tiếp quản đế chế Santos tại Vander.",
-    ["Pregnomorph Serum III", "Tráo Bài Trinh Sát", "Token Cân Bằng"], { kin: ["jose"], portrait: "assets/portraits/kim.jpg" }),
+    ["Pregnomorph Serum III", "Tráo Bài Trinh Sát", "Token Cân Bằng"], { kin: ["jose"], portrait: "assets/portraits/kim.png" }),
   C("hande", "Hande Ersoy", "F", "human", "Người", "independent", "Giám Sát Ottomano", "evernight", 55, 1.73, 126, "29",
     "#38bdf8", "#a855f7", "#1e40af", "Giám Sát Ottomano",
     "Giám sát viên người Thổ Nhĩ Kỳ, ngoan ngoãn và kiên nhẫn. Có khả năng bay, da chống đạn và hồi phục trung bình. Mẹ kế của Felicia sau khi sinh con cùng Xal Kor.",
-    ["Bay", "Da Chống Đạn", "Hồi Phục"], { kin: ["xalkor", "felicia"], portrait: "assets/portraits/hande.jpg" }),
+    ["Bay", "Da Chống Đạn", "Hồi Phục"], { kin: ["xalkor", "felicia"], portrait: "assets/portraits/hande.png" }),
   C("bryce", "Bryce Dallas", "F", "human", "Người", "independent", "Nhà Thám Hiểm (Thicc Explorer)", "evernight", 475, 1.7, 119, "34",
     "#f43f5e", "#fbbf24", "#7c3aed", "Nhà Thám Hiểm Chiến Lược",
     "Nhà thám hiểm người Mỹ bướng bỉnh và giàu tính chiến lược (CR 475). Sở hữu siêu sức mạnh, thân thể sắt đá và phản xạ siêu việt.",
-    ["Siêu Sức Mạnh", "Thân Thể Sắt Đá", "Phản Xạ Siêu Việt"])
+    ["Siêu Sức Mạnh", "Thân Thể Sắt Đá", "Phản Xạ Siêu Việt"], { portrait: "assets/portraits/bryce.png" })
 ];
 
 export const CHAR_BY_ID = Object.fromEntries(CHARACTERS.map(c => [c.id, c]));
