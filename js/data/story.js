@@ -2380,14 +2380,62 @@ export function buildEncounterScene(charId, gameState) {
     ragnaroir: `Grrr... Mẹ Meralina ra lệnh bảo vệ nơi này. Nếu ngươi là kẻ thù của Sylvarian hay Nadir, móng vuốt hỗn mang sẽ xé nát bộ bài của ngươi.`,
     carnavex: `Mọi đế chế đều có thời điểm giao chuyển quyền lực. Arisia thông minh, nhưng Tham vọng Kronea đâu chỉ dành cho mỗi nhà Grok.`,
     cipheron: `Thần trí Nadir nhìn thấy mọi mắt xích yếu trên bàn cờ. Sớm thôi, ngay cả Prozonian kiên cường nhất cũng sẽ phải cân nhắc lại liên minh.`,
-    bill: `Trong kỷ nguyên thần linh chiến tranh, đồng Credits và lọ Serum Pregnomorph đôi khi xoay chuyển ván cờ còn nhanh hơn cả tàu chiến!`
+    bill: `Trong kỷ nguyên thần linh chiến tranh, đồng Credits và lọ Serum Pregnomorph đôi khi xoay chuyển ván cờ còn nhanh hơn cả tàu chiến!`,
+    kim: `Cha giao cho tôi mở rộng địa bàn tại Metallia, nhưng tôi sẽ tự mình chứng minh năng lực trước cả nhà Santos lẫn Đế chế Sylvarian.`,
+    hande: `Xin chào. Tôi chỉ là Giám sát viên tại Ottomano thôi... nhưng từ sau đêm gặp Xal Kor và sinh ra đứa trẻ, mọi thứ quanh tôi đã phức tạp hơn rất nhiều.`,
+    bryce: `Cuốn băng tài liệu về Pherone Nexus này chắc chắn sẽ gây chấn động Global Icon! Chỉ tiếc cho Chunlina đã chọn ở lại dưới hang sâu đó.`
   };
 
-  let greeting = mutualRel
-    ? `${hero.name} đấy à? (${mutualRel}). Ta là ${c.name} — không ngờ chúng ta lại hội ngộ giữa sóng gió ${pactLine.toLowerCase()}`
-    : (GREETINGS[c.id] || (c.fac === "collectors"
-      ? `Khu vực Vander và Tokyzhou có quy tắc riêng. Nếu mang đủ lợi ích cho The Collectors, có lẽ Mr. Mind sẽ để ngươi yên.`
-      : `Ta là ${c.name} (${c.title || "Hậu duệ thế hệ mới"}), hiện đang đóng tại ${loc ? loc.label : "Gaiastra"}. ${pactLine}`));
+  // Lời chào đặc biệt theo cặp quan hệ canon (ví dụ: Magnatere <-> Hyouya, Xal Kor <-> Hande, Meralina <-> Ragnaroir...)
+  const pairKey = [hero.id, c.id].sort().join("|");
+  const PAIR_GREETINGS = {
+    "hyouya|magnatere": c.id === "hyouya"
+      ? `Phu quân Magnatere... Chàng vừa trở về từ nghị sự sao? Đứa trẻ vừa ngủ say rồi. Chàng đừng quá bận lòng vì Hiệp ước Cursew của Arisia — thiếp sẽ luôn đứng bên cạnh chàng và Nadirius!`
+      : `Hoàng hậu Hyouya của ta... Nàng vất vả rồi, cả việc chăm con lẫn lần sang Salvic giúp chị Elita. Có nàng bên cạnh, Nadirius mới thực sự là chốn bình yên giữa loạn thế.`,
+    "elita|hyouya": c.id === "hyouya"
+      ? `Chị Elita! Dù hiệp ước trói tay Magnatere, em vẫn luôn tìm cách sang tiếp viện cho chị ở mặt trận Salvic. Chị phải giữ an toàn nhé!`
+      : `Hyouya, em gái... Cảm ơn em đã dùng kẽ hở hiệp ước sang đánh lui Cipheron giúp Salvic. Đừng để Magnatere phải khó xử vì chị.`,
+    "jokar|mina": c.id === "mina"
+      ? `Jack... à không, anh Jokar yêu quý~ Về nhà rồi thì cởi bỏ lớp vỏ cổ đông Global Icon đi, hôm nay anh muốn 'xả stress' với em theo kiểu Prozonian nào đây?`
+      : `Mina bé nhỏ của anh... Hôm nay ở Global Icon lại có tin nóng gì à? Lại đây nào, anh cần giải tỏa căng thẳng một chút.`,
+    "avalanche|mary": c.id === "mary"
+      ? `Avalanche... Từ ngày rời ghế Phó Tư lệnh Trái Đất để ở bên anh tại Fremde Protectorae, em chưa từng hối hận dù chỉ một giây.`
+      : `Mary yêu dấu! Nhờ có nàng ở bên, ngay cả những kẻ Tyranian bảo thủ nhất cũng phải nể trọng cặp đôi lãnh đạo mới của Fremde Protectorae.`,
+    "hande|xalkor": c.id === "hande"
+      ? `Xal Kor... Đứa trẻ vừa mỉm cười giống hệt anh đấy. Nhưng ánh mắt của Felicia hôm qua vẫn khiến em lo lắng...`
+      : `Hande của ta, đừng lo chuyện Felicia. Nàng và đứa bé là khởi đầu mới cho huyết thống Kryptonian của chúng ta.`,
+    "felicia|hande": c.id === "hande"
+      ? `Felicia... Chị hiểu em sốc khi thấy chị trong phòng cha em, nhưng đứa trẻ này vô tội. Chị không hề muốn tranh giành vị thế của em ở The Supers đâu.`
+      : `Hande Ersoy... Tôi vẫn chưa thể tin nổi cha tôi vừa ra tù đã có con với cô. Tốt nhất cô đừng để ông ta kéo vào mưu đồ khôi phục Kryptonian!`,
+    "meralina|ragnaroir": c.id === "meralina"
+      ? `Ragnaroir ngoan của mẹ... Lại đây nào, ở Pherone Nexus này chẳng có Arisia soi mói đâu, nhưng nhớ đừng để Ovalina nhìn thấy thái độ quá trớn của con đấy~`
+      : `Grrr... Mẹ Meralina! Mùi hương của mẹ luôn khiến con phát điên... Bất cứ kẻ nào dám tới gần mẹ, con sẽ xé xác chúng!`,
+    "veidos|yulina": c.id === "yulina"
+      ? `Veidos? Đừng tưởng vài buổi Couple Events khiến tôi quên mất sự khác biệt tư tưởng giữa chúng ta... nhưng công nhận, đứng cạnh anh trên chiến tuyến cũng không tệ.`
+      : `Yulina! Kệ đám quý tộc Kronea nói gì đi — chỉ có trên chiến trường biên giới mới có những kẻ xứng đáng đứng ngang hàng với ta và cô!`,
+    "evelina|perplexa": c.id === "evelina"
+      ? `Perplexa cưng! Cả Global Icon đang cá cược xem khi nào em chính thức thành 'phu nhân Earth Overlord tương lai' đấy nhé~`
+      : `Evelina, đừng nghe mấy lời trêu chọc ở tòa soạn nữa... nhưng nếu là cô, tôi cũng chẳng phiền nếu lời đồn đó thành sự thật đâu.`,
+    "arisia|overlord": c.id === "overlord"
+      ? `Nữ hoàng Arisia ghé thăm pháo đài của ta sao? Cứ ngồi xuống chiếc ghế kia đi... Ta rất thích sự lạnh lùng của nàng, nhất là khi nàng còn chưa biết điều gì đang chờ đợi.`
+      : `Overlord... Đừng quên Hiệp ước Cursew là thứ duy nhất giữ Pháo Gotterfall chưa chĩa thẳng vào đầu ngươi. Ta tới đây chỉ để chốt tình báo biên giới.`,
+    "brigitte|zarcseid": c.id === "brigitte"
+      ? `Tướng quân Zarcseid~ Sao lúc nào ông chú cũng bận rộn ở Predita thế? Thỉnh thoảng cũng phải để ý tới Brigitte Grok này chứ!`
+      : `Tiểu thư Brigitte... Tôi rất trân trọng sự quan tâm của cô, nhưng cuộc chiến tại Predita và Salvic Union chưa cho phép tôi nghĩ tới chuyện riêng.`,
+    "ojamon|pussiri": c.id === "pussiri"
+      ? `Ojamon~ Đừng lúc nào cũng chỉ coi em như đối tác định kỳ chứ! Lại đây, em vừa nghe được tin mật mới từ phòng riêng của Arisia đấy...`
+      : `Pussiri, giữ giọng nhỏ thôi. Ta luôn sẵn sàng 'họp riêng' với cô, miễn là những thông tin cô mang về đủ giá trị.`,
+    "jose|kim": c.id === "kim"
+      ? `Cha yên tâm, con đã dẹp xong cuộc nổi dậy công nhân ở Metallia rồi. Nhà Santos sẽ có chỗ đứng vững chắc ngay trong lòng Đế chế Sylvarian.`
+      : `Làm tốt lắm, Kim! Con gái ta quả nhiên xứng đáng làm người thừa kế đế chế Santos tại Vander.`
+  };
+
+  let greeting = PAIR_GREETINGS[pairKey]
+    || (mutualRel
+      ? `${hero.name} đấy à? (${mutualRel}). Ta là ${c.name} — không ngờ chúng ta lại hội ngộ giữa sóng gió ${pactLine.toLowerCase()}`
+      : (GREETINGS[c.id] || (c.fac === "collectors"
+        ? `Khu vực Vander và Tokyzhou có quy tắc riêng. Nếu mang đủ lợi ích cho The Collectors, có lẽ Mr. Mind sẽ để ngươi yên.`
+        : `Ta là ${c.name} (${c.title || "Hậu duệ thế hệ mới"}), hiện đang đóng tại ${loc ? loc.label : "Gaiastra"}. ${pactLine}`)));
 
   const secretText = sharedRel.length > 0
     ? `Hồ sơ mật của ${c.name} ghi nhận các mối dây liên hệ đáng chú ý: ${sharedRel.join(" • ")}. Những mắt xích này ảnh hưởng trực tiếp tới cục diện ${fac.name}.`

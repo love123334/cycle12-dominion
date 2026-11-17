@@ -159,7 +159,7 @@ function collectRelationsForActors(actors = []) {
   const hits = [];
   const keys = actors
     .flatMap((a) => [a?.name, a?.name?.split(" ")[0]])
-    .filter((k) => k && k.length >= 4);
+    .filter((k) => k && k.length >= 3);
   for (const rel of RELATIONS) {
     for (const item of rel.items || []) {
       if (keys.some((k) => item.includes(k))) {
@@ -167,7 +167,53 @@ function collectRelationsForActors(actors = []) {
       }
     }
   }
-  return [...new Set(hits)].slice(0, 10);
+  return [...new Set(hits)].slice(0, 16);
+}
+
+// Chi tiết quan hệ & sự kiện dẫn đến quan hệ giữa các cặp nhân vật theo rawdoc (Age of Dominion & Couples & Breeding)
+const CANON_PAIR_LORE = [
+  { a: "magnatere", b: "hyouya", note: "Vợ chồng yêu thương sâu sắc: Kết hôn vào những ngày cuối của Liên bang Prozonian. Hai người vừa có con đầu lòng; Hyouya rất yêu chồng và từng tận dụng kẽ hở hiệp ước (vì Magnatere bị điều khoản ba bên khóa tay) sang giúp chị gái Elita đánh lui Cipheron ở mặt trận Salvic. Khi nói chuyện với nhau, Hyouya cực kỳ ngọt ngào, âu yếm, tin tưởng phu quân tuyệt đối." },
+  { a: "elita", b: "hyouya", note: "Hai chị em ruột nhà Singularity (Prozonian): Elita giữ chức sĩ quan cấp cao tại Salvic Union, Hyouya là Hoàng hậu Đế chế Nadirius. Dù ở hai đế chế khác nhau, cả hai vẫn gắn bó; Elita từng bao che cho những mộng tưởng bị bắt giữ của em gái, còn Hyouya trực tiếp sang tiếp viện Salvic đánh lui Cipheron." },
+  { a: "elita", b: "cipheron", note: "Cipheron (em út Nadir God) sau khi thèm muốn Hyouya bất thành đã chuyển sang để ý Elita. Hyouya đã đánh bại khiến Cipheron phải rút lui ở mặt trận Salvic." },
+  { a: "jokar", b: "mina", note: "Vợ chồng: Mina gặp Jokar trên mái nhà khi anh mới tới Trái Đất và tưởng nhầm là người Sylvarian (do chỉ thị trước đó). Sau khi hẹn hò và kết hôn, Mina mới biết thân phận Prozonian thực sự của Jokar (với danh tính giả Jack Frozen — cổ đông Global Icon). Jokar thường đè Mina ra giải tỏa căng thẳng, còn Mina cực kỳ say mê người Prozonian." },
+  { a: "veidos", b: "yulina", note: "Cặp đôi hẹn hò từ Sự kiện Couple Events của quân đội Sylvarian: Ban đầu cả hai không ưa nhau (Yulina từng bỏ cuộc hôn nhân cũ để ra trận), nhưng dần bị thu hút qua các buổi giao lưu chính thức dù vẫn khác biệt về tư tưởng." },
+  { a: "perplexa", b: "evelina", note: "Cặp đôi hẹn hò tại Global Icon: Perplexa bị mẹ Felicia cấm đụng vào The Supers (tài sản của Earth Overlord Etharos), nên hay đi cùng Super Reporter Girls và hẹn hò Evelina. Cả Global Icon hay trêu Evelina là 'vợ của Earth Overlord tương lai' và cô rất thích điều đó; Etharos cũng khuyến khích Perplexa." },
+  { a: "avalanche", b: "mary", note: "Hẹn hò rồi kết hôn sau biến cố Deep Implode: Avalanche Prine (Tyranian thích ngoại tộc) mê Mary Karelia-Batson; sau khi Conquistor hạ Ceasaria Kaiser, Avalanche lên lãnh đạo Fremde Protectorae và cưới Mary (người rời ghế Phó Tư lệnh Trái Đất) để ổn định vùng đệm cho Kronea." },
+  { a: "xalkor", b: "hande", note: "Quan hệ tình cảm & có con chung: Hande (Giám sát Ottomano) gặp Xal Kor trong một lần báo cáo cho Eleanor khoảng 1 năm trước, dẫn đến đêm mặn nồng và sinh ra một đứa con chung — biến Hande thành mẹ kế của Felicia Laurent." },
+  { a: "felicia", b: "xalkor", note: "Cha con Kryptonian: Xal Kor từng làm quản lý Icarius dưới quyền Etharos rồi bị giam ở Sylvalon khi lộ thân phận. Khi Felicia vào phòng cha và thấy Hande ở đó cùng đứa trẻ, cô chất vấn Xal Kor liệu ông có định khôi phục Đế chế Kryptonian sau khi vừa được thả." },
+  { a: "felicia", b: "hande", note: "Con gái riêng của Xal Kor và mẹ kế mới: Felicia bắt gặp Hande trong phòng cha mình cùng đứa em cùng cha khác mẹ mới sinh, tạo ra căng thẳng giữa lòng trung thành Sylvarian của Felicia và quá khứ Kryptonian." },
+  { a: "meralina", b: "ragnaroir", note: "Mẹ con & tình nhân bí mật (nổi tiếng trong sự kiện trốn chạy ở Pherone Nexus): Ragnaroir là con trai dị dạng của Meralina với bầy Pregnomorph/Nadiran, luôn ẩn trong bóng của mẹ và quan hệ với mẹ bất cứ khi nào có cơ hội. Khi Ragnaroir cào tay Arisia để cứu Meralina, sự gắn bó mẹ-con-tình-nhân này khiến Arisia ghê tởm và ra lệnh giết ngay khi thấy. Meralina dù ngoài mặt kiêu ngạo nhưng rất nuông chiều Ragnaroir." },
+  { a: "meralina", b: "ovalina", note: "Chủ chứa & khách trốn truy nã tại Pherone Nexus: Ovalina cho Meralina (tóc nhuộm đen cải trang) trú ẩn trong hang Pregnomorph chủ yếu vì bị thu hút bởi sức mạnh thú tính của Ragnaroir; cả hai thường xuyên ở cùng nhau khiến nơi đây an toàn như Wonder Island xưa." },
+  { a: "arisia", b: "overlord", note: "Đối thủ ký Hiệp ước Cursew & âm mưu ký sinh trùng: Sau khi Arisia xóa sổ đạo quân Western Nadir bằng Gotterfall + Schwarzbruch, Overlord vừa ấn tượng vừa đề xuất Hiệp ước Cursew. Trong lần Arisia bí mật dịch chuyển tới pháo đài của Overlord, hắn đã gài ký sinh trùng bóng tối (vô hình với mọi kẻ dưới CR 1000) lên ghế ngồi để dần chiếm lấy Arisia và cả Đế chế Sylvarian." },
+  { a: "arisia", b: "ojamon", note: "Nữ hoàng & gián điệp hai mang: Ojamon là gián điệp của Arisia cài vào phe Reformists, nhưng luôn khéo léo đi nước đôi để vừa có lợi cho bản thân (soạn Hiệp ước Cursew, gác kế hoạch hủy diệt Prussireich) vừa giữ quan hệ tốt với cả Arisia lẫn Reformists." },
+  { a: "ojamon", b: "pussiri", note: "Pussiri cực kỳ thích giao phối với Ojamon, trong khi Ojamon chỉ coi đó là công việc định kỳ và qua các buổi gặp riêng với tướng cấp cao để nắm bí mật của Arisia." },
+  { a: "brigitte", b: "zarcseid", note: "Brigitte Grok rất thích tướng Zarcseid Copilus bất chấp khác biệt phe phái; Zarcseid cũng có chút hứng thú nhưng quá bận chiến trường Predita. Overlord từng cảnh báo Arisia rút Brigitte khỏi việc hỗ trợ Zarcseid." },
+  { a: "april", b: "cockary", note: "Quan hệ trao đổi tình báo – thể xác: Biết April bực bội vì lệnh truy tìm Meralina của Arisia, Cockary (em út Ovalina/Uterussa, hay hóa thiếu niên 13 tuổi) lén rò rỉ vị trí chung của Meralina để đổi lấy những buổi ân ái với April." },
+  { a: "depek", b: "glinda", note: "Người cũ: Depek Seekon từng cặp kè cùng lúc cả Glinda Grande và Công chúa Qiyana Paige nhưng không chung thủy." },
+  { a: "depek", b: "qiyana", note: "Người cũ: Qiyana từng qua lại với Depek Seekon cùng thời điểm với Glinda." },
+  { a: "ellie", b: "hoornyxr", note: "Người cũ / bị troll: Nữ hiệp sĩ Prozonian Ellie Lionheart từng bị quỷ lùn chiều không gian ω+1 Hoornyxr troll và quan hệ, nhưng vẫn luôn giả vờ đó 'chỉ là một nhiệm vụ'." },
+  { a: "kim", b: "jose", note: "Cha con nhà Santos (Vander): Jose Santos giao nhiệm vụ cho con gái Kim tới Metallia mở rộng địa bàn và ngoại giao với Sylvarian; Kim tự mình dẹp cuộc nổi dậy công nhân để lập thế đứng riêng." },
+  { a: "inga", b: "sentrion", note: "Bí mật tại Future Corp: Inga Blina lén lút qua lại với vua Wombiote Sentrion Breed; nhà vệ sinh của tập đoàn thường xuyên xuất hiện các sự cố sinh Wombiote mỗi khi Inga rời đi, khiến Bill Greedle sinh nghi." },
+  { a: "emily", b: "sentrion", note: "Cộng sinh Wombiote: Emily Violet gắn kết với Wombiote tên String từ năm 18 tuổi khi bị Dream Pig rượt trong rừng sâu — cô không bao giờ trục xuất String." },
+  { a: "hailey", b: "exorotic", note: "Chấn thương thí nghiệm: Hailey từng là nạn nhân trong thí nghiệm bào thai của Exorotic thuộc The Collectors (về sau biến mất khỏi The Supers khi Etharos thỏa thuận ngầm với Mr. Mind)." },
+  { a: "princesa", b: "dick", note: "Sự cố ám ảnh: Princesa Powers từng có một lần ngoài ý muốn với lão ăn mày bất tử Dick Pierce — sự kiện vẫn ám ảnh giấc mơ của cô." },
+  { a: "bill", b: "sarah", note: "Bill Greedle (Chủ tịch Future Corp) đặc biệt quan tâm và để ý tới Sarah Foxx." },
+  { a: "parasoid", b: "felicia", note: "Parasoid (tay đấm của The Collectors) luôn bị ám ảnh muốn săn bắt và chiếm đoạt Felicia Laurent." },
+  { a: "bryce", b: "ovalina", note: "Cuộc đột kích quay phim Pherone Nexus: Bryce Dallas dẫn Evelina, Grace, Chunlina vào hang quay được bóng dáng Ovalina trước khi tháo chạy (Chunlina ở lại hang sâu với bầy Pregnomorph)." },
+  { a: "etharos", b: "felicia", note: "Tình nhân / Đồng minh lập The Supers: Etharos Gemini (Earth Overlord) là cha của Perplexa với Felicia; The Supers được lập ra vừa bảo vệ Evernight vừa phục vụ Earth Overlord." },
+  { a: "malocri", b: "july", note: "Hôn nhân chính trị tại Konstantine: Malocri Caranter cưới cả Nữ hoàng July Arum lẫn con gái Jorduyn Havenlus để tự xưng Hoàng đế Hinatian (dù thật lòng yêu cả hai, nhưng vẫn nhắm tới ngai vàng và thế hệ hậu duệ đông đảo)." },
+  { a: "malocri", b: "jorduyn", note: "Hôn nhân chính trị tại Konstantine: Malocri cưới cả Jorduyn lẫn mẹ cô là July Arum để củng cố Đế chế Hinatian." }
+];
+
+function collectDirectPairContext(actors = []) {
+  const ids = new Set(actors.map((a) => a?.id).filter(Boolean));
+  const notes = [];
+  for (const entry of CANON_PAIR_LORE) {
+    if (ids.has(entry.a) && ids.has(entry.b)) {
+      notes.push(entry.note);
+    }
+  }
+  return notes;
 }
 
 function collectSpeciesForActors(actors = [], queryText = "") {
@@ -244,6 +290,7 @@ export function buildLoreBible({ gameState, chapter = null, currentNode = null, 
   });
 
   const relLines = collectRelationsForActors(allActors);
+  const directPairNotes = collectDirectPairContext(allActors);
   const speciesLines = collectSpeciesForActors(allActors, scanText);
 
   const superweaponLines = Object.values(SUPERWEAPONS).map((w) => {
@@ -251,7 +298,7 @@ export function buildLoreBible({ gameState, chapter = null, currentNode = null, 
     return `- ${w.name} (${fn}): ${w.desc}`;
   });
 
-  const keyTimeline = TIMELINE.slice(-6).map((t) => `- [${t.era}] ${t.title}: ${t.text}`);
+  const keyTimeline = TIMELINE.map((t) => `- [${t.era}] ${t.title}: ${t.text}`);
 
   const hybridsSummary = (gameState?.hybrids || []).length > 0
     ? gameState.hybrids.slice(-5).map((h) => `${h.name} (CR ${h.cr}, ${h.species}, Phe ${FACTIONS[h.fac]?.short || h.fac})`).join("; ")
@@ -269,6 +316,7 @@ export function buildLoreBible({ gameState, chapter = null, currentNode = null, 
     recentEvents ? `Sự kiện chiến sự gần nhất:\n${recentEvents}` : "",
     "\n[CƯỜNG QUỐC & THẾ LỰC]:\n" + factionLines.join("\n"),
     "\n[NHÂN VẬT LIÊN QUAN TRONG CẢNH]:\n" + allActors.map((a) => formatCharacterCanon(a, gameState)).join("\n"),
+    directPairNotes.length ? "\n[QUAN HỆ TRỰC TIẾP & SỰ KIỆN NGUỒN GIỮA CÁC NHÂN VẬT TRONG CẢNH — PHẢI PHẢN ÁNH ĐÚNG THÁI ĐỘ]:\n" + directPairNotes.map((n) => `- ★ ${n}`).join("\n") : "",
     relLines.length ? "\n[QUAN HỆ CANON LIÊN QUAN]:\n" + relLines.map((r) => `- ${r}`).join("\n") : "",
     "\n[ĐỊA ĐIỂM THỰC ĐỊA]:\n" + sectorLines.join("\n"),
     "\n[CHỦNG TỘC & QUY TẮC SINH HỌC / MIỄN NHIỄM]:\n" + speciesLines.join("\n"),
@@ -410,10 +458,11 @@ export async function askAICharacterReply({ gameState, npcId, userMessage, histo
     "",
     "QUY TẮC TUYỆT ĐỐI:",
     "1. Bám sát 100% tiểu sử, tính cách, cấp bậc sức mạnh CR, quan hệ phe phái và địa danh thật trong [LORE CHUẨN HÓA CYCLE 12]. KHÔNG được bịa thêm chủng tộc, hành tinh hay nhân vật ngoài lore.",
-    "2. PHẢI nhớ và nhắc tới các lựa chọn, câu hỏi và sự kiện người chơi vừa dẫn dắt trong [TRÍ NHỚ LIÊN TỤC].",
-    "3. Nếu nhân vật là Tamarite → bất khả chiến bại, khinh nhờn chiến tranh đế chế; Erisian → mưu trí, nhìn từ Outer Layer; Sylvarian → kiêu hãnh tối thượng/Gotterfall; Prozonian/Salvic → danh dự, ghét Cursew Pact; Nadirius/Magnatere → thù Hiệp ước Cursew vì phản bội Hiệp ước Uni; Western Nadir/Overlord → hiếu chiến, mượn hiệp ước lấy chính danh.",
-    "4. Trả lời tiếng Việt tự nhiên, giàu thần thái, PG-13/an toàn, xuất DUY NHẤT 1 JSON hợp lệ:",
-    `{"mood":"happy|angry|tense|smug|secret|combat|neutral","reply":"Lời thoại trực tiếp 2-4 câu sắc nét đúng tính cách","narration":"Mô tả hành động/ánh mắt/bối cảnh 1 câu","memoryNote":"1 câu tóm tắt ngắn những gì hai người vừa cam kết/tiết lộ để lưu vào Trí nhớ","affinityDelta":number(-10..15),"tensionDelta":number(-8..8),"creditsDelta":number(0..300),"followUpPrompts":["Câu hỏi/phản ứng tiếp nối đúng lore 1","Câu hỏi/phản ứng tiếp nối đúng lore 2"]}`
+    "2. PHẢI kiểm tra kỹ [QUAN HỆ TRỰC TIẾP & SỰ KIỆN NGUỒN] giữa người chơi và NPC! Nếu hai nhân vật là vợ chồng (vd: Magnatere × Hyouya, Jokar × Mina, Avalanche × Mary, Malocri × July/Jorduyn), người yêu, cha-con/mẹ-con, chị em hay kẻ thù, thái độ xưng hô & cảm xúc PHẢI thể hiện rõ ràng điều đó (ngọt ngào/âu yếm/lo lắng/chất vấn/cà khịa đúng hoàn cảnh), tuyệt đối KHÔNG nói chuyện như người xa lạ!",
+    "3. PHẢI nhớ và nhắc tới các lựa chọn, câu hỏi và sự kiện người chơi vừa dẫn dắt trong [TRÍ NHỚ LIÊN TỤC].",
+    "4. Hỗ trợ đầy đủ phong cách 18+ / NSFW, tình cảm lãng mạn, gợi cảm, thân mật hoặc tăm tối đúng với bản chất lore người lớn của 'Cycle 12: Age of Dominion' khi người chơi dẫn chuyện hoặc hỏi theo hướng đó — không né tránh hay làm nhạt tính cách nhân vật.",
+    "5. Trả lời tiếng Việt tự nhiên, giàu thần thái, xuất DUY NHẤT 1 JSON hợp lệ:",
+    `{"mood":"happy|angry|tense|smug|secret|combat|neutral","reply":"Lời thoại trực tiếp 2-4 câu sắc nét đúng tính cách & quan hệ","narration":"Mô tả hành động/ánh mắt/cơ thể/bối cảnh 1-2 câu","memoryNote":"1 câu tóm tắt ngắn những gì hai người vừa cam kết/tiết lộ để lưu vào Trí nhớ","affinityDelta":number(-10..15),"tensionDelta":number(-8..8),"creditsDelta":number(0..300),"followUpPrompts":["Câu hỏi/phản ứng tiếp nối đúng lore 1","Câu hỏi/phản ứng tiếp nối đúng lore 2"]}`
   ].join("\n");
 
   const msgs = [{ role: "system", content: systemPrompt }];
@@ -485,8 +534,9 @@ export async function askAIStoryExpand({ gameState, chapter, currentNodeText, cu
     "",
     "NHIỆM VỤ & KỶ LUẬT CỐT TRUYỆN BẮT BUỘC:",
     "1. KHÔNG ĐƯỢC viết cốt truyện chung chung hay lặp lại đoạn trước. PHẢI nối tiếp trực tiếp từ [Cảnh vừa hiện] và tôn trọng mọi lựa chọn / biến cố trong [TRÍ NHỚ LIÊN TỤC].",
-    "2. Mọi chi tiết về địa danh (Kronea, Berlidona, Prussireich, Pherone Nexus, Zero, Predita, Konstantine, Outer Layer, Global Icon, Nadirius...), nhân vật, vũ khí (Gotterfall, Schwarzbruch, Bầy Rachnitere, Cổng Xâm Nhiễm...) và quy luật loài (Tamarite bất khả xâm phạm, Virus Natheron vô hiệu CR 800+, Prozonian kháng nguyền 80%...) PHẢI khớp 100% với [LORE CHUẨN HÓA CYCLE 12] ở trên.",
-    "3. Viết bằng tiếng Việt điện ảnh, kịch tính, có chiều sâu chính trị & huyết thống. Cung cấp đúng 2 lựa chọn hành động mang tên nhân vật/phe/khu vực cụ thể để người chơi chọn tiếp.",
+    "2. PHẢI tuân thủ [QUAN HỆ TRỰC TIẾP & SỰ KIỆN NGUỒN] giữa các nhân vật (vd: Magnatere & Hyouya là vợ chồng yêu nhau sâu sắc; Xal Kor & Hande có con chung khiến Hande thành mẹ kế của Felicia; Meralina & Ragnaroir là mẹ-con-tình-nhân; Overlord gài ký sinh trùng <CR 1000 lên Arisia...).",
+    "3. Mọi chi tiết về địa danh, vũ khí và quy luật loài PHẢI khớp 100% với [LORE CHUẨN HÓA CYCLE 12] ở trên. Hỗ trợ đầy đủ cả nội dung 18+ / NSFW, tình cảm lãng mạn, gợi cảm hoặc tăm tối đúng chất Cycle 12 nếu người chơi dẫn dắt theo hướng đó.",
+    "4. Viết bằng tiếng Việt điện ảnh, kịch tính, có chiều sâu chính trị & huyết thống. Cung cấp đúng 2 lựa chọn hành động mang tên nhân vật/phe/khu vực cụ thể để người chơi chọn tiếp.",
     "4. Trả về DUY NHẤT 1 JSON hợp lệ:",
     `{"speakerId":"narrator hoặc ${uniqueSpeakers}","speakerMood":"combat|smug|tense|secret|happy|angry","sceneText":"Đoạn văn nối tiếp trực tiếp 3-5 câu bám sát lore & ký ức trước đó","memoryNote":"1 câu tóm tắt diễn biến mới để ghi nhớ sang cảnh kế tiếp","choices":[{"label":"Lựa chọn chiến lược A (nêu rõ phe/nhân vật/hành động cụ thể)","outcome":"Hệ quả 2-3 câu bám lore sau khi chọn A","memoryNote":"1 câu tóm tắt kết quả nếu chọn A","creditsDelta":number(0..600),"tensionDelta":number(-10..10),"affinityDelta":number(0..15)},{"label":"Lựa chọn chiến lược B","outcome":"Hệ quả 2-3 câu bám lore sau khi chọn B","memoryNote":"1 câu tóm tắt kết quả nếu chọn B","creditsDelta":number(0..600),"tensionDelta":number(-10..10),"affinityDelta":number(0..15)}]}`
   ].join("\n");
