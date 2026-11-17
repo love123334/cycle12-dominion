@@ -1,4 +1,4 @@
-const CACHE_NAME = "cycle12-dominion-v14.5";
+const CACHE_NAME = "cycle12-dominion-v14.6";
 
 const PRECACHE_ASSETS = [
   "./",
@@ -36,7 +36,7 @@ const PRECACHE_ASSETS = [
   "./assets/portraits/dejaylah.jpeg",
   "./assets/portraits/eleanor.jpeg",
   "./assets/portraits/elita.png",
-  "./assets/portraits/ellie.jpeg",
+  "./assets/portraits/ellie.png",
   "./assets/portraits/emily.jpeg",
   "./assets/portraits/emma.jpeg",
   "./assets/portraits/evelina.jpeg",

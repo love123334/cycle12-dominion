@@ -136,7 +136,7 @@ export const CHARACTERS = [
   C("ellie", "Ellie Lionheart", "F", "prozonian", "Prozonian", "sylvarian", "Prozonian khu vực Trái Đất", "evernight", 200, 1.82, 196, "67",
     "#fde047", "#3b82f6", "#6366f1", "Sĩ quan Prozonian trên Trái Đất",
     "Mạnh mẽ, tự tin, IQ 196. Sức mạnh Prozonian, Kiếm Helios (vô hiệu hóa ma thuật hồi phục). Từng có quan hệ với Hoornyxr.",
-    ["Kiếm Helios", "Sức Mạnh Prozonian", "Phá Hồi Phục"], { portrait: "assets/portraits/ellie.jpeg" }),
+    ["Kiếm Helios", "Sức Mạnh Prozonian", "Phá Hồi Phục"], { portrait: "assets/portraits/ellie.png" }),
   C("hailey", "Hailey Claering", "F", "human", "Người tăng cường", "sylvarian", "The Supers", "evernight", 150, 1.76, 131, "25",
     "#451a03", "#78350f", "#0ea5e9", "Xạ thủ The Supers",
     "Kiêu ngạo, giỏi chiến lược. Súng Absolute Zero, bộ giáp khiên ngụy trang. Vẫn mang chấn thương tâm lý từ các thí nghiệm của Exorotic.",
