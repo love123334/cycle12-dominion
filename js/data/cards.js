@@ -341,6 +341,57 @@ export const CUSTOM_CHAR_EFFECTS = {
       desc: "Hàng 2: Khi lá này bị đặt vào Hàng 2, tự động chuyển về Hàng 2 sân mình thay vì sân đối thủ! Summon Phase (Ấn kích hoạt 1 lần/lượt): Bỏ toàn bộ bài trên tay của bạn xuống Mộ, triệu hồi một số Token lên Hàng 1 tương ứng với số bài bạn vừa bỏ khỏi tay, CR của mỗi Token bằng 200 × số bài đã bỏ!"
     }
   },
+  kim: {
+    r1: {
+      id: "kim_h1",
+      tag: "Tráo Về Deck → Tìm 1 Thẻ Nam (♂) Lên Tay",
+      bonusFlat: 0,
+      shuffleToSearchMale: true,
+      desc: "Effect Phase (Hàng 1): Có thể xào lá bài này trên sân trở lại Bộ bài, sau đó tìm và thêm 1 thẻ Nam (♂) từ Bộ bài lên tay bạn!"
+    },
+    r2: {
+      id: "kim_h2",
+      tier: "human_special",
+      ignition: true,
+      crAura: 40,
+      tag: "Ignition H2: Sinh 1 Token (CR = Tổng Bài Trên Tay 2 Bên × 125)",
+      desc: "Summon Phase (Hàng 2 — Ấn kích hoạt 1 lần/lượt): Triệu hồi 1 Token lên sân bạn với CR bằng tổng số bài trên tay của cả 2 người chơi × 125 (mang loài của cả cha & mẹ, thuộc phe thẻ Nam nếu có)!"
+    }
+  },
+  hande: {
+    r1: {
+      id: "hande_h1",
+      tag: "Bị Tiêu Diệt Chiến Đấu → Đặt Vào Hàng 2 Sân Mình",
+      bonusFlat: 100,
+      returnToOriginalOwnerRow2: true,
+      desc: "Hàng 1: +100 CR khi giao chiến. Nếu lá bài này bị tiêu diệt trong chiến đấu (Battle Phase), bạn có thể đặt nó vào Hàng 2 sân mình thay vì sân đối thủ!"
+    },
+    r2: {
+      id: "hande_h2",
+      tier: "alien_buff",
+      ignition: true,
+      crAura: 90,
+      tag: "Ignition H2: Sinh Token Bất Tử Lần Đầu & +200 CR Hàng 1",
+      desc: "Summon Phase (Hàng 2 — Ấn kích hoạt 1 lần/lượt): Triệu hồi 1 Token lên Hàng 1; lần đầu tiên Token này sắp bị tiêu diệt bởi chiến đấu, nó không bị tiêu diệt; đồng thời các thẻ khác bạn điều khiển ở Hàng 1 được +200 CR khi Token đó còn trên sân cho đến hết lượt đối thủ!"
+    }
+  },
+  bryce: {
+    r1: {
+      id: "bryce_h1",
+      tag: "Hủy 1 Lá H2 Ta → Hủy 1 Lá H1 Địch (Không Tấn Công Lượt Này)",
+      bonusFlat: 0,
+      sacrificeR2ToDestroyEnemyR1: true,
+      desc: "Effect Phase (Hàng 1): Có thể tiêu diệt 1 thẻ ở Hàng 2 sân bạn, sau đó tiêu diệt ngay 1 thẻ ở Hàng 1 đối phương, nhưng lá bài này không thể tấn công trong lượt này!"
+    },
+    r2: {
+      id: "bryce_h2",
+      tier: "alien_buff",
+      ignition: true,
+      crAura: 100,
+      tag: "Ignition H2: Chọn 1 ♂ H1 → Sinh Token ♂ (CR = Bryce + ♂) • Vỡ → Rút 1",
+      desc: "Summon Phase (Hàng 2 — Ấn kích hoạt 1 lần/lượt): Chọn 1 thẻ Nam (♂) trên Hàng 1 sân bạn, triệu hồi 1 Token Nam (♂) lên sân với CR bằng tổng CR của Bryce và thẻ Nam đó (kế thừa loài cả hai & phe thẻ Nam). Nếu Token này bị tiêu diệt, bạn được rút 1 lá bài!"
+    }
+  },
 
   // === CÁC NHÂN VẬT CÒN LẠI (THIẾT KẾ RIÊNG BIỆT THEO SỨC MẠNH, TÍNH CÁCH & LORE) ===
   overlord: {

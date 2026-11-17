@@ -298,7 +298,19 @@ export const CHARACTERS = [
   C("dick", "Dick Pierce", "M", "nadir", "Thần Nadir tái sinh", "western_nadir", "Huynh đệ Nadir (thứ 5)", "western_abyss", 10, 1.62, 125, "Bất tử (tái sinh)",
     "#78716c", "#eab308", "#57534e", "Lão ăn mày bất tử",
     "Con của Ikyphone và Impregnita, mang dáng một ông lão ăn mày rách rưới, không có sức chiến đấu. Chết rất nhanh nhưng tái sinh ở nơi khác. Ra lệnh được cho mọi hậu duệ của mình.",
-    ["Tái Sinh Tức Thời", "Hiệu Lệnh Hậu Duệ", "Chạy Trốn"], { kin: ["overlord", "tsunadia", "magnatere", "cipheron"] })
+    ["Tái Sinh Tức Thời", "Hiệu Lệnh Hậu Duệ", "Chạy Trốn"], { kin: ["overlord", "tsunadia", "magnatere", "cipheron"] }),
+  C("kim", "Kim Santos", "F", "human", "Người", "independent", "Tình Báo Vander", "vander", 260, 1.68, 128, "24",
+    "#ec4899", "#38bdf8", "#f59e0b", "Đặc vụ Tình báo Santos",
+    "Đặc vụ trinh sát lanh lợi thuộc mạng lưới nhà Santos tại Vander. Chuyên luồn lách giữa các phe phái để chiêu mộ chiến binh nam chủ lực về tay.",
+    ["Tráo Bài Trinh Sát", "Định Vị Chiến Binh", "Token Cân Bằng"], { kin: ["jose"] }),
+  C("hande", "Hande Ersoy", "F", "prozonian", "Prozonian", "salvic", "Vệ Binh Bất Khuất Salvic", "kronos", 490, 1.74, 140, "29",
+    "#38bdf8", "#a855f7", "#1e40af", "Nữ vệ binh Bất Khuất",
+    "Nữ chiến binh Salvic kiên cường bậc nhất, không bao giờ gục ngã dù bị đánh bại trên tiền tuyến — luôn rút về tuyến sau tiếp tục yểm trợ đồng đội.",
+    ["Tái Triển Khai Tuyến Sau", "Token Bất Tử Lần Đầu", "Hào Quang +200 CR"]),
+  C("bryce", "Bryce Dallas", "F", "sylvarian", "Sylvarian", "sylvarian", "Chỉ Huy Chiến Thuật Sylvarian", "kronos", 560, 1.75, 152, "34",
+    "#f43f5e", "#fbbf24", "#7c3aed", "Nữ Chỉ Huy Tác Chiến",
+    "Chỉ huy chiến trường quyết đoán của Đế chế Sylvarian, sẵn sàng hy sinh tuyến hậu cần để triệt hạ chủ lực địch và phối hợp cùng các chiến binh nam tạo nên hậu duệ hùng mạnh.",
+    ["Hiến Tế H2 Phá Địch", "Hợp Nhất CR Nam-Nữ", "Rút Bài Khi Token Vỡ"])
 ];
 
 export const CHAR_BY_ID = Object.fromEntries(CHARACTERS.map(c => [c.id, c]));

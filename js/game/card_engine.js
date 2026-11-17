@@ -575,20 +575,54 @@ export class CardBattleEngine {
   // Helper to spawn a Token onto a side's Row 1 (up to 5 slots)
   createAndPlaceToken(sideKey, {
     name = "Token Chiến Binh",
-    species = "Token",
-    race = "hybrid",
+    species = null,
+    race = null,
     fac = null,
     gender = null,
     cr = 400,
     unaffected = false,
+    firstBattleImmunity = false,
+    handeAuraBonus = 0,
+    handeAuraExpireTurn = 0,
+    drawOnDestroyOwner = null,
+    drawOnDestroyCount = 0,
+    maleParent = null,
+    femaleParent = null,
     tag = "Token Trực Chiến",
     desc = "Token triệu hồi lên Hàng 1 (Nếu thua giao chiến sẽ biến mất thay vì vào Hàng 2)."
   } = {}) {
     const s = this.getSide(sideKey);
     const targetLane = s.row1.findIndex((slot) => slot === null);
     const finalGender = gender || (Math.random() < 0.5 ? "Male" : "Female");
-    const finalFac = fac || s.leader.fac;
-    const style = RACE_STYLE[race] || { aura: "#38bdf8" };
+
+    // Universal Token Inheritance Rule:
+    // By default, a spawned Token inherits the species of BOTH the Male and Female cards,
+    // and ALWAYS belongs to the Male card's faction (unless a card explicitly overrides species/faction).
+    let resolvedSpecies = species;
+    let resolvedRace = race;
+    let resolvedFac = fac;
+    if (maleParent || femaleParent) {
+      if (!resolvedSpecies) {
+        if (maleParent && femaleParent) {
+          resolvedSpecies = maleParent.species === femaleParent.species
+            ? maleParent.species
+            : `Lai ${maleParent.species}–${femaleParent.species}`;
+        } else {
+          resolvedSpecies = (maleParent || femaleParent).species || "Chiến Binh Lai";
+        }
+      }
+      if (!resolvedRace) {
+        resolvedRace = maleParent?.race || femaleParent?.race || "hybrid";
+      }
+      if (!resolvedFac) {
+        resolvedFac = maleParent?.fac || femaleParent?.fac || s.leader.fac;
+      }
+    }
+    resolvedSpecies = resolvedSpecies || "Token";
+    resolvedRace = resolvedRace || "hybrid";
+    const finalFac = resolvedFac || s.leader.fac;
+
+    const style = RACE_STYLE[resolvedRace] || { aura: "#38bdf8" };
     const finalCR = Math.max(20, Math.round(cr));
 
     const tokenObj = {
@@ -596,8 +630,8 @@ export class CardBattleEngine {
       isToken: true,
       name,
       fac: finalFac,
-      species,
-      race,
+      species: resolvedSpecies,
+      race: resolvedRace,
       gender: finalGender,
       cr: finalCR,
       cost: 1,
@@ -628,6 +662,11 @@ export class CardBattleEngine {
     inst.isToken = true;
     inst.fromRow2Breeding = true;
     inst.unaffectedByOtherCards = unaffected;
+    inst.firstBattleImmunity = Boolean(firstBattleImmunity);
+    inst.handeAuraBonus = handeAuraBonus;
+    inst.handeAuraExpireTurn = handeAuraExpireTurn;
+    inst.drawOnDestroyOwner = drawOnDestroyOwner;
+    inst.drawOnDestroyCount = drawOnDestroyCount;
     inst.spawnedFromRow2Turn = this.turn;
     inst.deployedTurn = this.turn;
 
@@ -650,7 +689,15 @@ export class CardBattleEngine {
     // Rule: Tokens CANNOT be placed into Row 2 — they disappear!
     if (captiveCard.isToken) {
       this.getSide(originalOwnerKey).graveyard.push(captiveCard);
-      return { vanishedToken: true, notes: [`💨 Token ${captiveCard.name} bị đánh bại và biến mất khỏi sân!`] };
+      const tokNotes = [`💨 Token ${captiveCard.name} bị đánh bại và biến mất khỏi sân!`];
+      if (captiveCard.drawOnDestroyOwner) {
+        const d = this.drawCards(captiveCard.drawOnDestroyOwner, captiveCard.drawOnDestroyCount || 1);
+        if (d > 0) {
+          const whoD = captiveCard.drawOnDestroyOwner === "player" ? "Bạn" : "Địch";
+          tokNotes.push(`🃏 Hiệu ứng Token Bryce Dallas: ${whoD} rút +${d} lá!`);
+        }
+      }
+      return { vanishedToken: true, notes: tokNotes };
     }
 
     captiveCard.ownerSide = `captured_by_${capturerSideKey}`;
@@ -664,6 +711,7 @@ export class CardBattleEngine {
 
     const notes = [];
     const r2 = captiveCard.row2Effect || {};
+    const r1 = captiveCard.row1Effect || {};
 
     // 1. OVALINA H2 Mandatory Trigger: "người chơi k thể triệu hồi card vào lượt tiếp theo sau khi lá này dc đặt vào hàng 2"
     if (captiveCard.id === "ovalina" || r2.lockNextTurnSummon) {
@@ -680,13 +728,13 @@ export class CardBattleEngine {
       }
     }
 
-    // 3. CYNTHIA H2 Mandatory Trigger: "khi bị đặt vào hàng 2, sẽ tự động chuyển về sân mình thay vì sân đối thủ"
-    if (captiveCard.id === "cynthia" || r2.returnToOriginalOwnerRow2) {
+    // 3. CYNTHIA H2 & HANDE ERSOY H1 Mandatory Trigger: Return to original owner's Row 2 instead of opponent's Row 2
+    if (captiveCard.id === "cynthia" || r2.returnToOriginalOwnerRow2 || captiveCard.id === "hande" || r1.returnToOriginalOwnerRow2) {
       const ownerSideObj = this.getSide(originalOwnerKey);
       captiveCard.ownerSide = `returned_to_${originalOwnerKey}`;
       ownerSideObj.row2.push(captiveCard);
       const ownerLbl = originalOwnerKey === "player" ? "Hàng 2 Sân Ta" : "Hàng 2 Sân Địch";
-      notes.push(`🔄 Hiệu ứng H2 Cynthia: Tự động chuyển về ${ownerLbl} (sân chủ sở hữu ban đầu) thay vì sân đối thủ!`);
+      notes.push(`🔄 Hiệu ứng ${captiveCard.name}: Tự động chuyển về ${ownerLbl} (sân chủ sở hữu ban đầu) thay vì sân đối thủ!`);
       return { vanishedToken: false, returnedToOwnerRow2: true, targetRow2Side: originalOwnerKey, notes };
     }
 
@@ -886,6 +934,66 @@ export class CardBattleEngine {
       }
       notes.push(`Bỏ toàn bộ ${discardCount} lá trên tay → Triệu hồi ${spawnedTokens.length} Token (Mỗi Token ${tokCR} CR) lên Hàng 1!`);
     }
+    // --- 4B. KIM SANTOS H2: Summon 1 Token with CR = (player.hand.length + enemy.hand.length) * 125 ---
+    else if (card.id === "kim" || r2.id === "kim_h2") {
+      const totalHand = this.player.hand.length + this.enemy.hand.length;
+      const tokCR = Math.max(125, totalHand * 125);
+      const maleParent = card.sireCard || s.row1.find((u) => u && u.gender === "Male") || null;
+      const res = this.createAndPlaceToken(sideKey, {
+        name: `Token Tình Báo Kim`,
+        maleParent,
+        femaleParent: card,
+        cr: tokCR,
+        tag: `Tay 2 Bên (${totalHand}×125 = ${tokCR} CR)`,
+        desc: `Token triệu hồi bởi Kim Santos H2 (Tổng bài trên tay 2 bên: ${totalHand} × 125 = ${tokCR} CR).`
+      });
+      if (res.placed) spawnedTokens.push(res.token);
+      notes.push(`Tổng bài trên tay 2 bên = ${totalHand} → Triệu hồi 1 Token (${tokCR} CR) lên Hàng 1!`);
+    }
+    // --- 4C. HANDE ERSOY H2: Summon 1 Token (first battle destruction immunity) + other Row 1 allies gain +200 CR while token is on field until end of opponent's turn ---
+    else if (card.id === "hande" || r2.id === "hande_h2") {
+      const maleParent = card.sireCard || s.row1.find((u) => u && u.gender === "Male") || null;
+      const res = this.createAndPlaceToken(sideKey, {
+        name: `Token Bất Khuất Hande`,
+        maleParent,
+        femaleParent: card,
+        cr: 480,
+        firstBattleImmunity: true,
+        handeAuraBonus: 200,
+        handeAuraExpireTurn: this.turn + 1,
+        tag: `🛡️ Bất Tử Lần Đầu • +200 CR Đồng Đội H1`,
+        desc: `Token của Hande Ersoy: Lần đầu tiên sắp bị tiêu diệt bởi chiến đấu, không bị tiêu diệt; các thẻ khác trên Hàng 1 ta được +200 CR khi Token này còn trên sân đến hết lượt đối thủ!`
+      });
+      if (res.placed) spawnedTokens.push(res.token);
+      notes.push(`Triệu hồi Token Bất Tử Lần Đầu (480 CR) & cộng +200 CR cho toàn bộ thẻ khác trên Hàng 1 ta!`);
+    }
+    // --- 4D. BRYCE DALLAS H2: Target 1 Male card on Row 1, summon 1 Male Token with CR = Bryce CR + Male CR; if destroyed, draw 1 card ---
+    else if (card.id === "bryce" || r2.id === "bryce_h2") {
+      const malesOnRow1 = s.row1.filter((u) => u && u.gender === "Male");
+      if (malesOnRow1.length === 0) {
+        if (sideKey === "player") this.turnHistory.pop();
+        return {
+          ok: false,
+          reason: "Điều kiện Bryce Dallas H2: Cần có ít nhất 1 thẻ Nam (♂) trên Hàng 1 sân ta để hợp nhất CR!"
+        };
+      }
+      const maleTarget = [...malesOnRow1].sort((a, b) => this.evalCardCombatCR(b, null, sideKey).total - this.evalCardCombatCR(a, null, sideKey).total)[0];
+      const maleCR = this.evalCardCombatCR(maleTarget, null, sideKey).total || maleTarget.cr;
+      const tokCR = (card.cr || 560) + maleCR;
+      const res = this.createAndPlaceToken(sideKey, {
+        name: `Token ♂ ${maleTarget.name.split(" ")[0]}×Bryce`,
+        maleParent: maleTarget,
+        femaleParent: card,
+        gender: "Male",
+        cr: tokCR,
+        drawOnDestroyOwner: sideKey,
+        drawOnDestroyCount: 1,
+        tag: `♂ Hợp Nhất (${tokCR} CR) • Vỡ → Rút 1`,
+        desc: `Token Nam (♂) triệu hồi bởi Bryce Dallas H2 (CR = Bryce ${card.cr} + ${maleTarget.name} ${maleCR} = ${tokCR}). Nếu bị tiêu diệt, bạn được rút 1 lá!`
+      });
+      if (res.placed) spawnedTokens.push(res.token);
+      notes.push(`Chọn ♂ ${maleTarget.name} (${maleCR} CR) → Triệu hồi Token ♂ ${res.token.name} (${tokCR} CR, Vỡ → Rút 1 lá)!`);
+    }
     // --- 5. OTHER CUSTOM CHARACTERS & FACTION TROOPS H2 IGNITION ---
     else if (r2.id === "uterussa_h2") {
       const sac = s.hand.shift() || s.row1.find(Boolean);
@@ -967,6 +1075,7 @@ export class CardBattleEngine {
       return { ok: false, reason: "Hiệu ứng Hàng 1 & Hàng 3 CHỈ được kích hoạt trong EFFECT PHASE (Pha 3)!" };
     }
     const s = this.getSide(sideKey);
+    const opp = this.getOpp(sideKey);
     const card = zone === "row3" ? s.leader : s.row1[idx];
     if (!card) return { ok: false, reason: "Không tìm thấy lá bài." };
     const r1 = card.row1Effect || {};
@@ -975,6 +1084,14 @@ export class CardBattleEngine {
     }
     if (card.h1ActivatedThisTurn) {
       return { ok: false, reason: `${card.name} đã kích hoạt hiệu ứng trong Effect Phase lượt này rồi!` };
+    }
+    if (r1.id === "bryce_h1" || r1.sacrificeR2ToDestroyEnemyR1) {
+      if (s.row2.length === 0) {
+        return { ok: false, reason: "Điều kiện Bryce Dallas H1: Cần có ít nhất 1 thẻ ở Hàng 2 sân bạn để tiêu diệt!" };
+      }
+      if (!opp.row1.some(Boolean)) {
+        return { ok: false, reason: "Điều kiện Bryce Dallas H1: Hàng 1 đối phương không có thẻ nào để tiêu diệt!" };
+      }
     }
     return { ok: true, card, r1 };
   }
@@ -997,8 +1114,43 @@ export class CardBattleEngine {
     card.h1ActivatedThisTurn = true;
     const notes = [];
 
+    // --- 0A. KIM SANTOS H1: Shuffle self on field to deck, add 1 Male card from deck to hand ---
+    if (card.id === "kim" || r1.shuffleToSearchMale) {
+      if (zone === "row1" && s.row1[idx] === card) {
+        s.row1[idx] = null;
+        s.deck.push(card);
+        for (let i = s.deck.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [s.deck[i], s.deck[j]] = [s.deck[j], s.deck[i]];
+        }
+        const mIdx = s.deck.findIndex((c) => c.gender === "Male");
+        if (mIdx >= 0) {
+          const [maleCard] = s.deck.splice(mIdx, 1);
+          s.hand.push(maleCard);
+          notes.push(`🔄 Xào ${card.name} về Bộ bài → Thêm ♂ ${maleCard.name} từ Bộ bài lên tay!`);
+        } else {
+          notes.push(`🔄 Xào ${card.name} về Bộ bài (Không còn thẻ Nam ♂ trong Bộ bài).`);
+        }
+      }
+    }
+    // --- 0B. BRYCE DALLAS H1: Destroy 1 card in your Row 2, then destroy 1 card in opponent's Row 1, but cannot attack this turn ---
+    else if (card.id === "bryce" || r1.sacrificeR2ToDestroyEnemyR1) {
+      const r2Sac = s.row2.shift();
+      if (r2Sac) s.graveyard.push(r2Sac);
+      const enemyTargets = opp.row1
+        .map((u, i) => (u ? { u, i, cr: this.evalCardCombatCR(u, null, sideKey === "player" ? "enemy" : "player", { laneIdx: i }).total } : null))
+        .filter(Boolean)
+        .sort((a, b) => b.cr - a.cr);
+      const target = enemyTargets[0];
+      if (target) {
+        opp.row1[target.i] = null;
+        opp.graveyard.push(target.u);
+      }
+      card.cannotAttackThisTurn = true;
+      notes.push(`💥 Tiêu diệt ${r2Sac?.name || "1 thẻ H2"} & phá hủy ${target?.u?.name || "1 thẻ H1 địch"} (Bryce không thể tấn công lượt này)!`);
+    }
     // --- 1. OVALINA H1: +180 CR all friendly units + 80 CR per card in Row 2, minus 50 CR per non-Pherone-Nexus card on Row 1 ---
-    if (card.id === "ovalina" || r1.id === "ovalina_h1") {
+    else if (card.id === "ovalina" || r1.id === "ovalina_h1") {
       s.ovalinaH1Active = true;
       const r2Bonus = s.row2.length * 80;
       const nonPheroneCount = s.row1.filter((u) => u && u.fac !== "tamarite").length;
@@ -1228,6 +1380,12 @@ export class CardBattleEngine {
     if (s.arisiaTokenBuffActive && card.isToken && card.fromRow2Breeding && (this.turn <= (card.spawnedFromRow2Turn || 0) + 1) && !unaffected) {
       r1Bonus += 200;
       triggeredConditionals.push("👑 Arisia H1: Token Hàng 2 (+200 CR)");
+    }
+
+    // Hande Ersoy H2 Token aura (+200 CR to other Row 1 allies while Hande Token is on field until end of opponent's turn)
+    if (!unaffected && !isSmallScale && s.row1.some((u) => u && u !== card && u.handeAuraBonus > 0 && this.turn <= (u.handeAuraExpireTurn || 0))) {
+      r1Bonus += 200;
+      triggeredConditionals.push("🛡️ Hào Quang Token Hande (+200 CR)");
     }
 
     // Standardized H1 Keywords
@@ -1602,12 +1760,12 @@ export class CardBattleEngine {
             detail: `Token biến mất và Hàng 3 của bạn phải gánh ${sim.overkill} sát thương!`
           };
         }
-        if (pCard && (pCard.id === "cynthia" || pCard.row2Effect?.returnToOriginalOwnerRow2)) {
+        if (pCard && (pCard.id === "cynthia" || pCard.id === "hande" || pCard.row2Effect?.returnToOriginalOwnerRow2 || pCard.row1Effect?.returnToOriginalOwnerRow2)) {
           return {
             ...sim,
             badgeClass: "win",
-            label: `🔄 ${prefix}Cynthia Thua → Tự Về H2 Sân Ta!`,
-            detail: `Cynthia bị đánh bại nhưng tự động chuyển về Hàng 2 sân bạn để kích hoạt OTK Token ở Summon Phase!`
+            label: `🔄 ${prefix}${pCard.name.split(" ")[0]} Thua → Tự Về H2 Sân Ta!`,
+            detail: `${pCard.name} bị đánh bại nhưng tự động chuyển về Hàng 2 sân bạn thay vì sân đối thủ!`
           };
         }
         return {
@@ -1786,9 +1944,24 @@ export class CardBattleEngine {
       const eCard = this.enemy.row1[i];
 
       if (pCard && eCard) {
+        if (pCard.cannotAttackThisTurn && eCard.cannotAttackThisTurn) {
+          this.pushLog(`⏸️ Làn ${i + 1}: Cả ${pCard.name} và ${eCard.name} đều bị khóa tấn công lượt này.`);
+          laneResults.push({ lane: i, outcome: "tie", pTotal: 0, eTotal: 0 });
+          continue;
+        }
         const pEval = this.evalCardCombatCR(pCard, eCard, "player", { laneIdx: i });
         const eEval = this.evalCardCombatCR(eCard, pCard, "enemy", { laneIdx: i });
         const res = resolveLanePair(pCard, eCard, pEval, eEval, i);
+        if (pCard.cannotAttackThisTurn && res.outcome === "player_win") {
+          this.pushLog(`⏸️ Làn ${i + 1}: ${pCard.name} không thể tấn công lượt này (hiệu ứng Bryce Dallas) nên không tiêu diệt/bắt ${eCard.name}.`);
+          laneResults.push({ ...res, outcome: "tie" });
+          continue;
+        }
+        if (eCard.cannotAttackThisTurn && res.outcome === "enemy_win") {
+          this.pushLog(`⏸️ Làn ${i + 1}: ${eCard.name} không thể tấn công lượt này.`);
+          laneResults.push({ ...res, outcome: "tie" });
+          continue;
+        }
 
         if (res.outcome === "enemy_shield_block") {
           if (eCard.firstBattleImmunity) eCard.firstBattleImmunity = false;
@@ -1944,6 +2117,7 @@ export class CardBattleEngine {
         u.tempPenaltyCR = 0;
         u.nullifiedBuffs = false;
         u.halvedByEnemy = false;
+        u.cannotAttackThisTurn = false;
       });
       s.row2.forEach((c) => {
         c.h2ActivatedThisTurn = false;
