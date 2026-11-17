@@ -335,9 +335,10 @@ export const CUSTOM_CHAR_EFFECTS = {
       id: "cynthia_h2",
       tier: "human_special",
       ignition: true,
+      returnToOriginalOwnerRow2: true,
       crAura: 30,
-      tag: "Ignition H2: Bỏ Toàn Bộ Tay → Sinh N Token (CR = 200 × N)",
-      desc: "Summon Phase (Hàng 2 — Ấn kích hoạt 1 lần/lượt): Bỏ toàn bộ bài trên tay của bạn xuống Mộ, triệu hồi một số Token lên Hàng 1 tương ứng với số bài bạn vừa bỏ khỏi tay, CR của mỗi Token bằng 200 × số bài đã bỏ!"
+      tag: "Đặt vào H2: Tự Chuyển Về Sân Mình • Ignition: Bỏ Tay → Sinh N Token (200 × N)",
+      desc: "Hàng 2: Khi lá này bị đặt vào Hàng 2, tự động chuyển về Hàng 2 sân mình thay vì sân đối thủ! Summon Phase (Ấn kích hoạt 1 lần/lượt): Bỏ toàn bộ bài trên tay của bạn xuống Mộ, triệu hồi một số Token lên Hàng 1 tương ứng với số bài bạn vừa bỏ khỏi tay, CR của mỗi Token bằng 200 × số bài đã bỏ!"
     }
   },
 

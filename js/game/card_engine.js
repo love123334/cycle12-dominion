@@ -680,8 +680,18 @@ export class CardBattleEngine {
       }
     }
 
+    // 3. CYNTHIA H2 Mandatory Trigger: "khi bị đặt vào hàng 2, sẽ tự động chuyển về sân mình thay vì sân đối thủ"
+    if (captiveCard.id === "cynthia" || r2.returnToOriginalOwnerRow2) {
+      const ownerSideObj = this.getSide(originalOwnerKey);
+      captiveCard.ownerSide = `returned_to_${originalOwnerKey}`;
+      ownerSideObj.row2.push(captiveCard);
+      const ownerLbl = originalOwnerKey === "player" ? "Hàng 2 Sân Ta" : "Hàng 2 Sân Địch";
+      notes.push(`🔄 Hiệu ứng H2 Cynthia: Tự động chuyển về ${ownerLbl} (sân chủ sở hữu ban đầu) thay vì sân đối thủ!`);
+      return { vanishedToken: false, returnedToOwnerRow2: true, targetRow2Side: originalOwnerKey, notes };
+    }
+
     capturer.row2.push(captiveCard);
-    return { vanishedToken: false, notes };
+    return { vanishedToken: false, returnedToOwnerRow2: false, targetRow2Side: capturerSideKey, notes };
   }
 
   // ==========================================================================
@@ -1592,6 +1602,14 @@ export class CardBattleEngine {
             detail: `Token biến mất và Hàng 3 của bạn phải gánh ${sim.overkill} sát thương!`
           };
         }
+        if (pCard && (pCard.id === "cynthia" || pCard.row2Effect?.returnToOriginalOwnerRow2)) {
+          return {
+            ...sim,
+            badgeClass: "win",
+            label: `🔄 ${prefix}Cynthia Thua → Tự Về H2 Sân Ta!`,
+            detail: `Cynthia bị đánh bại nhưng tự động chuyển về Hàng 2 sân bạn để kích hoạt OTK Token ở Summon Phase!`
+          };
+        }
         return {
           ...sim,
           badgeClass: "lose",
@@ -1795,6 +1813,9 @@ export class CardBattleEngine {
             enemyRow3OverkillDamage += chip;
             this.enemy.leader.battleDamageTaken = (this.enemy.leader.battleDamageTaken || 0) + chip;
             this.pushLog(`💨 Làn ${i + 1}: ${pCard.name} (${res.pTotal}) đánh tan Token ${eCard.name} (${res.eTotal}) -> Token biến mất & Hàng 3 Địch ăn ${chip} sát thương tràn!`);
+          } else if (capInfo.returnedToOwnerRow2) {
+            const extraNotes = capInfo.notes.length ? ` [${capInfo.notes.join(" • ")}]` : "";
+            this.pushLog(`🔄 Làn ${i + 1}: ${pCard.name} (${res.pTotal} CR) thắng ${eCard.name} (${res.eTotal} CR) — ${eCard.name} tự chuyển về Hàng 2 Địch (${this.enemy.row2.length}/${this.maxRow2})!${extraNotes}`);
           } else {
             const extraNotes = capInfo.notes.length ? ` [${capInfo.notes.join(" • ")}]` : "";
             this.pushLog(`🏆 Làn ${i + 1}: ${pCard.name} (${res.pTotal} CR) thắng ${eCard.name} (${res.eTotal} CR) -> Đưa vào Hàng 2 Ta (${this.player.row2.length}/${this.maxRow2})!${extraNotes}`);
@@ -1810,6 +1831,9 @@ export class CardBattleEngine {
             playerRow3OverkillDamage += chip;
             this.player.leader.battleDamageTaken = (this.player.leader.battleDamageTaken || 0) + chip;
             this.pushLog(`💥 Làn ${i + 1}: Token ${pCard.name} (${res.pTotal}) bị ${eCard.name} (${res.eTotal}) đánh bay -> Token biến mất & Thủ lĩnh Hàng 3 của bạn phải ăn ${chip} sát thương!`);
+          } else if (capInfo.returnedToOwnerRow2) {
+            const extraNotes = capInfo.notes.length ? ` [${capInfo.notes.join(" • ")}]` : "";
+            this.pushLog(`🔄 Làn ${i + 1}: ${eCard.name} (${res.eTotal} CR) thắng ${pCard.name} (${res.pTotal} CR) — ${pCard.name} tự chuyển về Hàng 2 Sân Ta (${this.player.row2.length}/${this.maxRow2})!${extraNotes}`);
           } else {
             const extraNotes = capInfo.notes.length ? ` [${capInfo.notes.join(" • ")}]` : "";
             this.pushLog(`💢 Làn ${i + 1}: ${eCard.name} (${res.eTotal} CR) thắng ${pCard.name} (${res.pTotal} CR) -> Đưa vào Hàng 2 Địch (${this.enemy.row2.length}/${this.maxRow2})!${extraNotes}`);
