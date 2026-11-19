@@ -79,7 +79,9 @@ export function getPortraitUrl(char) {
   if (!char) return "";
   const custom = getCustomPortrait(char.id);
   if (custom) return custom;
-  if (char.portrait) return char.portrait;
+  if (char.portrait) {
+    return char.portrait.includes("?") ? `${char.portrait}&v=15.1` : `${char.portrait}?v=15.1`;
+  }
   if (SVG_CACHE.has(char.id)) return SVG_CACHE.get(char.id);
 
   const rStyle = RACE_STYLE[char.race] || { aura: "#38bdf8", skin: "#e5c3b1" };
